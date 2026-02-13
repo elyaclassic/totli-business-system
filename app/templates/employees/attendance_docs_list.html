@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    {% if request.query_params.get('unconfirmed') %}
+    <div class="alert alert-warning alert-dismissible fade show py-2 small">
+        <i class="bi bi-x-circle"></i> Tasdiqlash bekor qilindi.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if request.query_params.get('deleted') %}
+    <div class="alert alert-info alert-dismissible fade show py-2 small">
+        <i class="bi bi-trash"></i> Hujjat o'chirildi.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if request.query_params.get('error') %}
+    <div class="alert alert-danger alert-dismissible fade show py-2 small">
+        {{ request.query_params.get('error') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> Tabel forma spiskasi</h5>
+        <div class="d-flex gap-2">
+            <a href="/employees/attendance/form" class="btn btn-success btn-sm"><i class="bi bi-plus-lg"></i> Yaratish</a>
+            <a href="/employees/attendance/records" class="btn btn-outline-secondary btn-sm"><i class="bi bi-list-ul"></i> Barcha yozuvlar</a>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <form method="get" class="d-flex gap-2 align-items-end flex-wrap">
+                <div>
+                    <label class="form-label small mb-1">Sanadan</label>
+                    <input type="date" name="start_date" class="form-control form-control-sm" value="{{ start_date }}" style="width: auto;">
+                </div>
+                <div>
+                    <label class="form-label small mb-1">Sanagacha</label>
+                    <input type="date" name="end_date" class="form-control form-control-sm" value="{{ end_date }}" style="width: auto;">
+                </div>
+                <button type="submit" class="btn btn-sm btn-primary">Ko'rsatish</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Hujjat raqami</th>
+                            <th>Sana</th>
+                            <th>Yozuvlar soni</th>
+                            <th>Tasdiqlangan vaqti</th>
+                            <th width="280">Amallar</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for doc in docs %}
+                        <tr>
+                            <td><strong>{{ doc.number }}</strong></td>
+                            <td>{{ doc.date.strftime('%d.%m.%Y') }}</td>
+                            <td>{{ count_by_doc.get(doc.id, 0) }}</td>
+                            <td>{% if doc.confirmed_at %}{{ doc.confirmed_at.strftime('%d.%m.%Y %H:%M') }}{% else %}-{% endif %}</td>
+                            <td>
+                                <a href="/employees/attendance/doc/{{ doc.id }}" class="btn btn-sm btn-outline-primary" title="Hujjatni ko'rish"><i class="bi bi-eye"></i> Ko'rish</a>
+                                {% if current_user and current_user.role == 'admin' %}
+                                {% if not doc.confirmed_at %}
+                                <a href="/employees/attendance/records?start_date={{ doc.date.strftime('%Y-%m-%d') }}&end_date={{ doc.date.strftime('%Y-%m-%d') }}" class="btn btn-sm btn-outline-secondary" title="O'zgartirish"><i class="bi bi-pencil"></i> O'zgartirish</a>
+                                <form action="/employees/attendance/doc/{{ doc.id }}/delete" method="POST" class="d-inline" onsubmit="return confirm('Hujjatni o\'chirishni xohlaysizmi? Yozuvlar saqlanadi, faqat tasdiqlash bekor qilinadi.');">
+                                    <button type="submit" class="btn btn-sm btn-danger" title="O'chirish"><i class="bi bi-trash"></i> O'chirish</button>
+                                </form>
+                                {% else %}
+                                <form action="/employees/attendance/doc/{{ doc.id }}/cancel-confirm" method="POST" class="d-inline" onsubmit="return confirm('Tasdiqlashni bekor qilishni xohlaysizmi?');">
+                                    <button type="submit" class="btn btn-sm btn-warning" title="Tasdiqlashni bekor qilish"><i class="bi bi-x-circle"></i> Bekor qilish</button>
+                                </form>
+                                {% endif %}
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted py-4">Tanlangan oralikda hujjat yo'q.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

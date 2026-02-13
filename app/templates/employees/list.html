@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="card">
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2 py-3">
+            <h5 class="mb-0"><i class="bi bi-person-badge"></i> Xodimlar</h5>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                <form action="/employees/export" method="get" class="d-inline">
+                    <button type="submit" class="btn btn-outline-success btn-sm"><i class="bi bi-file-earmark-excel"></i> Export</button>
+                </form>
+                <a href="/employees/template" class="btn btn-outline-secondary btn-sm" title="Import uchun andoza"><i class="bi bi-download"></i> Andoza</a>
+                <form action="/employees/import" method="post" enctype="multipart/form-data" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
+                    <label class="btn btn-outline-primary btn-sm mb-0">
+                        <i class="bi bi-upload"></i> Import
+                        <input type="file" name="excel_file" accept=".xlsx" class="d-none" onchange="this.form.submit()">
+                    </label>
+                </form>
+                <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addEmployeeModal"><i class="bi bi-plus-circle"></i> Yaratish</button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th width="50">#</th>
+                            <th>Kodi</th>
+                            <th>F.I.O</th>
+                            <th>Lavozimi</th>
+                            <th>Bo'lim</th>
+                            <th>Telefon</th>
+                            <th>Oylik</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for emp in employees %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td><code>{{ emp.code }}</code></td>
+                            <td>
+                                <strong>{{ emp.full_name }}</strong>
+                                {% if emp.hire_date %}
+                                <br><small class="text-muted">{{ emp.hire_date.strftime('%d.%m.%Y') }} dan</small>
+                                {% endif %}
+                            </td>
+                            <td>{{ emp.position or '-' }}</td>
+                            <td>{{ emp.department or '-' }}</td>
+                            <td>{{ emp.phone or '-' }}</td>
+                            <td class="text-success">{{ "{:,.0f}".format(emp.salary) }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary" title="Tahrirlash">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" title="O'chirish">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="8" class="text-muted text-center py-4">Hozircha xodimlar yo'q. Yangi xodim qo'shish uchun yuqoridagi Yaratish tugmasini bosing.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Xodim qo'shish modal -->
+<div class="modal fade" id="addEmployeeModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form action="/employees/add" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-plus-circle"></i> Yangi xodim</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <!-- Xodim turi -->
+                        <div class="col-md-12">
+                            <label class="form-label">Xodim turi *</label>
+                            <select class="form-select" name="employee_type" id="employeeType" required
+                                onchange="toggleEmployeeFields()">
+                                <option value="regular">Oddiy xodim</option>
+                                <option value="agent">Agent (PWA)</option>
+                                <option value="driver">Haydovchi (PWA)</option>
+                            </select>
+                            <small class="text-muted">Agent va Haydovchilar PWA orqali tizimga kirishlari mumkin</small>
+                        </div>
+
+                        <!-- Asosiy ma'lumotlar -->
+                        <div class="col-md-6">
+                            <label class="form-label">F.I.O *</label>
+                            <input type="text" class="form-control" name="full_name" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Kodi *</label>
+                            <input type="text" class="form-control" name="code" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Oylik</label>
+                            <input type="number" class="form-control" name="salary" value="0" step="100000">
+                        </div>
+
+                        <!-- Oddiy xodim uchun -->
+                        <div class="col-md-4 regular-fields">
+                            <label class="form-label">Lavozimi</label>
+                            <input type="text" class="form-control" name="position">
+                        </div>
+                        <div class="col-md-4 regular-fields">
+                            <label class="form-label">Bo'lim</label>
+                            <input type="text" class="form-control" name="department">
+                        </div>
+                        <div class="col-md-4 regular-fields">
+                            <label class="form-label">Telefon</label>
+                            <input type="text" class="form-control" name="phone" placeholder="+998 XX XXX XX XX">
+                        </div>
+
+                        <!-- Agent/Haydovchi uchun -->
+                        <div class="col-md-6 pwa-fields" style="display:none;">
+                            <label class="form-label">Telefon (Login uchun) *</label>
+                            <input type="text" class="form-control" name="pwa_phone" placeholder="+998901234567">
+                            <small class="text-muted">PWA'ga kirish uchun telefon raqam</small>
+                        </div>
+                        <div class="col-md-6 pwa-fields" style="display:none;">
+                            <label class="form-label">Parol *</label>
+                            <input type="password" class="form-control" name="pwa_password" placeholder="Parol">
+                            <small class="text-muted">PWA'ga kirish uchun parol</small>
+                        </div>
+
+                        <!-- Faqat Haydovchi uchun -->
+                        <div class="col-md-6 driver-fields" style="display:none;">
+                            <label class="form-label">Mashina raqami *</label>
+                            <input type="text" class="form-control" name="vehicle_number" placeholder="01 A 123 BC">
+                        </div>
+                        <div class="col-md-6 driver-fields" style="display:none;">
+                            <label class="form-label">Mashina turi</label>
+                            <select class="form-select" name="vehicle_type">
+                                <option value="car">Yengil mashina</option>
+                                <option value="van">Furgon</option>
+                                <option value="truck">Yuk mashinasi</option>
+                            </select>
+                        </div>
+
+                        <!-- Holat -->
+                        <div class="col-md-12 pwa-fields" style="display:none;">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="is_active" id="isActive" checked>
+                                <label class="form-check-label" for="isActive">
+                                    Faol (PWA'ga kirish ruxsati)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <script>
+                    function toggleEmployeeFields() {
+                        const type = document.getElementById('employeeType').value;
+                        const regularFields = document.querySelectorAll('.regular-fields');
+                        const pwaFields = document.querySelectorAll('.pwa-fields');
+                        const driverFields = document.querySelectorAll('.driver-fields');
+
+                        // Hide all
+                        regularFields.forEach(el => el.style.display = 'none');
+                        pwaFields.forEach(el => el.style.display = 'none');
+                        driverFields.forEach(el => el.style.display = 'none');
+
+                        // Show based on type
+                        if (type === 'regular') {
+                            regularFields.forEach(el => el.style.display = 'block');
+                        } else if (type === 'agent' || type === 'driver') {
+                            pwaFields.forEach(el => el.style.display = 'block');
+                            if (type === 'driver') {
+                                driverFields.forEach(el => el.style.display = 'block');
+                            }
+                        }
+                    }
+                </script>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-success"><i class="bi bi-check-lg"></i> Saqlash</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

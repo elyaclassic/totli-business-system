@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0"><i class="bi bi-file-earmark-plus"></i> Tabel formasi</h5>
+        <a href="/employees/attendance" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> Ro'yxatga</a>
+    </div>
+
+    {% if request.query_params.get('error') %}
+    <div class="alert alert-danger alert-dismissible fade show py-2 small">
+        {{ request.query_params.get('error') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if request.query_params.get('synced') == '1' %}
+    <div class="alert alert-info alert-dismissible fade show py-2 small">
+        <i class="bi bi-cloud-download"></i> {{ request.query_params.get('msg', 'Hikvision\'dan yuklandi') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <form method="get" action="/employees/attendance/form" class="d-flex align-items-end gap-3 flex-wrap">
+                <div>
+                    <label class="form-label small mb-1">Sana</label>
+                    <input type="date" name="date" class="form-control" value="{{ form_date_str }}" onchange="this.form.submit()" style="width: auto;">
+                </div>
+                <button type="submit" class="btn btn-sm btn-outline-primary">Ko'rsatish</button>
+            </form>
+        </div>
+    </div>
+
+    {% if doc %}
+    <div class="alert alert-success py-2">
+        <i class="bi bi-check-circle"></i> Bu kun tasdiqlangan.
+        <a href="/employees/attendance/doc/{{ doc.id }}" class="alert-link">{{ doc.number }}</a> —
+        <a href="/employees/attendance/doc/{{ doc.id }}">Hujjatni ko'rish</a>
+    </div>
+    {% else %}
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#hikvisionModal">
+                <i class="bi bi-cloud-download"></i> Hikvision'dan yuklash
+            </button>
+            <span class="text-muted small ms-2">Tanlangan sana: {{ form_date.strftime('%d.%m.%Y') }} bo'yicha yuklanadi.</span>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Shu kundagi yozuvlar ({{ attendances|length }} ta)</span>
+            {% if current_user and current_user.role == 'admin' %}
+            <form method="POST" action="/employees/attendance/form/confirm" class="d-inline">
+                <input type="hidden" name="date" value="{{ form_date_str }}">
+                <button type="submit" class="btn btn-sm btn-success" {% if not attendances %}disabled{% endif %} onclick="return confirm('{{ form_date.strftime('%d.%m.%Y') }} kunini tasdiqlashni xohlaysizmi? Hujjat yaratiladi.');">
+                    <i class="bi bi-check-circle"></i> Tasdiqlash
+                </button>
+            </form>
+            {% endif %}
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th width="45">№</th>
+                            <th>Xodim</th>
+                            <th>Keldi</th>
+                            <th>Ketdi</th>
+                            <th>Soat</th>
+                            <th>Holat</th>
+                            <th width="80">Rasm</th>
+                            <th>Izoh</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for att in attendances %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td>{{ att.employee.full_name }}</td>
+                            <td>{{ att.check_in.strftime('%H:%M') if att.check_in else '-' }}</td>
+                            <td>{{ att.check_out.strftime('%H:%M') if att.check_out else '-' }}</td>
+                            <td>{{ att.hours_worked }}</td>
+                            <td>
+                                {% if att.status == 'present' %}<span class="badge bg-success">Keldi</span>
+                                {% elif att.status == 'absent' %}<span class="badge bg-danger">Kelmadi</span>
+                                {% else %}{{ att.status }}{% endif %}
+                            </td>
+                            <td>{% if att.event_snapshot_path %}<a href="/static/{{ att.event_snapshot_path }}" target="_blank" title="Hodisa rasmi"><img src="/static/{{ att.event_snapshot_path }}" alt="" class="rounded" style="max-width:48px;max-height:48px;object-fit:cover;"></a>{% else %}-{% endif %}</td>
+                            <td><small>{{ att.note or '-' }}</small></td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="8" class="text-center text-muted py-4">Shu kun uchun yozuv yo'q. «Hikvision'dan yuklash» yoki <a href="/employees/attendance/records?start_date={{ form_date_str }}&end_date={{ form_date_str }}">barcha yozuvlar</a> sahifasida qo'lda qo'shing.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+{% if not doc %}
+<!-- Hikvision modal (faqat shu kun) -->
+<div class="modal fade" id="hikvisionModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="/employees/attendance/sync-hikvision">
+                <input type="hidden" name="redirect_url" value="/employees/attendance/form?date={{ form_date_str }}">
+                <input type="hidden" name="start_date" value="{{ form_date_str }}">
+                <input type="hidden" name="end_date" value="{{ form_date_str }}">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-cloud-download"></i> Hikvision'dan yuklash ({{ form_date.strftime('%d.%m.%Y') }})</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Hikvision IP *</label>
+                        <input type="text" class="form-control" name="hikvision_host" value="192.168.1.199" required>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label">Port</label>
+                            <input type="number" class="form-control" name="hikvision_port" value="443">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Login</label>
+                            <input type="text" class="form-control" name="hikvision_username" value="admin">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Parol</label>
+                        <input type="password" class="form-control" name="hikvision_password" placeholder="Parol">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor</button>
+                    <button type="submit" class="btn btn-success"><i class="bi bi-cloud-download"></i> Yuklash</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

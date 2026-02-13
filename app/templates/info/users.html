@@ -1,0 +1,338 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-people"></i> Foydalanuvchilar</h5>
+            <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addUserModal"><i class="bi bi-plus-circle"></i> Yaratish</button>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>#</th>
+                            <th>Login</th>
+                            <th>To'liq ism</th>
+                            <th>Rol</th>
+                            <th>Holat</th>
+                            <th>Yaratilgan</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for user in users %}
+                <tr>
+                    <td>{{ user.id }}</td>
+                    <td>{{ user.username }}</td>
+                    <td>{{ user.full_name }}</td>
+                    <td>
+                        {% if user.role == 'admin' %}
+                        <span class="badge bg-danger">Administrator</span>
+                        {% elif user.role == 'manager' %}
+                        <span class="badge bg-warning">Menejer</span>
+                        {% elif user.role == 'production' %}
+                        <span class="badge bg-primary">Ishlab chiqarish</span>
+                        {% elif user.role == 'qadoqlash' %}
+                        <span class="badge bg-success">Qadoqlash</span>
+                        {% elif user.role == 'agent' %}
+                        <span class="badge bg-info">Agent (PWA)</span>
+                        {% elif user.role == 'driver' %}
+                        <span class="badge bg-secondary">Haydovchi (PWA)</span>
+                        {% else %}
+                        <span class="badge bg-info">Foydalanuvchi</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if user.is_active %}
+                        <span class="badge bg-success">Faol</span>
+                        {% else %}
+                        <span class="badge bg-secondary">Faol emas</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ user.created_at.strftime('%d.%m.%Y %H:%M') if user.created_at else '-' }}</td>
+                    <td>
+                        <button class="btn btn-sm btn-warning"
+                            onclick="editUser({{ user.id }}, '{{ user.username }}', '{{ user.full_name }}', '{{ user.role }}', {{ 'true' if user.is_active else 'false' }})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-sm btn-info"
+                            onclick="changePassword({{ user.id }}, '{{ user.username }}')">
+                            <i class="fas fa-key"></i>
+                        </button>
+                        {% if user.id != current_user.id %}
+                        <button class="btn btn-sm btn-danger"
+                            onclick="deleteUser({{ user.id }}, '{{ user.username }}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                        {% endif %}
+                    </td>
+                </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="text-muted text-center py-4">Hozircha foydalanuvchilar yo'q. Yangi qo'shish uchun yuqoridagi Yaratish tugmasini bosing.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% block modals %}
+<!-- Yangi foydalanuvchi qo'shish modali -->
+<div class="modal fade" id="addUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Yangi foydalanuvchi</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="/info/users/add">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Login *</label>
+                        <input type="text" class="form-control" name="username" required autocomplete="username">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Parol *</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" name="password" id="add_user_password" required autocomplete="new-password">
+                            {% if current_user and current_user.role == 'admin' %}
+                            <button type="button" class="btn btn-outline-secondary" onclick="togglePass(this, 'add_user_password')" title="Parolni ko'rsatish" aria-label="Parolni ko'rsatish">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">To'liq ism *</label>
+                        <input type="text" class="form-control" name="full_name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Telefon</label>
+                        <input type="text" class="form-control" name="phone" placeholder="+998901234567">
+                        <small class="text-muted">ERP foydalanuvchilar uchun</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Rol *</label>
+                        <select class="form-select" name="role" id="userRole" onchange="toggleUserFields()" required>
+                            <optgroup label="ERP Foydalanuvchilar">
+                                <option value="user">Foydalanuvchi</option>
+                                <option value="manager">Menejer</option>
+                                <option value="admin">Administrator</option>
+                                <option value="production">Ishlab chiqarish</option>
+                                <option value="qadoqlash">Qadoqlash</option>
+                            </optgroup>
+                            <optgroup label="PWA Foydalanuvchilar">
+                                <option value="agent">Agent (PWA)</option>
+                                <option value="driver">Haydovchi (PWA)</option>
+                            </optgroup>
+                        </select>
+                        <small class="text-muted">Rolni shu ro'yxatdan tanlang. Agent/Haydovchi — mobil ilova.</small>
+                    </div>
+
+                    <!-- PWA uchun qo'shimcha maydonlar -->
+                    <div id="pwaFields" style="display:none;">
+                        <div class="mb-3">
+                            <label class="form-label">Telefon (PWA login) *</label>
+                            <input type="text" class="form-control" name="pwa_phone" placeholder="+998901234567">
+                            <small class="text-muted">Mobil ilovaga kirish uchun</small>
+                        </div>
+
+                        <!-- Faqat haydovchi uchun -->
+                        <div id="driverFields" style="display:none;">
+                            <div class="mb-3">
+                                <label class="form-label">Mashina raqami *</label>
+                                <input type="text" class="form-control" name="vehicle_number" placeholder="01 A 123 BC">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Mashina turi</label>
+                                <select class="form-select" name="vehicle_type">
+                                    <option value="car">Yengil mashina</option>
+                                    <option value="van">Furgon</option>
+                                    <option value="truck">Yuk mashinasi</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" name="is_active" checked>
+                        <label class="form-check-label">Faol</label>
+                    </div>
+                </div>
+                <script>
+                    function toggleUserFields() {
+                        const role = document.getElementById('userRole').value;
+                        const pwaFields = document.getElementById('pwaFields');
+                        const driverFields = document.getElementById('driverFields');
+
+                        if (role === 'agent' || role === 'driver') {
+                            pwaFields.style.display = 'block';
+                            if (role === 'driver') {
+                                driverFields.style.display = 'block';
+                            } else {
+                                driverFields.style.display = 'none';
+                            }
+                        } else {
+                            pwaFields.style.display = 'none';
+                            driverFields.style.display = 'none';
+                        }
+                    }
+                </script>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-primary">Saqlash</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Tahrirlash modali -->
+<div class="modal fade" id="editUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Foydalanuvchini tahrirlash</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="editUserForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Login *</label>
+                        <input type="text" class="form-control" name="username" id="edit_username" required autocomplete="username">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">To'liq ism *</label>
+                        <input type="text" class="form-control" name="full_name" id="edit_full_name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Rol</label>
+                        <select class="form-select" name="role" id="edit_role">
+                            <option value="user">Foydalanuvchi</option>
+                            <option value="manager">Menejer</option>
+                            <option value="admin">Administrator</option>
+                            <option value="production">Ishlab chiqarish</option>
+                            <option value="qadoqlash">Qadoqlash</option>
+                            <option value="agent">Agent (PWA)</option>
+                            <option value="driver">Haydovchi (PWA)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" name="is_active" id="edit_is_active">
+                        <label class="form-check-label">Faol</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-primary">Saqlash</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Parolni o'zgartirish modali -->
+<div class="modal fade" id="changePasswordModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Parolni o'zgartirish</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="changePasswordForm">
+                <input type="hidden" name="username" id="change_password_username" value="" autocomplete="username">
+                <div class="modal-body">
+                    <p>Foydalanuvchi: <strong id="password_username"></strong></p>
+                    <div class="mb-3">
+                        <label class="form-label">Yangi parol *</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" name="new_password" id="new_password_input" required autocomplete="new-password">
+                            {% if current_user and current_user.role == 'admin' %}
+                            <button type="button" class="btn btn-outline-secondary" onclick="togglePass(this, 'new_password_input')" title="Parolni ko'rsatish" aria-label="Parolni ko'rsatish">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-primary">Saqlash</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+<script>
+    function editUser(id, username, fullName, role, isActive) {
+        document.getElementById('editUserForm').action = '/info/users/edit/' + id;
+        document.getElementById('edit_username').value = username;
+        document.getElementById('edit_full_name').value = fullName;
+        document.getElementById('edit_role').value = role;
+        document.getElementById('edit_is_active').checked = isActive;
+        new bootstrap.Modal(document.getElementById('editUserModal')).show();
+    }
+
+    function toggleUserFields() {
+        const role = document.getElementById('userRole').value;
+        const pwaFields = document.getElementById('pwaFields');
+        const driverFields = document.getElementById('driverFields');
+
+        if (role === 'agent' || role === 'driver') {
+            pwaFields.style.display = 'block';
+            if (role === 'driver') {
+                driverFields.style.display = 'block';
+            } else {
+                driverFields.style.display = 'none';
+            }
+        } else {
+            pwaFields.style.display = 'none';
+            driverFields.style.display = 'none';
+        }
+    }
+
+    function changePassword(id, username) {
+        document.getElementById('changePasswordForm').action = '/info/users/change-password/' + id;
+        document.getElementById('password_username').textContent = username;
+        document.getElementById('change_password_username').value = username;
+        new bootstrap.Modal(document.getElementById('changePasswordModal')).show();
+    }
+
+    function togglePass(btn, inputId) {
+        var inp = document.getElementById(inputId);
+        var icon = btn.querySelector('i');
+        if (inp.type === 'password') {
+            inp.type = 'text';
+            icon.className = 'bi bi-eye-slash';
+            btn.title = 'Parolni yashirish';
+        } else {
+            inp.type = 'password';
+            icon.className = 'bi bi-eye';
+            btn.title = 'Parolni ko\'rsatish';
+        }
+    }
+
+    function deleteUser(id, username) {
+        if (confirm(`"${username}" foydalanuvchisini o'chirishni xohlaysizmi?`)) {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/info/users/delete/' + id;
+            var csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            var meta = document.querySelector('meta[name="csrf-token"]');
+            csrfInput.value = meta ? meta.getAttribute('content') : '';
+            form.appendChild(csrfInput);
+            document.body.appendChild(form);
+            form.submit();
+        }
+    }
+</script>
+{% endblock %}
