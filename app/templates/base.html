@@ -792,12 +792,32 @@
         })();
     </script>
     <script>
-        // Modallarni body ga ko'chirish — backdrop ustiga chiqmasligi va bosish ishlashi uchun
+        // Modallarni body ga ko'chirish va aria-hidden to'g'ri boshqaruvi
         document.addEventListener('DOMContentLoaded', function () {
             document.querySelectorAll('.modal').forEach(function (modalEl) {
-                document.body.appendChild(modalEl);
-                modalEl.addEventListener('shown.bs.modal', function () {
+                if (modalEl.parentElement !== document.body) {
                     document.body.appendChild(modalEl);
+                }
+                // Yopiq holatda aria-hidden bo'lishi kerak
+                if (!modalEl.classList.contains('show')) {
+                    modalEl.setAttribute('aria-hidden', 'true');
+                }
+            });
+
+            document.querySelectorAll('.modal').forEach(function (modalEl) {
+                // Modal to'liq ochilgandan keyin: aria-hidden olib tashlash, fokusni boshqarish
+                modalEl.addEventListener('shown.bs.modal', function () {
+                    modalEl.removeAttribute('aria-hidden');
+                    modalEl.setAttribute('aria-modal', 'true');
+                    var firstFocusable = modalEl.querySelector('.btn-close, [autofocus], input:not([type="hidden"]), button, select, textarea');
+                    if (firstFocusable) {
+                        firstFocusable.focus();
+                    }
+                });
+                // Modal yopilganda: aria-hidden qayta qo'yish
+                modalEl.addEventListener('hidden.bs.modal', function () {
+                    modalEl.setAttribute('aria-hidden', 'true');
+                    modalEl.removeAttribute('aria-modal');
                 });
             });
         });

@@ -10,7 +10,27 @@ _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 _db_path = os.path.join(_root, "totli_holva.db")
 DATABASE_URL = f"sqlite:///{_db_path}"
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    pool_pre_ping=True,
+    echo=False,
+)
+
+
+def _set_sqlite_pragma(conn, _):
+    """Har bir ulanishda SQLite tezligini oshirish uchun PRAGMA."""
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA cache_size=-64000")
+    cursor.execute("PRAGMA temp_store=MEMORY")
+    cursor.close()
+
+
+from sqlalchemy import event
+event.listen(engine, "connect", _set_sqlite_pragma)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

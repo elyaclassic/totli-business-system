@@ -37,7 +37,8 @@ async def home(
             "materials_count": db.query(Product).filter(Product.type == "hom_ashyo", Product.is_active == True).count(),
         }
         today = datetime.now().date()
-        today_sales = db.query(Order).filter(Order.type == "sale", Order.date >= today).all()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_sales = db.query(Order).filter(Order.type == "sale", Order.date >= today_start).all()
         stats["today_sales"] = sum(s.total for s in today_sales)
         stats["today_orders"] = len(today_sales)
         cash = db.query(CashRegister).first()
@@ -53,14 +54,14 @@ async def home(
         )
         low_stock_count = db.query(Stock).join(Product).filter(Stock.quantity < Product.min_stock).count()
         birthday_today_count = 0
-        if hasattr(Employee, "birth_date"):
-            try:
-                md = today.strftime("%m-%d")
-                for e in db.query(Employee).filter(Employee.birth_date.isnot(None), Employee.is_active == True).all():
-                    if e.birth_date and e.birth_date.strftime("%m-%d") == md:
-                        birthday_today_count += 1
-            except Exception:
-                pass
+        try:
+            md = today.strftime("%m-%d")
+            for e in db.query(Employee).filter(Employee.birth_date.isnot(None), Employee.is_active == True).all():
+                if e.birth_date and e.birth_date.strftime("%m-%d") == md:
+                    birthday_today_count += 1
+        except Exception:
+            # birth_date ustuni mavjud emas bo'lishi mumkin (eski bazalar)
+            pass
         overdue_cutoff = datetime.now() - timedelta(days=7)
         overdue_debts_count = db.query(Order).filter(
             Order.type == "sale",
@@ -68,6 +69,9 @@ async def home(
             Order.created_at < overdue_cutoff,
         ).count()
     except Exception as e:
+        import traceback
+        print(f"[Home] Statistika yuklashda xato: {e}")
+        print(traceback.format_exc())
         stats = {
             "tayyor_count": 0, "yarim_tayyor_count": 0, "hom_ashyo_count": 0,
             "partners_count": 0, "employees_count": 0, "products_count": 0, "materials_count": 0,
@@ -78,7 +82,7 @@ async def home(
         birthday_today_count = 0
         overdue_debts_count = 0
         if not error:
-            error = "Statistika yuklanmadi"
+            error = f"Statistika yuklanmadi: {str(e)}"
     return templates.TemplateResponse("index.html", {
         "request": request,
         "stats": stats,

@@ -2,6 +2,12 @@
 
 {% block content %}
 <div class="container-fluid">
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        <i class="bi bi-exclamation-triangle me-2"></i>{{ error }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Yopish"></button>
+    </div>
+    {% endif %}
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h5 class="mb-0"><i class="bi bi-people"></i> Foydalanuvchilar</h5>
@@ -80,31 +86,30 @@
         </div>
     </div>
 </div>
+{% endblock %}
 
 {% block modals %}
 <!-- Yangi foydalanuvchi qo'shish modali -->
-<div class="modal fade" id="addUserModal" tabindex="-1">
+<div class="modal fade" id="addUserModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Yangi foydalanuvchi</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Yopish"></button>
             </div>
             <form method="POST" action="/info/users/add">
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label">Login *</label>
-                        <input type="text" class="form-control" name="username" required autocomplete="username">
+                        <input type="text" class="form-control" name="username" id="add_user_username" required autocomplete="username">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Parol *</label>
                         <div class="input-group">
-                            <input type="password" class="form-control" name="password" id="add_user_password" required autocomplete="new-password">
-                            {% if current_user and current_user.role == 'admin' %}
+                            <input type="password" class="form-control" name="password" id="add_user_password" required autocomplete="new-password" aria-label="Parol">
                             <button type="button" class="btn btn-outline-secondary" onclick="togglePass(this, 'add_user_password')" title="Parolni ko'rsatish" aria-label="Parolni ko'rsatish">
                                 <i class="bi bi-eye"></i>
                             </button>
-                            {% endif %}
                         </div>
                     </div>
                     <div class="mb-3">
@@ -193,12 +198,12 @@
 </div>
 
 <!-- Tahrirlash modali -->
-<div class="modal fade" id="editUserModal" tabindex="-1">
+<div class="modal fade" id="editUserModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Foydalanuvchini tahrirlash</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Yopish"></button>
             </div>
             <form method="POST" id="editUserForm">
                 <div class="modal-body">
@@ -237,21 +242,21 @@
 </div>
 
 <!-- Parolni o'zgartirish modali -->
-<div class="modal fade" id="changePasswordModal" tabindex="-1">
+<div class="modal fade" id="changePasswordModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Parolni o'zgartirish</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Yopish"></button>
             </div>
             <form method="POST" id="changePasswordForm">
-                <input type="hidden" name="username" id="change_password_username" value="" autocomplete="username">
+                <input type="hidden" name="username" id="change_password_username" value="" autocomplete="username" aria-hidden="true">
                 <div class="modal-body">
                     <p>Foydalanuvchi: <strong id="password_username"></strong></p>
                     <div class="mb-3">
                         <label class="form-label">Yangi parol *</label>
                         <div class="input-group">
-                            <input type="password" class="form-control" name="new_password" id="new_password_input" required autocomplete="new-password">
+                            <input type="password" class="form-control" name="new_password" id="new_password_input" required autocomplete="new-password" aria-label="Yangi parol">
                             {% if current_user and current_user.role == 'admin' %}
                             <button type="button" class="btn btn-outline-secondary" onclick="togglePass(this, 'new_password_input')" title="Parolni ko'rsatish" aria-label="Parolni ko'rsatish">
                                 <i class="bi bi-eye"></i>
@@ -270,6 +275,7 @@
 </div>
 {% endblock %}
 
+{% block extra_js %}
 <script>
     function editUser(id, username, fullName, role, isActive) {
         document.getElementById('editUserForm').action = '/info/users/edit/' + id;
@@ -306,16 +312,21 @@
     }
 
     function togglePass(btn, inputId) {
-        var inp = document.getElementById(inputId);
-        var icon = btn.querySelector('i');
-        if (inp.type === 'password') {
-            inp.type = 'text';
-            icon.className = 'bi bi-eye-slash';
-            btn.title = 'Parolni yashirish';
-        } else {
-            inp.type = 'password';
-            icon.className = 'bi bi-eye';
-            btn.title = 'Parolni ko\'rsatish';
+        try {
+            var inp = document.getElementById(inputId);
+            if (!inp) return;
+            var icon = btn.querySelector('i');
+            if (inp.type === 'password') {
+                inp.type = 'text';
+                if (icon) icon.className = 'bi bi-eye-slash';
+                btn.title = 'Parolni yashirish';
+            } else {
+                inp.type = 'password';
+                if (icon) icon.className = 'bi bi-eye';
+                btn.title = 'Parolni ko\'rsatish';
+            }
+        } catch (error) {
+            console.error('togglePass xatosi:', error);
         }
     }
 

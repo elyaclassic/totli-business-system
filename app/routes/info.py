@@ -4,6 +4,7 @@ bo'limlar, yo'nalishlar, foydalanuvchilar, lavozimlar, hududlar, uskunalar.
 """
 import io
 from typing import Optional
+from urllib.parse import quote
 from fastapi import APIRouter, Request, Depends, Form, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
@@ -842,11 +843,13 @@ async def info_users(
     request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_admin)
 ):
     users = db.query(User).all()
+    error = request.query_params.get("error", "").strip()
     return templates.TemplateResponse("info/users.html", {
         "request": request,
         "users": users,
         "current_user": current_user,
         "page_title": "Foydalanuvchilar",
+        "error": error,
     })
 
 
@@ -863,7 +866,8 @@ async def info_users_add(
 ):
     existing = db.query(User).filter(User.username == username).first()
     if existing:
-        raise HTTPException(status_code=400, detail=f"'{username}' login bilan foydalanuvchi allaqachon mavjud!")
+        msg = quote(f"'{username}' login bilan foydalanuvchi allaqachon mavjud! Boshqa login tanlang.")
+        return RedirectResponse(url=f"/info/users?error={msg}", status_code=303)
     user = User(
         username=username,
         password_hash=hash_password(password),
@@ -891,7 +895,8 @@ async def info_users_edit(
         raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
     existing = db.query(User).filter(User.username == username, User.id != user_id).first()
     if existing:
-        raise HTTPException(status_code=400, detail=f"'{username}' login bilan foydalanuvchi allaqachon mavjud!")
+        msg = quote(f"'{username}' login bilan foydalanuvchi allaqachon mavjud! Boshqa login tanlang.")
+        return RedirectResponse(url=f"/info/users?error={msg}", status_code=303)
     user.username = username
     user.full_name = full_name
     user.role = role
