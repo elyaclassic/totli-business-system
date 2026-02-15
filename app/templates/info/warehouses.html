@@ -92,33 +92,32 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <form id="addWarehouseForm">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-plus-circle"></i> Yangi ombor</h5>
+                <div class="modal-header py-2">
+                    <h6 class="modal-title mb-0"><i class="bi bi-plus-circle"></i> Yangi ombor</h6>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Nomi *</label>
-                        <input type="text" class="form-control" name="name" required>
+                <div class="modal-body py-2">
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Nomi *</label>
+                        <input type="text" class="form-control form-control-sm" name="name" required>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Bo'lim</label>
-                        <select class="form-select" name="department_id">
-                            <option value="">— Bo'lim tanlanmagan —</option>
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Bo'lim</label>
+                        <select class="form-select form-select-sm" name="department_id">
+                            <option value="">— Tanlanmagan —</option>
                             {% for dept in departments %}
                             <option value="{{ dept.id }}">{{ dept.name }}</option>
                             {% endfor %}
                         </select>
-                        <small class="text-muted">Ombor qaysi bo'limga tegishli ekanligini belgilang</small>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Manzil</label>
-                        <input type="text" class="form-control" name="address">
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Manzil</label>
+                        <input type="text" class="form-control form-control-sm" name="address">
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
-                    <button type="submit" class="btn btn-success"><i class="bi bi-check-lg"></i> Saqlash</button>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check-lg"></i> Saqlash</button>
                 </div>
             </form>
         </div>
@@ -130,33 +129,32 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <form id="editWarehouseForm" method="POST">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-pencil"></i> Omborni tahrirlash</h5>
+                <div class="modal-header py-2">
+                    <h6 class="modal-title mb-0"><i class="bi bi-pencil"></i> Omborni tahrirlash</h6>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Nomi *</label>
-                        <input type="text" class="form-control" name="name" id="edit_name" required>
+                <div class="modal-body py-2">
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Nomi *</label>
+                        <input type="text" class="form-control form-control-sm" name="name" id="edit_name" required>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Bo'lim</label>
-                        <select class="form-select" name="department_id" id="edit_department_id">
-                            <option value="">— Bo'lim tanlanmagan —</option>
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Bo'lim</label>
+                        <select class="form-select form-select-sm" name="department_id" id="edit_department_id">
+                            <option value="">— Tanlanmagan —</option>
                             {% for dept in departments %}
                             <option value="{{ dept.id }}">{{ dept.name }}</option>
                             {% endfor %}
                         </select>
-                        <small class="text-muted">Ombor qaysi bo'limga tegishli ekanligini belgilang</small>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Manzil</label>
-                        <input type="text" class="form-control" name="address" id="edit_address">
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Manzil</label>
+                        <input type="text" class="form-control form-control-sm" name="address" id="edit_address">
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
-                    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Saqlash</button>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-check-lg"></i> Saqlash</button>
                 </div>
             </form>
         </div>

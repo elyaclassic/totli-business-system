@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, ForeignKey, Text, Date, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, ForeignKey, Text, Date, UniqueConstraint, Table
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
 from datetime import datetime
 import os
@@ -103,10 +103,21 @@ class User(Base):
     username = Column(String(50), unique=True, index=True)
     password_hash = Column(String(255))
     full_name = Column(String(100))
-    role = Column(String(20), default="user")  # admin, manager, user
+    role = Column(String(20), default="user")  # admin, manager, user, sotuvchi
     phone = Column(String(20))
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)  # Bo'lim
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)   # Ombor
+    cash_register_id = Column(Integer, ForeignKey("cash_registers.id"), nullable=True)  # Kassa
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.now)
+    
+    department = relationship("Department", foreign_keys=[department_id], backref="users")
+    warehouse = relationship("Warehouse", foreign_keys=[warehouse_id], backref="users")
+    cash_register = relationship("CashRegister", foreign_keys=[cash_register_id], backref="users")
+    # Bir nechta bo'lim, ombor, kassa (ro'yxat)
+    departments_list = relationship("Department", secondary="user_departments", backref="users_list_dept", lazy="select")
+    warehouses_list = relationship("Warehouse", secondary="user_warehouses", backref="users_list_wh", lazy="select")
+    cash_registers_list = relationship("CashRegister", secondary="user_cash_registers", backref="users_list_cash", lazy="select")
 
 
 # ==========================================
@@ -351,6 +362,28 @@ class CashBalanceDocItem(Base):
 
     doc = relationship("CashBalanceDoc", back_populates="items")
     cash_register = relationship("CashRegister")
+
+
+class CashTransfer(Base):
+    """Kassadan kassaga o'tkazish: bitta kassadan ikkinchisiga pul, jo'natuvchi yuboradi — qabul qiluvchi tasdiqlaydi"""
+    __tablename__ = "cash_transfers"
+    id = Column(Integer, primary_key=True, index=True)
+    number = Column(String(50), unique=True, index=True)
+    date = Column(DateTime, default=datetime.now)
+    from_cash_id = Column(Integer, ForeignKey("cash_registers.id"), nullable=False)
+    to_cash_id = Column(Integer, ForeignKey("cash_registers.id"), nullable=False)
+    amount = Column(Float, default=0)
+    status = Column(String(20), default="draft")  # draft, pending_approval, confirmed
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Jo'natuvchi
+    approved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Qabul qiluvchi (tasdiqlovchi)
+    approved_at = Column(DateTime, nullable=True)
+    note = Column(Text)
+    created_at = Column(DateTime, default=datetime.now)
+
+    from_cash = relationship("CashRegister", foreign_keys=[from_cash_id])
+    to_cash = relationship("CashRegister", foreign_keys=[to_cash_id])
+    user = relationship("User", foreign_keys=[user_id])
+    approved_by = relationship("User", foreign_keys=[approved_by_user_id])
 
 
 # ==========================================
@@ -608,12 +641,15 @@ class Order(Base):
     paid = Column(Float, default=0)  # To'langan
     debt = Column(Float, default=0)  # Qarz
     status = Column(String(20), default="draft")  # draft, confirmed, completed, cancelled
+    payment_type = Column(String(20), nullable=True)  # naqd, plastik — to'lov turi (POS sotuvlar uchun)
     note = Column(Text)
     created_at = Column(DateTime, default=datetime.now)
     
     partner = relationship("Partner", back_populates="orders")
+    warehouse = relationship("Warehouse")
     items = relationship("OrderItem", back_populates="order")
     price_type = relationship("PriceType")
+    user = relationship("User", foreign_keys=[user_id])
 
 
 class OrderItem(Base):
@@ -632,6 +668,21 @@ class OrderItem(Base):
     product = relationship("Product")
 
 
+class PosDraft(Base):
+    """POS: vaqtinchalik saqlangan chek (savat). Chekni saqlash / Chekni yuklash."""
+    __tablename__ = "pos_drafts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)
+    name = Column(String(200), nullable=True)  # ixtiyoriy nom (masalan "Chek 12:30")
+    items_json = Column(Text, nullable=False)  # [{"productId", "productName", "price", "quantity"}, ...]
+    created_at = Column(DateTime, default=datetime.now)
+
+    user = relationship("User")
+    warehouse = relationship("Warehouse")
+
+
 # ==========================================
 # MOLIYA (KASSA)
 # ==========================================
@@ -647,6 +698,27 @@ class CashRegister(Base):
     is_active = Column(Boolean, default=True)
     
     department = relationship("Department")
+
+
+# Foydalanuvchi — bir nechta bo'lim, ombor, kassa (many-to-many)
+user_departments = Table(
+    "user_departments",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
+    Column("department_id", Integer, ForeignKey("departments.id"), primary_key=True),
+)
+user_warehouses = Table(
+    "user_warehouses",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
+    Column("warehouse_id", Integer, ForeignKey("warehouses.id"), primary_key=True),
+)
+user_cash_registers = Table(
+    "user_cash_registers",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
+    Column("cash_register_id", Integer, ForeignKey("cash_registers.id"), primary_key=True),
+)
 
 
 class Payment(Base):
@@ -694,9 +766,11 @@ class Employee(Base):
     hikvision_id = Column(String(50))  # Hikvision tizimidagi ID
     created_at = Column(DateTime, default=datetime.now)
 
+    salaries = relationship("Salary", back_populates="employee")
+
 
 class Salary(Base):
-    """Ish haqi"""
+    """Ish haqi (oylik)"""
     __tablename__ = "salaries"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -706,10 +780,80 @@ class Salary(Base):
     base_salary = Column(Float, default=0)
     bonus = Column(Float, default=0)
     deduction = Column(Float, default=0)
+    advance_deduction = Column(Float, default=0)  # Avans ushlab qolish
     total = Column(Float, default=0)
     paid = Column(Float, default=0)
     status = Column(String(20), default="pending")  # pending, paid
     created_at = Column(DateTime, default=datetime.now)
+    
+    employee = relationship("Employee", back_populates="salaries")
+
+
+class Attendance(Base):
+    """Davomat yozuvi (kunlik — bitta xodim, bitta sana)"""
+    __tablename__ = "attendances"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    date = Column(Date, nullable=False)
+    check_in = Column(DateTime, nullable=True)
+    check_out = Column(DateTime, nullable=True)
+    hours_worked = Column(Float, default=0)
+    status = Column(String(20), default="present")  # present, absent, leave
+    event_snapshot_path = Column(String(255), nullable=True)
+    note = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    
+    employee = relationship("Employee", backref="attendances")
+
+
+class AttendanceDoc(Base):
+    """Kunlik tabel hujjati (sana bo'yicha tasdiqlangan davomat)"""
+    __tablename__ = "attendance_docs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    number = Column(String(50), unique=True, index=True)
+    date = Column(Date, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    confirmed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    
+    user = relationship("User")
+
+
+class EmployeeAdvance(Base):
+    """Xodimga berilgan avans"""
+    __tablename__ = "employee_advances"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    amount = Column(Float, default=0)
+    advance_date = Column(Date, nullable=False)
+    note = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    
+    employee = relationship("Employee", backref="advances")
+
+
+class EmploymentDoc(Base):
+    """Ishga qabul qilish hujjati"""
+    __tablename__ = "employment_docs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    number = Column(String(50), unique=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    doc_date = Column(Date, nullable=False)   # Hujjat sanasi
+    hire_date = Column(Date, nullable=True)   # Ishga kirgan sana
+    position = Column(String(100), nullable=True)
+    department = Column(String(100), nullable=True)
+    salary = Column(Float, default=0)
+    note = Column(String(500), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    confirmed_at = Column(DateTime, nullable=True)   # Tasdiqlangan vaqti
+    created_at = Column(DateTime, default=datetime.now)
+    
+    employee = relationship("Employee", backref="employment_docs")
+    user = relationship("User")
 
 
 # ==========================================
@@ -971,6 +1115,70 @@ class Notification(Base):
 def init_db():
     Base.metadata.create_all(bind=engine)
     print("Database tayyor (mavjud ma'lumotlar saqlanadi).")
+
+
+def ensure_attendance_advance_tables():
+    """Davomat, tabel hujjati va avans jadvalarini yaratadi (SQLite); salaries.advance_deduction qo'shadi."""
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS attendances (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                employee_id INTEGER NOT NULL REFERENCES employees(id),
+                date DATE NOT NULL,
+                check_in DATETIME,
+                check_out DATETIME,
+                hours_worked FLOAT DEFAULT 0,
+                status VARCHAR(20) DEFAULT 'present',
+                event_snapshot_path VARCHAR(255),
+                note VARCHAR(500),
+                created_at DATETIME
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS attendance_docs (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                number VARCHAR(50) NOT NULL UNIQUE,
+                date DATE NOT NULL,
+                user_id INTEGER REFERENCES users(id),
+                confirmed_at DATETIME,
+                created_at DATETIME
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS employee_advances (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                employee_id INTEGER NOT NULL REFERENCES employees(id),
+                amount FLOAT DEFAULT 0,
+                advance_date DATE NOT NULL,
+                note VARCHAR(500),
+                created_at DATETIME
+            )
+        """))
+        r = conn.execute(text("PRAGMA table_info(salaries)"))
+        cols = [row[1] for row in r]
+        if "advance_deduction" not in cols:
+            conn.execute(text("ALTER TABLE salaries ADD COLUMN advance_deduction FLOAT"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS employment_docs (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                number VARCHAR(50) NOT NULL UNIQUE,
+                employee_id INTEGER NOT NULL REFERENCES employees(id),
+                doc_date DATE NOT NULL,
+                hire_date DATE,
+                position VARCHAR(100),
+                department VARCHAR(100),
+                salary FLOAT DEFAULT 0,
+                note VARCHAR(500),
+                user_id INTEGER REFERENCES users(id),
+                confirmed_at DATETIME,
+                created_at DATETIME
+            )
+        """))
+        r = conn.execute(text("PRAGMA table_info(employment_docs)"))
+        ed_cols = [row[1] for row in r]
+        if "confirmed_at" not in ed_cols:
+            conn.execute(text("ALTER TABLE employment_docs ADD COLUMN confirmed_at DATETIME"))
 
 
 if __name__ == "__main__":

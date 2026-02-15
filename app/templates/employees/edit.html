@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0"><i class="bi bi-pencil-square"></i> Xodimni tahrirlash</h5>
+        <a href="/employees" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> Ro'yxatga</a>
+    </div>
+    {% if request.query_params.get('error') %}
+    <div class="alert alert-danger py-2 small">{{ request.query_params.get('error') }}</div>
+    {% endif %}
+    <div class="card">
+        <div class="card-body">
+            <form method="POST" action="/employees/update/{{ emp.id }}">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">F.I.O *</label>
+                        <input type="text" class="form-control" name="full_name" value="{{ emp.full_name }}" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Kodi *</label>
+                        <input type="text" class="form-control" name="code" value="{{ emp.code or '' }}" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Oylik</label>
+                        <input type="number" class="form-control" name="salary" value="{{ emp.salary or 0 }}" step="100000">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Lavozimi</label>
+                        <input type="text" class="form-control" name="position" value="{{ emp.position or '' }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Bo'lim</label>
+                        <input type="text" class="form-control" name="department" value="{{ emp.department or '' }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Telefon</label>
+                        <input type="text" class="form-control" name="phone" value="{{ emp.phone or '' }}" placeholder="+998 XX XXX XX XX">
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-success"><i class="bi bi-check-lg"></i> Saqlash</button>
+                        <a href="/employees" class="btn btn-secondary">Bekor</a>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

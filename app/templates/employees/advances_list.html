@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    {% if request.query_params.get('added') %}
+    <div class="alert alert-success alert-dismissible fade show py-2 small">
+        <i class="bi bi-check-circle"></i> Avans qo'shildi.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if request.query_params.get('error') %}
+    <div class="alert alert-danger alert-dismissible fade show py-2 small">
+        {{ request.query_params.get('error') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0"><i class="bi bi-cash-coin"></i> Avans berish</h5>
+        <a href="/employees" class="btn btn-outline-secondary btn-sm"><i class="bi bi-person-badge"></i> Xodimlar</a>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header">Yangi avans</div>
+        <div class="card-body">
+            <form method="post" action="/employees/advances/add" class="row g-2 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label small">Xodim *</label>
+                    <select name="employee_id" class="form-select form-select-sm" required>
+                        <option value="">Tanlang...</option>
+                        {% for e in employees %}
+                        <option value="{{ e.id }}">{{ e.full_name }} ({{ e.code }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">Summa (so'm) *</label>
+                    <input type="number" name="amount" class="form-control form-control-sm" step="1000" min="1" required>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">Sana *</label>
+                    <input type="date" name="advance_date" class="form-control form-control-sm" value="{{ default_date or request.query_params.get('date', '') }}" required>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small">Izoh</label>
+                    <input type="text" name="note" class="form-control form-control-sm" placeholder="Izoh">
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-success btn-sm w-100"><i class="bi bi-plus-circle"></i> Qo'shish</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">Avanslar ro'yxati</div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Sana</th>
+                            <th>Xodim</th>
+                            <th>Summa (so'm)</th>
+                            <th>Izoh</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for a in advances %}
+                        <tr>
+                            <td>{{ a.advance_date.strftime('%d.%m.%Y') }}</td>
+                            <td>{{ a.employee.full_name }} <small class="text-muted">({{ a.employee.code }})</small></td>
+                            <td class="text-success fw-bold">{{ "{:,.0f}".format(a.amount) }}</td>
+                            <td><small>{{ a.note or '-' }}</small></td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="4" class="text-center text-muted py-4">Avanslar yo'q.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

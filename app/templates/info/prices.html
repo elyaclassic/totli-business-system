@@ -8,7 +8,7 @@
                 <h4><i class="bi bi-currency-exchange"></i> Narxni o'rnatish</h4>
                 <a href="/info" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> Ma'lumotnomalar</a>
             </div>
-            <p class="text-muted mb-0 small">Mahsulot tannarxi (sotib olish) va har bir <strong>narx turi</strong> bo'yicha sotuv narxini shu yerdan o'rnating. Savdo vaqtida narx turini tanlaysiz.</p>
+            <p class="text-muted mb-0 small">Mahsulot tannarxi (sotib olish) va har bir <strong>narx turi</strong> bo'yicha sotuv narxini shu yerdan o'rnating. Savdo vaqtida narx turini tanlaysiz. <strong>Tannarx</strong> avtomatik to'ldiriladi: tovar kirimi yoki qoldiq hujjatida qo'yilgan tannarxdan olinadi.</p>
         </div>
     </div>
 
@@ -45,6 +45,7 @@
                     {% for product in products %}
                     {% set sale_price_val = product_prices_by_type.get(product.id) if product_prices_by_type is defined else product.sale_price %}
                     {% if sale_price_val is none %}{% set sale_price_val = product.sale_price %}{% endif %}
+                    {% set tannarx_val = (product_tannarx.get(product.id) if product_tannarx is defined else none) or product.purchase_price or 0 %}
                     <tr>
                         <td>{{ loop.index }}</td>
                         <td>
@@ -54,11 +55,19 @@
                         <td>
                             {% if product.type == 'tayyor' %}Tayyor{% elif product.type == 'yarim_tayyor' %}Yarim tayyor{% elif product.type == 'hom_ashyo' %}Xom ashyo{% else %}-{% endif %}
                         </td>
-                        <td>{{ "{:,.0f}".format(product.purchase_price or 0) }}</td>
-                        <td>{{ "{:,.0f}".format(sale_price_val or 0) }}</td>
+                        <td>{{ "{:,.0f}".format(tannarx_val or 0) }} <small class="text-muted">(kirim/qoldiq)</small></td>
                         <td>
-                            <button type="button" class="btn btn-sm btn-outline-primary" title="Narxni tahrirlash"
-                                onclick='editPrice({{ product.id }}, {{ product.name|tojson }}, {{ product.purchase_price or 0 }}, {{ sale_price_val or 0 }}, {{ current_price_type_id if current_price_type_id is not none else "null" }})'>
+                            <form method="post" action="/info/prices/edit/{{ product.id }}" class="d-inline-flex align-items-center gap-1" style="max-width:180px">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token_from_request(request) }}">
+                                <input type="hidden" name="purchase_price" value="{{ tannarx_val or 0 }}">
+                                <input type="hidden" name="price_type_id" value="{{ current_price_type_id or '' }}">
+                                <input type="number" name="sale_price" class="form-control form-control-sm" step="0.01" min="0" value="{{ sale_price_val or 0 }}" style="width:100px">
+                                <button type="submit" class="btn btn-sm btn-success" title="Sotuv narxini saqlash"><i class="bi bi-check-lg"></i></button>
+                            </form>
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-outline-primary" title="Tannarx va sotuv narxini tahrirlash"
+                                onclick='editPrice({{ product.id }}, {{ product.name|tojson }}, {{ tannarx_val or 0 }}, {{ sale_price_val or 0 }}, {{ current_price_type_id if current_price_type_id is not none else "null" }})'>
                                 <i class="bi bi-pencil"></i>
                             </button>
                         </td>

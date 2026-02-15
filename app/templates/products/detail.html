@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% if error_param == 'duplicate' and detail_param %}
+<div class="container py-2">
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        <strong>Nom dublikati.</strong> {{ detail_param }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+</div>
+{% endif %}
 <div class="container py-4">
     <div class="row">
         <div class="col-md-6">

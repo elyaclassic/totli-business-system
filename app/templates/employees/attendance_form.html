@@ -134,7 +134,14 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Parol</label>
-                        <input type="password" class="form-control" name="hikvision_password" placeholder="Parol">
+                        <div class="input-group">
+                            <input type="password" class="form-control" name="hikvision_password" id="hikvisionPassword" placeholder="Parol" autocomplete="off">
+                            {% if current_user and current_user.role == 'admin' %}
+                            <button type="button" class="btn btn-outline-secondary" id="toggleHikvisionPassword" title="Parolni ko'rsatish" aria-label="Parolni ko'rsatish">
+                                <i class="bi bi-eye" id="hikvisionPasswordIcon"></i>
+                            </button>
+                            {% endif %}
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -146,4 +153,27 @@
     </div>
 </div>
 {% endif %}
+
+<script>
+(function() {
+    var btn = document.getElementById('toggleHikvisionPassword');
+    if (!btn) return;
+    var inp = document.getElementById('hikvisionPassword');
+    var icon = document.getElementById('hikvisionPasswordIcon');
+    if (!inp || !icon) return;
+    btn.addEventListener('click', function() {
+        if (inp.type === 'password') {
+            inp.type = 'text';
+            icon.classList.remove('bi-eye');
+            icon.classList.add('bi-eye-slash');
+            btn.title = 'Parolni yashirish';
+        } else {
+            inp.type = 'password';
+            icon.classList.remove('bi-eye-slash');
+            icon.classList.add('bi-eye');
+            btn.title = 'Parolni ko\'rsatish';
+        }
+    });
+})();
+</script>
 {% endblock %}

@@ -82,24 +82,23 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <form id="addUnitForm">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-plus-circle"></i> Yangi o'lchov birligi</h5>
+                <div class="modal-header py-2">
+                    <h6 class="modal-title mb-0"><i class="bi bi-plus-circle"></i> Yangi o'lchov birligi</h6>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Kod *</label>
-                        <input type="text" class="form-control" name="code" placeholder="kg, dona, litr" required>
-                        <small class="text-muted">Masalan: kg, dona, litr, qop</small>
+                <div class="modal-body py-2">
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Kod *</label>
+                        <input type="text" class="form-control form-control-sm" name="code" placeholder="kg, dona, litr" required>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Nomi *</label>
-                        <input type="text" class="form-control" name="name" placeholder="Kilogramm" required>
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Nomi *</label>
+                        <input type="text" class="form-control form-control-sm" name="name" placeholder="Kilogramm" required>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
-                    <button type="submit" class="btn btn-success"><i class="bi bi-check-lg"></i> Saqlash</button>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check-lg"></i> Saqlash</button>
                 </div>
             </form>
         </div>
@@ -111,23 +110,23 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <form id="editUnitForm" method="POST">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-pencil"></i> O'lchov birligini tahrirlash</h5>
+                <div class="modal-header py-2">
+                    <h6 class="modal-title mb-0"><i class="bi bi-pencil"></i> O'lchov birligini tahrirlash</h6>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Kod *</label>
-                        <input type="text" class="form-control" name="code" id="edit_code" required>
+                <div class="modal-body py-2">
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Kod *</label>
+                        <input type="text" class="form-control form-control-sm" name="code" id="edit_code" required>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Nomi *</label>
-                        <input type="text" class="form-control" name="name" id="edit_name" required>
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Nomi *</label>
+                        <input type="text" class="form-control form-control-sm" name="name" id="edit_name" required>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
-                    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Saqlash</button>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-check-lg"></i> Saqlash</button>
                 </div>
             </form>
         </div>

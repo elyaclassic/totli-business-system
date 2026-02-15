@@ -865,8 +865,12 @@
         }
     }
 
-    // GPS location
+    // GPS location (faqat HTTPS yoki localhost da ishlaydi)
     function getPartnerLocation() {
+        if (!window.isSecureContext) {
+            showNotification('GPS faqat xavfsiz ulanishda (HTTPS) ishlaydi. "Xaritadan tanlash" tugmasidan foydalaning yoki saytni HTTPS orqali oching.', 'warning');
+            return;
+        }
         if (!navigator.geolocation) {
             showNotification('GPS qo\'llab-quvvatlanmaydi', 'danger');
             return;
@@ -882,7 +886,11 @@
 
             showNotification('GPS koordinatalar olindi!', 'success');
         }, (error) => {
-            showNotification('GPS xatosi: ' + error.message, 'danger');
+            var msg = error.message || 'Noma\'lum xato';
+            if (msg.indexOf('secure') !== -1 || error.code === 1) {
+                msg = 'GPS faqat HTTPS da ishlaydi. "Xaritadan tanlash" tugmasidan foydalaning.';
+            }
+            showNotification('GPS xatosi: ' + msg, 'warning');
         }, {
             enableHighAccuracy: true,
             timeout: 10000,
@@ -903,8 +911,12 @@
         }
     }
 
-    // Edit partner GPS location
+    // Edit partner GPS location (faqat HTTPS yoki localhost da ishlaydi)
     function getEditPartnerLocation() {
+        if (!window.isSecureContext) {
+            showNotification('GPS faqat xavfsiz ulanishda (HTTPS) ishlaydi. "Xaritadan tanlash" tugmasidan foydalaning yoki saytni HTTPS orqali oching.', 'warning');
+            return;
+        }
         if (!navigator.geolocation) {
             showNotification('GPS qo\'llab-quvvatlanmaydi', 'danger');
             return;
@@ -920,7 +932,11 @@
 
             showNotification('GPS koordinatalar olindi!', 'success');
         }, (error) => {
-            showNotification('GPS xatosi: ' + error.message, 'danger');
+            var msg = error.message || 'Noma\'lum xato';
+            if (msg.indexOf('secure') !== -1 || error.code === 1) {
+                msg = 'GPS faqat HTTPS da ishlaydi. "Xaritadan tanlash" tugmasidan foydalaning.';
+            }
+            showNotification('GPS xatosi: ' + msg, 'warning');
         }, {
             enableHighAccuracy: true,
             timeout: 10000,

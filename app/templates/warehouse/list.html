@@ -28,6 +28,64 @@
     </div>
     {% endif %}
 
+    <!-- Hujjatlar ro'yxati — mahsulotlar hujjat ichida ko'riladi -->
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <i class="bi bi-file-earmark-text"></i> Hujjatlar ro'yxati
+        </div>
+        <div class="card-body p-0">
+            <p class="text-muted small px-3 pt-2 mb-0">Hujjatni oching — uning ichida mahsulotlar ro'yxati chiqadi.</p>
+            <ul class="nav nav-tabs px-3 mt-2" id="docsTab" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="qoldiq-docs-tab" data-bs-toggle="tab" data-bs-target="#qoldiq-docs" type="button">Tovar qoldiq hujjatlari</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="kirim-docs-tab" data-bs-toggle="tab" data-bs-target="#kirim-docs" type="button">Tovar kirim hujjatlari</button>
+                </li>
+            </ul>
+            <div class="tab-content p-3" id="docsTabContent">
+                <div class="tab-pane fade show active" id="qoldiq-docs">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light"><tr><th>#</th><th>Hujjat raqami</th><th>Sana</th><th>Holat</th><th>Qatorlar</th><th></th></tr></thead>
+                        <tbody>
+                            {% for doc in qoldiq_docs %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td><strong>{{ doc.number }}</strong></td>
+                                <td>{{ doc.date.strftime('%d.%m.%Y %H:%M') if doc.date else '—' }}</td>
+                                <td>{% if doc.status == 'confirmed' %}<span class="badge bg-success">Tasdiqlangan</span>{% else %}<span class="badge bg-warning text-dark">Qoralama</span>{% endif %}</td>
+                                <td>{{ doc.items|length }} ta</td>
+                                <td><a href="/qoldiqlar/tovar/hujjat/{{ doc.id }}" class="btn btn-sm btn-outline-primary">Hujjatni ochish <i class="bi bi-box-arrow-up-right"></i></a></td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="6" class="text-center text-muted py-3">Tovar qoldiq hujjati yo'q. <a href="/qoldiqlar">Qoldiqlar</a> bo'limida yangi hujjat yarating.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="tab-pane fade" id="kirim-docs">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light"><tr><th>#</th><th>Hujjat raqami</th><th>Sana</th><th>Ombor</th><th>Holat</th><th></th></tr></thead>
+                        <tbody>
+                            {% for doc in purchase_docs %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td><strong>{{ doc.number }}</strong></td>
+                                <td>{{ doc.date.strftime('%d.%m.%Y') if doc.date else '—' }}</td>
+                                <td>{{ doc.warehouse.name if doc.warehouse else '—' }}</td>
+                                <td>{% if doc.status == 'confirmed' %}<span class="badge bg-success">Tasdiqlangan</span>{% else %}<span class="badge bg-secondary">Qoralama</span>{% endif %}</td>
+                                <td><a href="/purchases/edit/{{ doc.id }}" class="btn btn-sm btn-outline-primary">Hujjatni ochish <i class="bi bi-box-arrow-up-right"></i></a></td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="6" class="text-center text-muted py-3">Tovar kirim hujjati yo'q.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Ombor bo'yicha (qaysi omborda nima bor) -->
     <div class="card mb-4">
         <div class="card-header bg-light">
@@ -71,7 +129,7 @@
                                                 <br><small class="text-muted"><code>{{ stock.product.barcode or stock.product.code }}</code></small>
                                                 {% endif %}
                                             </td>
-                                            <td class="fw-bold">{{ "{:,.2f}".format(stock.quantity) }}</td>
+                                            <td class="fw-bold">{{ "{:,.3f}".format(stock.quantity) }}</td>
                                             <td>{{ "{:,.0f}".format(stock.product.purchase_price if stock.product else 0) }} so'm</td>
                                             <td class="text-success">{{ "{:,.0f}".format(stock.quantity * (stock.product.purchase_price if stock.product else 0)) }} so'm</td>
                                             <td>
@@ -150,7 +208,7 @@
                                 {% endif %}
                             </td>
                             <td>{{ stock.warehouse.name if stock.warehouse else '-' }}</td>
-                            <td class="fw-bold">{{ "{:,.2f}".format(stock.quantity) }}</td>
+                            <td class="fw-bold">{{ "{:,.3f}".format(stock.quantity) }}</td>
                             <td>{{ "{:,.0f}".format(stock.product.purchase_price if stock.product else 0) }} so'm</td>
                             <td class="text-success">{{ "{:,.0f}".format(stock.quantity * (stock.product.purchase_price if stock.product else 0)) }} so'm</td>
                             <td>
@@ -190,20 +248,20 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <form action="/warehouse/import" method="post" enctype="multipart/form-data">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-upload"></i> Qoldiqlarni Exceldan yuklash</h5>
+                <div class="modal-header py-2">
+                    <h6 class="modal-title mb-0"><i class="bi bi-upload"></i> Exceldan yuklash</h6>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body">
-                    <p class="text-muted small">Andoza ustunlari: <strong>Ombor nomi (yoki kodi)</strong>, <strong>Mahsulot nomi (yoki kodi)</strong>, <strong>Qoldiq</strong>. Ixtiyoriy: <strong>Tannarx (so'm)</strong>, <strong>Sotuv narxi (so'm)</strong>. Birinchi qator sarlavha bo‘sin.</p>
-                    <div class="mb-3">
-                        <label class="form-label">Excel fayl (.xlsx)</label>
-                        <input type="file" class="form-control" name="file" accept=".xlsx,.xls" required>
+                <div class="modal-body py-2">
+                    <p class="text-muted small mb-2">Ustunlar: Ombor, Mahsulot, Qoldiq. Birinchi qator sarlavha.</p>
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Excel fayl (.xlsx)</label>
+                        <input type="file" class="form-control form-control-sm" name="file" accept=".xlsx,.xls" required>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
-                    <button type="submit" class="btn btn-primary"><i class="bi bi-upload"></i> Yuklash</button>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-upload"></i> Yuklash</button>
                 </div>
             </form>
         </div>
@@ -215,23 +273,23 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <form action="/info/warehouses/add" method="POST">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-plus-circle"></i> Yangi ombor</h5>
+                <div class="modal-header py-2">
+                    <h6 class="modal-title mb-0"><i class="bi bi-plus-circle"></i> Yangi ombor</h6>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Nomi *</label>
-                        <input type="text" class="form-control" name="name" required>
+                <div class="modal-body py-2">
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Nomi *</label>
+                        <input type="text" class="form-control form-control-sm" name="name" required>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Manzil</label>
-                        <input type="text" class="form-control" name="address">
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Manzil</label>
+                        <input type="text" class="form-control form-control-sm" name="address">
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
-                    <button type="submit" class="btn btn-success"><i class="bi bi-check-lg"></i> Saqlash</button>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check-lg"></i> Saqlash</button>
                 </div>
             </form>
         </div>

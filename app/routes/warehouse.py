@@ -108,11 +108,27 @@ async def warehouse_list(
             items.append((doc.number, f"/qoldiqlar/tovar/hujjat/{doc.id}", doc.date.strftime("%d.%m.%Y") if doc.date else ""))
         items.sort(key=lambda x: x[2] or "", reverse=True)
         stock_sources[s.id] = items[:8]
+    # Hujjatlar ro'yxati — mahsulotlar hujjat ichida ko'riladi
+    qoldiq_docs = (
+        db.query(StockAdjustmentDoc)
+        .order_by(StockAdjustmentDoc.date.desc(), StockAdjustmentDoc.id.desc())
+        .limit(100)
+        .all()
+    )
+    purchase_docs = (
+        db.query(Purchase)
+        .filter(Purchase.status.in_(["confirmed", "draft"]))
+        .order_by(Purchase.date.desc())
+        .limit(80)
+        .all()
+    )
     return templates.TemplateResponse("warehouse/list.html", {
         "request": request,
         "warehouses": warehouses,
         "stocks": stocks,
         "stock_sources": stock_sources,
+        "qoldiq_docs": qoldiq_docs,
+        "purchase_docs": purchase_docs,
         "current_user": current_user,
         "page_title": "Ombor qoldiqlari",
     })
@@ -229,13 +245,17 @@ async def warehouse_import(
             warehouse = db.query(Warehouse).filter(
                 (func.lower(Warehouse.name) == wh_key.lower()) | (Warehouse.code == wh_key)
             ).first()
+            # Kod/shtrixkod va nom — katta-kichik harf farqisiz
             product = db.query(Product).filter(
-                (Product.code == prod_key) | (Product.barcode == prod_key)
+                or_(
+                    and_(Product.code.isnot(None), Product.code != "", func.lower(Product.code) == prod_key.lower()),
+                    and_(Product.barcode.isnot(None), Product.barcode != "", func.lower(Product.barcode) == prod_key.lower()),
+                )
             ).first()
             if not product and prod_key:
                 product = db.query(Product).filter(
                     Product.name.isnot(None),
-                    func.lower(Product.name) == prod_key.lower(),
+                    func.lower(func.trim(Product.name)) == prod_key.strip().lower(),
                 ).first()
             if not warehouse:
                 if wh_key and wh_key not in missing_warehouses:
@@ -466,12 +486,14 @@ async def warehouse_transfer_confirm(
             Stock.warehouse_id == transfer.from_warehouse_id,
             Stock.product_id == item.product_id,
         ).first()
-        if not src or src.quantity < item.quantity:
+        need = float(item.quantity or 0)
+        have = float(src.quantity or 0) if src else 0
+        if not src or (have + 1e-6 < need):
             prod = db.query(Product).filter(Product.id == item.product_id).first()
             name = prod.name if prod else f"#{item.product_id}"
-            avail = src.quantity if src else 0
+            avail_display = "0" if abs(have) < 1e-6 else ("%.6f" % have).rstrip("0").rstrip(".")
             return RedirectResponse(
-                url=f"/warehouse/transfers/{transfer_id}?error=" + quote(f"Qayerdan omborda «{name}» yetarli emas (kerak: {item.quantity}, mavjud: {avail})"),
+                url=f"/warehouse/transfers/{transfer_id}?error=" + quote(f"Qayerdan omborda «{name}» yetarli emas (kerak: {item.quantity}, mavjud: {avail_display})"),
                 status_code=303,
             )
     for item in items:
@@ -573,12 +595,14 @@ async def warehouse_transfer(
         Stock.warehouse_id == from_warehouse_id,
         Stock.product_id == product_id,
     ).first()
-    if not source or source.quantity < quantity:
+    need_q = float(quantity or 0)
+    have_q = float(source.quantity or 0) if source else 0
+    if not source or (have_q + 1e-6 < need_q):
         product = db.query(Product).filter(Product.id == product_id).first()
         name = product.name if product else f"#{product_id}"
-        avail = source.quantity if source else 0
+        avail_display = "0" if abs(have_q) < 1e-6 else ("%.6f" % have_q).rstrip("0").rstrip(".")
         return RedirectResponse(
-            url="/warehouse/movement?error=1&detail=" + quote(f"Qayerdan omborda «{name}» yetarli emas (kerak: {quantity}, mavjud: {avail})"),
+            url="/warehouse/movement?error=1&detail=" + quote(f"Qayerdan omborda «{name}» yetarli emas (kerak: {quantity}, mavjud: {avail_display})"),
             status_code=303,
         )
     source.quantity -= quantity

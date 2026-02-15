@@ -7,7 +7,7 @@ from typing import Optional
 from urllib.parse import quote
 from fastapi import APIRouter, Request, Depends, Form, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 import openpyxl
 
 from app.core import templates
@@ -34,6 +34,27 @@ from app.utils.auth import hash_password
 router = APIRouter(prefix="/info", tags=["info"])
 
 # /info redirect -> home router (GET /info)
+
+
+# ---------- Ro'yxatlar: Bo'limlar, Omborlar, Kassalar (admin hammasini ko'radi, qo'shish/tanlash) ----------
+@router.get("/rosters", response_class=HTMLResponse)
+async def info_rosters(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Admin uchun: barcha bo'limlar, omborlar va kassalar ro'yxati — ko'rish, qo'shish havolalari."""
+    departments = db.query(Department).order_by(Department.name).all()
+    warehouses = db.query(Warehouse).order_by(Warehouse.name).all()
+    cash_registers = db.query(CashRegister).order_by(CashRegister.name).all()
+    return templates.TemplateResponse("info/rosters.html", {
+        "request": request,
+        "current_user": current_user,
+        "page_title": "Bo'limlar, Omborlar, Kassalar",
+        "departments": departments,
+        "warehouses": warehouses,
+        "cash_registers": cash_registers,
+    })
 
 
 # ---------- Warehouses ----------
@@ -842,15 +863,45 @@ async def import_directions(file: UploadFile = File(...), db: Session = Depends(
 async def info_users(
     request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_admin)
 ):
-    users = db.query(User).all()
+    users = (
+        db.query(User)
+        .options(
+            joinedload(User.department),
+            joinedload(User.warehouse),
+            joinedload(User.cash_register),
+            joinedload(User.departments_list),
+            joinedload(User.warehouses_list),
+            joinedload(User.cash_registers_list),
+        )
+        .order_by(User.id)
+        .all()
+    )
+    departments = db.query(Department).filter(Department.is_active == True).order_by(Department.name).all()
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
+    cash_registers = db.query(CashRegister).filter(CashRegister.is_active == True).order_by(CashRegister.name).all()
     error = request.query_params.get("error", "").strip()
     return templates.TemplateResponse("info/users.html", {
         "request": request,
         "users": users,
+        "departments": departments,
+        "warehouses": warehouses,
+        "cash_registers": cash_registers,
         "current_user": current_user,
         "page_title": "Foydalanuvchilar",
         "error": error,
     })
+
+
+def _parse_id_list(form_list) -> list:
+    out = []
+    for x in form_list:
+        try:
+            v = int(x)
+            if v > 0 and v not in out:
+                out.append(v)
+        except (ValueError, TypeError):
+            pass
+    return out
 
 
 @router.post("/users/add")
@@ -864,6 +915,10 @@ async def info_users_add(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    form = await request.form()
+    department_ids = _parse_id_list(form.getlist("department_ids"))
+    warehouse_ids = _parse_id_list(form.getlist("warehouse_ids"))
+    cash_register_ids = _parse_id_list(form.getlist("cash_register_ids"))
     existing = db.query(User).filter(User.username == username).first()
     if existing:
         msg = quote(f"'{username}' login bilan foydalanuvchi allaqachon mavjud! Boshqa login tanlang.")
@@ -874,8 +929,24 @@ async def info_users_add(
         full_name=full_name,
         role=role,
         is_active=is_active,
+        department_id=department_ids[0] if department_ids else None,
+        warehouse_id=warehouse_ids[0] if warehouse_ids else None,
+        cash_register_id=cash_register_ids[0] if cash_register_ids else None,
     )
     db.add(user)
+    db.flush()
+    for did in department_ids:
+        dept = db.query(Department).filter(Department.id == did).first()
+        if dept:
+            user.departments_list.append(dept)
+    for wid in warehouse_ids:
+        wh = db.query(Warehouse).filter(Warehouse.id == wid).first()
+        if wh:
+            user.warehouses_list.append(wh)
+    for cid in cash_register_ids:
+        cash = db.query(CashRegister).filter(CashRegister.id == cid).first()
+        if cash:
+            user.cash_registers_list.append(cash)
     db.commit()
     return RedirectResponse(url="/info/users", status_code=303)
 
@@ -883,6 +954,7 @@ async def info_users_add(
 @router.post("/users/edit/{user_id}")
 async def info_users_edit(
     user_id: int,
+    request: Request,
     username: str = Form(...),
     full_name: str = Form(...),
     role: str = Form("user"),
@@ -890,6 +962,10 @@ async def info_users_edit(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    form = await request.form()
+    department_ids = _parse_id_list(form.getlist("department_ids"))
+    warehouse_ids = _parse_id_list(form.getlist("warehouse_ids"))
+    cash_register_ids = _parse_id_list(form.getlist("cash_register_ids"))
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
@@ -901,6 +977,24 @@ async def info_users_edit(
     user.full_name = full_name
     user.role = role
     user.is_active = is_active
+    user.department_id = department_ids[0] if department_ids else None
+    user.warehouse_id = warehouse_ids[0] if warehouse_ids else None
+    user.cash_register_id = cash_register_ids[0] if cash_register_ids else None
+    user.departments_list.clear()
+    user.warehouses_list.clear()
+    user.cash_registers_list.clear()
+    for did in department_ids:
+        dept = db.query(Department).filter(Department.id == did).first()
+        if dept:
+            user.departments_list.append(dept)
+    for wid in warehouse_ids:
+        wh = db.query(Warehouse).filter(Warehouse.id == wid).first()
+        if wh:
+            user.warehouses_list.append(wh)
+    for cid in cash_register_ids:
+        cash = db.query(CashRegister).filter(CashRegister.id == cid).first()
+        if cash:
+            user.cash_registers_list.append(cash)
     db.commit()
     return RedirectResponse(url="/info/users", status_code=303)
 

@@ -17,7 +17,7 @@ from sqlalchemy import or_
 
 from app.core import templates
 from app.models.database import get_db, Product, Category, Unit, User
-from app.deps import require_auth
+from app.deps import require_auth, require_admin
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -339,7 +339,7 @@ async def product_edit(
 async def product_delete(
     product_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
+    current_user: User = Depends(require_admin),
 ):
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
@@ -347,6 +347,30 @@ async def product_delete(
     product.is_active = False
     db.commit()
     return RedirectResponse(url="/products", status_code=303)
+
+
+@router.post("/delete-bulk")
+async def product_delete_bulk(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Faqat admin: tanlangan tovarlarni o'chirish (is_active=False)."""
+    form = await request.form()
+    ids = form.getlist("product_ids")
+    deleted = 0
+    for sid in ids:
+        try:
+            pid = int(sid)
+            product = db.query(Product).filter(Product.id == pid).first()
+            if product:
+                product.is_active = False
+                deleted += 1
+        except (ValueError, TypeError):
+            pass
+    db.commit()
+    msg = quote(f"Tanlangan {deleted} ta tovar o'chirildi.") if deleted else quote("Hech narsa tanlanmadi.")
+    return RedirectResponse(url="/products?deleted=" + msg, status_code=303)
 
 
 @router.post("/{product_id}/upload-image")

@@ -29,7 +29,12 @@
     <div class="alert alert-success py-2 small">Hujjat tasdiqlandi. Omborda harakat bajarildi.</div>
     {% endif %}
     {% if request.query_params.get('error') %}
-    <div class="alert alert-danger py-2 small">{{ request.query_params.get('error') }}</div>
+    <div class="alert alert-danger py-2 small">
+        {{ request.query_params.get('error') }}
+        <div class="mt-2 pt-2 border-top border-danger border-opacity-25">
+            <strong>Nima qilish:</strong> Qayerdan omborda mavjud bo‘lmagan mahsulot qatorini <strong>×</strong> tugmasi bilan o‘chiring yoki <a href="/qoldiqlar/tovar/hujjat/new" class="alert-link">Qoldiqlar → Tovar qoldiq hujjati</a> orqali avval shu omborda qoldiq kiriting. Keyin «Saqlash» bosing va yana «Tasdiqlash»ni bosing.
+        </div>
+    </div>
     {% endif %}
 
     <div class="form-1c bg-white border rounded p-0 mb-3">
@@ -141,9 +146,9 @@
                             </td>
                             <td>
                                 {% if transfer.status == 'confirmed' %}
-                                <input type="text" class="form-control qty-input" value="{{ row.quantity }}" readonly>
+                                <input type="text" class="form-control qty-input" value="{{ "%.3f"|format(row.quantity) if row.quantity is not none else "" }}" readonly>
                                 {% else %}
-                                <input type="text" name="quantity_{{ loop.index }}" class="form-control qty-input" value="{{ row.quantity }}" inputmode="decimal">
+                                <input type="text" name="quantity_{{ loop.index }}" class="form-control qty-input" value="{{ "%.3f"|format(row.quantity) if row.quantity is not none else "" }}" inputmode="decimal">
                                 {% endif %}
                             </td>
                             <td>

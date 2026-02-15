@@ -2,6 +2,36 @@
 
 {% block content %}
 <div class="container-fluid">
+    {% if request.query_params.get('error') %}
+    <div class="alert alert-danger alert-dismissible fade show py-2 small">
+        {{ request.query_params.get('error') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if request.query_params.get('warning') %}
+    <div class="alert alert-warning alert-dismissible fade show py-2 small">
+        {{ request.query_params.get('warning') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if request.query_params.get('imported') == '1' and request.query_params.get('msg') %}
+    <div class="alert alert-success alert-dismissible fade show py-2 small">
+        <i class="bi bi-cloud-download"></i> {{ request.query_params.get('msg') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if request.query_params.get('updated') == '1' %}
+    <div class="alert alert-success alert-dismissible fade show py-2 small">
+        <i class="bi bi-check-circle"></i> Xodim ma'lumotlari yangilandi.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if request.query_params.get('deleted') == '1' %}
+    <div class="alert alert-success alert-dismissible fade show py-2 small">
+        <i class="bi bi-trash"></i> Xodim o'chirildi.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
     <div class="card">
         <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2 py-3">
             <h5 class="mb-0"><i class="bi bi-person-badge"></i> Xodimlar</h5>
@@ -17,6 +47,7 @@
                         <input type="file" name="excel_file" accept=".xlsx" class="d-none" onchange="this.form.submit()">
                     </label>
                 </form>
+                <button type="button" class="btn btn-outline-info btn-sm" data-bs-toggle="modal" data-bs-target="#hikvisionImportModal" title="Hikvision qurilmasidan xodimlar ro'yxatini yuklash"><i class="bi bi-camera-video"></i> Hikvision'dan yuklash</button>
                 <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addEmployeeModal"><i class="bi bi-plus-circle"></i> Yaratish</button>
             </div>
         </div>
@@ -32,7 +63,7 @@
                             <th>Bo'lim</th>
                             <th>Telefon</th>
                             <th>Oylik</th>
-                            <th></th>
+                            <th width="160"></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -51,12 +82,15 @@
                             <td>{{ emp.phone or '-' }}</td>
                             <td class="text-success">{{ "{:,.0f}".format(emp.salary) }}</td>
                             <td>
-                                <button class="btn btn-sm btn-outline-primary" title="Tahrirlash">
+                                <a href="/employees/hiring-doc/create?employee_id={{ emp.id }}" class="btn btn-sm btn-outline-secondary" title="Ishga qabul hujjati"><i class="bi bi-file-earmark-person"></i></a>
+                                <a href="/employees/edit/{{ emp.id }}" class="btn btn-sm btn-outline-primary" title="Tahrirlash">
                                     <i class="bi bi-pencil"></i>
-                                </button>
-                                <button class="btn btn-sm btn-outline-danger" title="O'chirish">
-                                    <i class="bi bi-trash"></i>
-                                </button>
+                                </a>
+                                <form method="POST" action="/employees/delete/{{ emp.id }}" class="d-inline" onsubmit="return confirm('Ushbu xodimni rostdan ham o\'chirishni xohlaysizmi?');">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="O'chirish">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
                             </td>
                         </tr>
                         {% else %}
@@ -130,7 +164,7 @@
                         </div>
                         <div class="col-md-6 pwa-fields" style="display:none;">
                             <label class="form-label">Parol *</label>
-                            <input type="password" class="form-control" name="pwa_password" placeholder="Parol">
+                            <input type="password" class="form-control" name="pwa_password" placeholder="Parol" autocomplete="current-password">
                             <small class="text-muted">PWA'ga kirish uchun parol</small>
                         </div>
 
@@ -190,4 +224,72 @@
         </div>
     </div>
 </div>
+
+<!-- Hikvision'dan xodimlar yuklash modal -->
+<div class="modal fade" id="hikvisionImportModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="/employees/import-from-hikvision-preview">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-camera-video"></i> Hikvision'dan xodimlarni yuklash</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small">Ulaning, ro'yxatni ko'ring, keraklilarini belgilab yuklang.</p>
+                    <div class="mb-3">
+                        <label class="form-label">Hikvision IP *</label>
+                        <input type="text" class="form-control" name="hikvision_host" value="192.168.1.199" required>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label">Port</label>
+                            <input type="number" class="form-control" name="hikvision_port" value="443">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Login</label>
+                            <input type="text" class="form-control" name="hikvision_username" value="admin">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Parol</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" name="hikvision_password" id="hikvisionImportPassword" placeholder="Parol" autocomplete="off">
+                            {% if current_user and current_user.role == 'admin' %}
+                            <button type="button" class="btn btn-outline-secondary" id="toggleHikvisionImportPassword" title="Parolni ko'rsatish" aria-label="Parolni ko'rsatish">
+                                <i class="bi bi-eye" id="hikvisionImportPasswordIcon"></i>
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor</button>
+                    <button type="submit" class="btn btn-info"><i class="bi bi-list-ul"></i> Ro'yxatni olish</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+(function() {
+    var btn = document.getElementById('toggleHikvisionImportPassword');
+    if (!btn) return;
+    var inp = document.getElementById('hikvisionImportPassword');
+    var icon = document.getElementById('hikvisionImportPasswordIcon');
+    if (!inp || !icon) return;
+    btn.addEventListener('click', function() {
+        if (inp.type === 'password') {
+            inp.type = 'text';
+            icon.classList.remove('bi-eye');
+            icon.classList.add('bi-eye-slash');
+            btn.title = 'Parolni yashirish';
+        } else {
+            inp.type = 'password';
+            icon.classList.remove('bi-eye-slash');
+            icon.classList.add('bi-eye');
+            btn.title = 'Parolni ko\'rsatish';
+        }
+    });
+})();
+</script>
 {% endblock %}

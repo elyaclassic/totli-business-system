@@ -212,79 +212,58 @@ class HikvisionAPI:
                 continue
         return out
 
+    def _parse_events_from_response(self, data: Any) -> List[Dict[str, Any]]:
+        """JSON javobdan hodisalar ro'yxatini ajratib oladi (turli Hikvision firmware formatlari)."""
+        out: List[Dict[str, Any]] = []
+        if not isinstance(data, dict):
+            return out
+        acs = data.get("AcsEvent") or data.get("acsEvent")
+        if isinstance(acs, list):
+            info_list = acs
+        elif isinstance(acs, dict):
+            info_list = acs.get("InfoList") or acs.get("infoList") or acs.get("MatchList") or []
+        else:
+            info_list = data.get("InfoList") or data.get("infoList") or data.get("MatchList") or []
+        if not isinstance(info_list, list):
+            info_list = [info_list] if info_list else []
+        for e in info_list:
+            if not isinstance(e, dict):
+                continue
+            emp_no = (e.get("employeeNoString") or e.get("employeeNo") or "").strip() or str(e.get("id", "")).strip()
+            if not emp_no:
+                continue
+            rec = {
+                "employeeNo": emp_no,
+                "time": e.get("time") or e.get("dateTime") or e.get("eventTime") or "",
+                "name": e.get("name") or e.get("personName") or "Noma'lum",
+            }
+            for k, v in e.items():
+                if v and isinstance(v, str) and any(x in k.lower() for x in ("pic", "photo", "image", "snap", "uri")):
+                    if "pic" in k.lower() or "photo" in k.lower() or "image" in k.lower() or "snap" in k.lower():
+                        rec[k] = v
+            out.append(rec)
+        return out
+
     def get_events(self, start_date: date, end_date: date) -> List[Dict[str, Any]]:
         """
         Berilgan sana oralig'ida kirish/chiqish hodisalarini olish.
-        Web Event Search (2026-02-01 00:00:00) formatida va ISO formatda sinab ko'ramiz.
+        Bir nechta vaqt formati sinanadi (qurilma firmwaresiga qarab).
         """
         out: List[Dict[str, Any]] = []
         max_results = 100
         max_position = 20000
-        # Avval web interfeysdagi kabi bo'shliq bilan vaqt (2026-02-01 00:00:00)
-        start_str = start_date.strftime("%Y-%m-%d") + " 00:00:00"
-        end_str = end_date.strftime("%Y-%m-%d") + " 23:59:59"
-        position = 0
-        while True:
-            try:
-                url = f"{self.base_url}/ISAPI/AccessControl/AcsEvent?format=json"
-                payload = {
-                    "AcsEventCond": {
-                        "searchID": "1",
-                        "searchResultPosition": position,
-                        "maxResults": max_results,
-                        "major": 0,
-                        "minor": 0,
-                        "startTime": start_str,
-                        "endTime": end_str,
-                    }
-                }
-                r = self._get_session().post(url, json=payload, timeout=60)
-                if r.status_code != 200:
-                    self._last_status = r.status_code
-                    if position == 0 and out:
-                        break
-                    break
-                data = r.json()
-                acs = data.get("AcsEvent") if isinstance(data, dict) else None
-                if isinstance(acs, list):
-                    info_list = acs
-                elif isinstance(acs, dict):
-                    info_list = acs.get("InfoList") or acs.get("infoList") or []
-                else:
-                    info_list = data.get("InfoList") or data.get("infoList") or [] if isinstance(data, dict) else []
-                if not isinstance(info_list, list):
-                    info_list = [info_list] if info_list else []
-                for e in info_list:
-                    if not isinstance(e, dict):
-                        continue
-                    emp_no = (e.get("employeeNoString") or e.get("employeeNo") or "").strip() or str(e.get("id", "")).strip()
-                    if not emp_no:
-                        continue
-                    rec = {
-                        "employeeNo": emp_no,
-                        "time": e.get("time") or e.get("dateTime") or e.get("eventTime") or "",
-                        "name": e.get("name") or e.get("personName") or "Noma'lum",
-                    }
-                    for k, v in e.items():
-                        if v and isinstance(v, str) and any(x in k.lower() for x in ("pic", "photo", "image", "snap", "uri")):
-                            if "pic" in k.lower() or "photo" in k.lower() or "image" in k.lower() or "snap" in k.lower():
-                                rec[k] = v
-                    out.append(rec)
-                acs_dict = acs if isinstance(acs, dict) else {}
-                if acs_dict.get("responseStatusStrg") != "MORE":
-                    break
-                position += max_results
-                if position >= max_position:
-                    break
-            except Exception:
+        time_formats = [
+            (start_date.strftime("%Y-%m-%d") + " 00:00:00", end_date.strftime("%Y-%m-%d") + " 23:59:59"),
+            (start_date.strftime("%Y-%m-%d") + "T00:00:00", end_date.strftime("%Y-%m-%d") + "T23:59:59"),
+            (start_date.strftime("%Y-%m-%d") + "T00:00:00+05:00", end_date.strftime("%Y-%m-%d") + "T23:59:59+05:00"),
+        ]
+        for start_str, end_str in time_formats:
+            if out:
                 break
-        # Agar bo'sh vaqt formatida hech narsa kelmasa, ISO+timezone bilan qayta urinamiz
-        if not out and (start_str != (start_date.strftime("%Y-%m-%d") + "T00:00:00+05:00")):
-            start_str = start_date.strftime("%Y-%m-%d") + "T00:00:00+05:00"
-            end_str = end_date.strftime("%Y-%m-%d") + "T23:59:59+05:00"
             position = 0
             while True:
                 try:
+                    url = f"{self.base_url}/ISAPI/AccessControl/AcsEvent?format=json"
                     payload = {
                         "AcsEventCond": {
                             "searchID": "1",
@@ -296,34 +275,16 @@ class HikvisionAPI:
                             "endTime": end_str,
                         }
                     }
-                    r = self._get_session().post(f"{self.base_url}/ISAPI/AccessControl/AcsEvent?format=json", json=payload, timeout=60)
+                    r = self._get_session().post(url, json=payload, timeout=60)
                     if r.status_code != 200:
+                        self._last_status = r.status_code
                         break
                     data = r.json()
-                    acs = data.get("AcsEvent") if isinstance(data, dict) else None
-                    if isinstance(acs, dict):
-                        info_list = acs.get("InfoList") or acs.get("infoList") or []
-                    else:
-                        info_list = acs if isinstance(acs, list) else []
-                    if not isinstance(info_list, list):
-                        info_list = [info_list] if info_list else []
-                    for e in info_list:
-                        if not isinstance(e, dict):
-                            continue
-                        emp_no = (e.get("employeeNoString") or e.get("employeeNo") or "").strip() or str(e.get("id", "")).strip()
-                        if not emp_no:
-                            continue
-                        rec = {
-                            "employeeNo": emp_no,
-                            "time": e.get("time") or e.get("dateTime") or "",
-                            "name": e.get("name") or "Noma'lum",
-                        }
-                        for k, v in e.items():
-                            if v and isinstance(v, str) and any(x in k.lower() for x in ("pic", "photo", "image", "snap", "uri")):
-                                if "pic" in k.lower() or "photo" in k.lower() or "image" in k.lower() or "snap" in k.lower():
-                                    rec[k] = v
-                        out.append(rec)
-                    if (acs if isinstance(acs, dict) else {}).get("responseStatusStrg") != "MORE":
+                    chunk = self._parse_events_from_response(data)
+                    out.extend(chunk)
+                    acs = (data.get("AcsEvent") or data.get("acsEvent")) if isinstance(data, dict) else None
+                    acs_dict = acs if isinstance(acs, dict) else {}
+                    if acs_dict.get("responseStatusStrg") != "MORE":
                         break
                     position += max_results
                     if position >= max_position:
@@ -391,7 +352,10 @@ def sync_hikvision_attendance(
         # Hodisalarni POST AcsEvent orqali olish (bot formatida, birinchi/oxirgi vaqt hisoblash uchun)
         events = api.get_events(start_date, end_date)
         result["events_count"] = len(events)
-        
+
+        if not events:
+            result["errors"].append("Hikvision qurilmasidan shu sana uchun hodisa qaytmadi. IP/parol va sana to'g'riligini tekshiring.")
+
         # employeeNo -> employee_id (barcha xodimlar, jumladan Hikvision'dan import qilingan is_active=False)
         employee_by_no: Dict[str, int] = {}
         for emp in db_session.query(Employee).all():
@@ -423,6 +387,11 @@ def sync_hikvision_attendance(
             by_emp_date[(emp_id, ev_date)].append((dt, ev))
         
         result["matched_count"] = len(by_emp_date)
+        if result["events_count"] > 0 and result["matched_count"] == 0:
+            result["errors"].append(
+                "Hikvisiondan %s ta hodisa keldi, lekin hech bir xodim ro'yxatga mos emas. "
+                "Xodimlarda «Hikvision ID» yoki «Kod» maydonini qurilmadagi raqamga moslang." % result["events_count"]
+            )
         unique_dates = sorted(set(d for (_, d) in by_emp_date))
         result["days_with_data"] = unique_dates
         result["days_count"] = len(unique_dates)
@@ -483,4 +452,84 @@ def sync_hikvision_attendance(
     except Exception as e:
         result["errors"].append(str(e))
     
+    return result
+
+
+def import_employees_from_hikvision(
+    hikvision_host: str,
+    hikvision_port: int,
+    hikvision_username: str,
+    hikvision_password: str,
+    db_session: Any,
+    employee_nos: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Hikvision qurilmasidan shaxslar ro'yxatini olib, Employee jadvaliga qo'shadi yoki yangilaydi.
+    employee_nos berilsa faqat shu Kod/ID dagi shaxslar yuklanadi; bo'lmasa hammasi.
+    """
+    from app.models.database import Employee
+
+    result: Dict[str, Any] = {"success": False, "imported": 0, "updated": 0, "errors": []}
+    if requests is None:
+        result["errors"].append("requests kutubxonasi o'rnatilmagan.")
+        return result
+
+    try:
+        api = HikvisionAPI(
+            host=hikvision_host,
+            port=hikvision_port,
+            username=hikvision_username,
+            password=hikvision_password,
+        )
+        if not api.test_connection():
+            result["errors"].append(api._last_error or "Qurilma bilan bog'lanib bo'lmadi.")
+            return result
+
+        persons = api.get_person_list()
+        if not persons:
+            result["errors"].append("Qurilmada hech qanday shaxs topilmadi.")
+            result["success"] = True
+            return result
+
+        allowed_set = None
+        if employee_nos:
+            allowed_set = {str(x).strip() for x in employee_nos if x and str(x).strip()}
+
+        for p in persons:
+            try:
+                emp_no = (p.get("employeeNo") or "").strip()
+                name = (p.get("name") or "").strip()
+                department = (p.get("department") or "").strip()
+                if not emp_no and not name:
+                    continue
+                if allowed_set is not None:
+                    key = emp_no or name
+                    if key not in allowed_set and name not in allowed_set:
+                        continue
+                code = (emp_no or "").strip() or ("HV-" + datetime.now().strftime("%Y%m%d%H%M%S") + "-" + str(result["imported"] + result["updated"] + 1))
+                employee = db_session.query(Employee).filter(Employee.code == code).first()
+                if not employee and emp_no:
+                    employee = db_session.query(Employee).filter(Employee.hikvision_id == emp_no).first()
+                if employee:
+                    employee.full_name = name or employee.full_name
+                    employee.hikvision_id = emp_no or employee.hikvision_id
+                    if department:
+                        employee.department = department
+                    result["updated"] += 1
+                else:
+                    new_emp = Employee(
+                        code=code,
+                        full_name=name or "Noma'lum",
+                        hikvision_id=emp_no or None,
+                        department=department or None,
+                    )
+                    db_session.add(new_emp)
+                    result["imported"] += 1
+                db_session.commit()
+            except Exception as e:
+                result["errors"].append(f"{emp_no or name}: {str(e)[:80]}")
+                db_session.rollback()
+        result["success"] = True
+    except Exception as e:
+        result["errors"].append(str(e))
     return result

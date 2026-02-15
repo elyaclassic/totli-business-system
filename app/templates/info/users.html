@@ -42,6 +42,8 @@
                         <span class="badge bg-primary">Ishlab chiqarish</span>
                         {% elif user.role == 'qadoqlash' %}
                         <span class="badge bg-success">Qadoqlash</span>
+                        {% elif user.role == 'sotuvchi' %}
+                        <span class="badge bg-success">Sotuvchi</span>
                         {% elif user.role == 'agent' %}
                         <span class="badge bg-info">Agent (PWA)</span>
                         {% elif user.role == 'driver' %}
@@ -60,7 +62,18 @@
                     <td>{{ user.created_at.strftime('%d.%m.%Y %H:%M') if user.created_at else '-' }}</td>
                     <td>
                         <button class="btn btn-sm btn-warning"
-                            onclick="editUser({{ user.id }}, '{{ user.username }}', '{{ user.full_name }}', '{{ user.role }}', {{ 'true' if user.is_active else 'false' }})">
+                            data-user-id="{{ user.id }}"
+                            data-username="{{ user.username }}"
+                            data-full-name="{{ user.full_name }}"
+                            data-role="{{ user.role }}"
+                            data-active="{{ 'true' if user.is_active else 'false' }}"
+                            data-department-ids="{% if user.departments_list %}{% for d in user.departments_list %}{{ d.id }}{% if not loop.last %},{% endif %}{% endfor %}{% endif %}"
+                            data-department-names="{% if user.departments_list %}{% for d in user.departments_list %}{{ d.name }}{% if not loop.last %}|||{% endif %}{% endfor %}{% endif %}"
+                            data-warehouse-ids="{% if user.warehouses_list %}{% for w in user.warehouses_list %}{{ w.id }}{% if not loop.last %},{% endif %}{% endfor %}{% endif %}"
+                            data-warehouse-names="{% if user.warehouses_list %}{% for w in user.warehouses_list %}{{ w.name }}{% if not loop.last %}|||{% endif %}{% endfor %}{% endif %}"
+                            data-cash-register-ids="{% if user.cash_registers_list %}{% for c in user.cash_registers_list %}{{ c.id }}{% if not loop.last %},{% endif %}{% endfor %}{% endif %}"
+                            data-cash-register-names="{% if user.cash_registers_list %}{% for c in user.cash_registers_list %}{{ c.name }}{% if not loop.last %}|||{% endif %}{% endfor %}{% endif %}"
+                            onclick="editUserFromBtn(this)">
                             <i class="fas fa-edit"></i>
                         </button>
                         <button class="btn btn-sm btn-info"
@@ -93,83 +106,170 @@
 <div class="modal fade" id="addUserModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Yangi foydalanuvchi</h5>
+            <div class="modal-header py-2">
+                <h6 class="modal-title mb-0">Yangi foydalanuvchi</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Yopish"></button>
             </div>
             <form method="POST" action="/info/users/add">
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Login *</label>
-                        <input type="text" class="form-control" name="username" id="add_user_username" required autocomplete="username">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Parol *</label>
-                        <div class="input-group">
-                            <input type="password" class="form-control" name="password" id="add_user_password" required autocomplete="new-password" aria-label="Parol">
-                            <button type="button" class="btn btn-outline-secondary" onclick="togglePass(this, 'add_user_password')" title="Parolni ko'rsatish" aria-label="Parolni ko'rsatish">
-                                <i class="bi bi-eye"></i>
-                            </button>
+                <div class="modal-body py-2">
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6">
+                            <label class="form-label small mb-0">Login *</label>
+                            <input type="text" class="form-control form-control-sm" name="username" id="add_user_username" required autocomplete="username">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small mb-0">Parol *</label>
+                            <div class="input-group input-group-sm">
+                                <input type="password" class="form-control" name="password" id="add_user_password" required autocomplete="new-password" aria-label="Parol">
+                                <button type="button" class="btn btn-outline-secondary" onclick="togglePass(this, 'add_user_password')" title="Ko'rsatish" aria-label="Parolni ko'rsatish"><i class="bi bi-eye"></i></button>
+                            </div>
                         </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">To'liq ism *</label>
-                        <input type="text" class="form-control" name="full_name" required>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6">
+                            <label class="form-label small mb-0">To'liq ism *</label>
+                            <input type="text" class="form-control form-control-sm" name="full_name" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small mb-0">Telefon</label>
+                            <input type="text" class="form-control form-control-sm" name="phone" placeholder="+998901234567">
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Telefon</label>
-                        <input type="text" class="form-control" name="phone" placeholder="+998901234567">
-                        <small class="text-muted">ERP foydalanuvchilar uchun</small>
+                    <div class="d-flex align-items-end gap-2 mb-2">
+                        <div class="flex-grow-1">
+                            <label class="form-label small mb-0">Rol *</label>
+                            <select class="form-select form-select-sm" name="role" id="userRole" onchange="toggleUserFields()" required>
+                                <optgroup label="ERP">
+                                    <option value="user">Foydalanuvchi</option>
+                                    <option value="manager">Menejer</option>
+                                    <option value="admin">Administrator</option>
+                                    <option value="production">Ishlab chiqarish</option>
+                                    <option value="qadoqlash">Qadoqlash</option>
+                                    <option value="sotuvchi">Sotuvchi</option>
+                                </optgroup>
+                                <optgroup label="PWA">
+                                    <option value="agent">Agent</option>
+                                    <option value="driver">Haydovchi</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <div class="form-check form-check-inline mb-0 pb-1">
+                            <input type="checkbox" class="form-check-input" name="is_active" checked>
+                            <label class="form-check-label small">Faol</label>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Rol *</label>
-                        <select class="form-select" name="role" id="userRole" onchange="toggleUserFields()" required>
-                            <optgroup label="ERP Foydalanuvchilar">
-                                <option value="user">Foydalanuvchi</option>
-                                <option value="manager">Menejer</option>
-                                <option value="admin">Administrator</option>
-                                <option value="production">Ishlab chiqarish</option>
-                                <option value="qadoqlash">Qadoqlash</option>
-                            </optgroup>
-                            <optgroup label="PWA Foydalanuvchilar">
-                                <option value="agent">Agent (PWA)</option>
-                                <option value="driver">Haydovchi (PWA)</option>
-                            </optgroup>
-                        </select>
-                        <small class="text-muted">Rolni shu ro'yxatdan tanlang. Agent/Haydovchi — mobil ilova.</small>
+
+                    <!-- Bo'lim, Ombor, Kassa — bir qatorda, tanlanganlar chip -->
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0">Bo'lim</label>
+                            <div class="d-flex gap-1">
+                                <select class="form-select form-select-sm flex-grow-1" id="add_department_id">
+                                    <option value="">-- Tanlang --</option>
+                                    {% for d in (departments or []) %}
+                                    <option value="{{ d.id }}">{{ d.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" id="add_btn_department" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                            </div>
+                            <div id="add_department_ids_container"></div>
+                            <div id="add_department_list" class="d-flex flex-wrap gap-1 mt-1"></div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0">Ombor</label>
+                            <div class="d-flex gap-1">
+                                <select class="form-select form-select-sm flex-grow-1" id="add_warehouse_id">
+                                    <option value="">-- Tanlang --</option>
+                                    {% for w in (warehouses or []) %}
+                                    <option value="{{ w.id }}">{{ w.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" id="add_btn_warehouse" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                            </div>
+                            <div id="add_warehouse_ids_container"></div>
+                            <div id="add_warehouse_list" class="d-flex flex-wrap gap-1 mt-1"></div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0">Kassa</label>
+                            <div class="d-flex gap-1">
+                                <select class="form-select form-select-sm flex-grow-1" id="add_cash_register_id">
+                                    <option value="">-- Tanlang --</option>
+                                    {% for c in (cash_registers or []) %}
+                                    <option value="{{ c.id }}">{{ c.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" id="add_btn_cash_register" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                            </div>
+                            <div id="add_cash_register_ids_container"></div>
+                            <div id="add_cash_register_list" class="d-flex flex-wrap gap-1 mt-1"></div>
+                        </div>
                     </div>
+                    <small class="text-muted small d-block mb-2" style="font-size:0.7rem">Sotuvchi: bo'lim/ombor → sotuv oynasi; kassa — biriktiriladi.</small>
 
                     <!-- PWA uchun qo'shimcha maydonlar -->
-                    <div id="pwaFields" style="display:none;">
-                        <div class="mb-3">
-                            <label class="form-label">Telefon (PWA login) *</label>
-                            <input type="text" class="form-control" name="pwa_phone" placeholder="+998901234567">
-                            <small class="text-muted">Mobil ilovaga kirish uchun</small>
+                    <div id="pwaFields" style="display:none;" class="mb-2">
+                        <div class="mb-2">
+                            <label class="form-label small mb-0">Telefon (PWA) *</label>
+                            <input type="text" class="form-control form-control-sm" name="pwa_phone" placeholder="+998901234567">
                         </div>
-
-                        <!-- Faqat haydovchi uchun -->
-                        <div id="driverFields" style="display:none;">
-                            <div class="mb-3">
-                                <label class="form-label">Mashina raqami *</label>
-                                <input type="text" class="form-control" name="vehicle_number" placeholder="01 A 123 BC">
+                        <div id="driverFields" style="display:none;" class="row g-2">
+                            <div class="col-6">
+                                <label class="form-label small mb-0">Mashina raqami *</label>
+                                <input type="text" class="form-control form-control-sm" name="vehicle_number" placeholder="01 A 123 BC">
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">Mashina turi</label>
-                                <select class="form-select" name="vehicle_type">
-                                    <option value="car">Yengil mashina</option>
+                            <div class="col-6">
+                                <label class="form-label small mb-0">Mashina turi</label>
+                                <select class="form-select form-select-sm" name="vehicle_type">
+                                    <option value="car">Yengil</option>
                                     <option value="van">Furgon</option>
-                                    <option value="truck">Yuk mashinasi</option>
+                                    <option value="truck">Yuk</option>
                                 </select>
                             </div>
                         </div>
                     </div>
-
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" name="is_active" checked>
-                        <label class="form-check-label">Faol</label>
-                    </div>
                 </div>
                 <script>
+                    (function() {
+                        function addToList(selectId, containerId, listId, inputName) {
+                            var sel = document.getElementById(selectId);
+                            var container = document.getElementById(containerId);
+                            var listEl = document.getElementById(listId);
+                            if (!sel || !container || !listEl) return;
+                            var opt = sel.options[sel.selectedIndex];
+                            if (!opt || !opt.value) return;
+                            var id = opt.value;
+                            var name = opt.text;
+                            if (container.querySelector('input[value="' + id + '"]')) return;
+                            var inp = document.createElement('input');
+                            inp.type = 'hidden';
+                            inp.name = inputName;
+                            inp.value = id;
+                            container.appendChild(inp);
+                            var chip = document.createElement('span');
+                            chip.className = 'badge bg-primary small d-inline-flex align-items-center gap-1 py-1 px-2';
+                            chip.innerHTML = name + ' <button type="button" class="btn btn-link p-0 border-0 text-white" style="font-size:0.65rem;line-height:1" aria-label="O\'chirish">&times;</button>';
+                            chip.querySelector('button').addEventListener('click', function() {
+                                container.querySelector('input[value="' + id + '"]').remove();
+                                chip.remove();
+                            });
+                            listEl.appendChild(chip);
+                        }
+                        function clearAddLists() {
+                            ['add_department_ids_container','add_warehouse_ids_container','add_cash_register_ids_container'].forEach(function(cid) {
+                                var c = document.getElementById(cid);
+                                if (c) c.innerHTML = '';
+                            });
+                            ['add_department_list','add_warehouse_list','add_cash_register_list'].forEach(function(lid) {
+                                var l = document.getElementById(lid);
+                                if (l) l.innerHTML = '';
+                            });
+                        }
+                        document.getElementById('add_btn_department').addEventListener('click', function() { addToList('add_department_id', 'add_department_ids_container', 'add_department_list', 'department_ids'); });
+                        document.getElementById('add_btn_warehouse').addEventListener('click', function() { addToList('add_warehouse_id', 'add_warehouse_ids_container', 'add_warehouse_list', 'warehouse_ids'); });
+                        document.getElementById('add_btn_cash_register').addEventListener('click', function() { addToList('add_cash_register_id', 'add_cash_register_ids_container', 'add_cash_register_list', 'cash_register_ids'); });
+                        var addModal = document.getElementById('addUserModal');
+                        if (addModal) addModal.addEventListener('show.bs.modal', function() { clearAddLists(); });
+                    })();
                     function toggleUserFields() {
                         const role = document.getElementById('userRole').value;
                         const pwaFields = document.getElementById('pwaFields');
@@ -188,9 +288,9 @@
                         }
                     }
                 </script>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
-                    <button type="submit" class="btn btn-primary">Saqlash</button>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-sm btn-primary">Saqlash</button>
                 </div>
             </form>
         </div>
@@ -201,40 +301,89 @@
 <div class="modal fade" id="editUserModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Foydalanuvchini tahrirlash</h5>
+            <div class="modal-header py-2">
+                <h6 class="modal-title mb-0">Foydalanuvchini tahrirlash</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Yopish"></button>
             </div>
             <form method="POST" id="editUserForm">
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Login *</label>
-                        <input type="text" class="form-control" name="username" id="edit_username" required autocomplete="username">
+                <div class="modal-body py-2">
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6">
+                            <label class="form-label small mb-0">Login *</label>
+                            <input type="text" class="form-control form-control-sm" name="username" id="edit_username" required autocomplete="username">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small mb-0">To'liq ism *</label>
+                            <input type="text" class="form-control form-control-sm" name="full_name" id="edit_full_name" required>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">To'liq ism *</label>
-                        <input type="text" class="form-control" name="full_name" id="edit_full_name" required>
+                    <div class="d-flex align-items-end gap-2 mb-2">
+                        <div class="flex-grow-1">
+                            <label class="form-label small mb-0">Rol</label>
+                            <select class="form-select form-select-sm" name="role" id="edit_role">
+                                <option value="user">Foydalanuvchi</option>
+                                <option value="manager">Menejer</option>
+                                <option value="admin">Administrator</option>
+                                <option value="production">Ishlab chiqarish</option>
+                                <option value="qadoqlash">Qadoqlash</option>
+                                <option value="sotuvchi">Sotuvchi</option>
+                                <option value="agent">Agent (PWA)</option>
+                                <option value="driver">Haydovchi (PWA)</option>
+                            </select>
+                        </div>
+                        <div class="form-check form-check-inline mb-0 pb-1">
+                            <input type="checkbox" class="form-check-input" name="is_active" id="edit_is_active">
+                            <label class="form-check-label small">Faol</label>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Rol</label>
-                        <select class="form-select" name="role" id="edit_role">
-                            <option value="user">Foydalanuvchi</option>
-                            <option value="manager">Menejer</option>
-                            <option value="admin">Administrator</option>
-                            <option value="production">Ishlab chiqarish</option>
-                            <option value="qadoqlash">Qadoqlash</option>
-                            <option value="agent">Agent (PWA)</option>
-                            <option value="driver">Haydovchi (PWA)</option>
-                        </select>
-                    </div>
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" name="is_active" id="edit_is_active">
-                        <label class="form-check-label">Faol</label>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0">Bo'lim</label>
+                            <div class="d-flex gap-1">
+                                <select class="form-select form-select-sm flex-grow-1" id="edit_department_id">
+                                    <option value="">-- Tanlang --</option>
+                                    {% for d in (departments or []) %}
+                                    <option value="{{ d.id }}">{{ d.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" id="edit_btn_department" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                            </div>
+                            <div id="edit_department_ids_container"></div>
+                            <div id="edit_department_list" class="d-flex flex-wrap gap-1 mt-1"></div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0">Ombor</label>
+                            <div class="d-flex gap-1">
+                                <select class="form-select form-select-sm flex-grow-1" id="edit_warehouse_id">
+                                    <option value="">-- Tanlang --</option>
+                                    {% for w in (warehouses or []) %}
+                                    <option value="{{ w.id }}">{{ w.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" id="edit_btn_warehouse" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                            </div>
+                            <div id="edit_warehouse_ids_container"></div>
+                            <div id="edit_warehouse_list" class="d-flex flex-wrap gap-1 mt-1"></div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0">Kassa</label>
+                            <div class="d-flex gap-1">
+                                <select class="form-select form-select-sm flex-grow-1" id="edit_cash_register_id">
+                                    <option value="">-- Tanlang --</option>
+                                    {% for c in (cash_registers or []) %}
+                                    <option value="{{ c.id }}">{{ c.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" id="edit_btn_cash_register" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                            </div>
+                            <div id="edit_cash_register_ids_container"></div>
+                            <div id="edit_cash_register_list" class="d-flex flex-wrap gap-1 mt-1"></div>
+                        </div>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
-                    <button type="submit" class="btn btn-primary">Saqlash</button>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-sm btn-primary">Saqlash</button>
                 </div>
             </form>
         </div>
@@ -245,29 +394,27 @@
 <div class="modal fade" id="changePasswordModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Parolni o'zgartirish</h5>
+            <div class="modal-header py-2">
+                <h6 class="modal-title mb-0">Parolni o'zgartirish</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Yopish"></button>
             </div>
             <form method="POST" id="changePasswordForm">
                 <input type="hidden" name="username" id="change_password_username" value="" autocomplete="username" aria-hidden="true">
-                <div class="modal-body">
-                    <p>Foydalanuvchi: <strong id="password_username"></strong></p>
-                    <div class="mb-3">
-                        <label class="form-label">Yangi parol *</label>
-                        <div class="input-group">
+                <div class="modal-body py-2">
+                    <p class="small mb-2">Foydalanuvchi: <strong id="password_username"></strong></p>
+                    <div class="mb-0">
+                        <label class="form-label small mb-0">Yangi parol *</label>
+                        <div class="input-group input-group-sm">
                             <input type="password" class="form-control" name="new_password" id="new_password_input" required autocomplete="new-password" aria-label="Yangi parol">
                             {% if current_user and current_user.role == 'admin' %}
-                            <button type="button" class="btn btn-outline-secondary" onclick="togglePass(this, 'new_password_input')" title="Parolni ko'rsatish" aria-label="Parolni ko'rsatish">
-                                <i class="bi bi-eye"></i>
-                            </button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="togglePass(this, 'new_password_input')" title="Ko'rsatish" aria-label="Parolni ko'rsatish"><i class="bi bi-eye"></i></button>
                             {% endif %}
                         </div>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
-                    <button type="submit" class="btn btn-primary">Saqlash</button>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-sm btn-primary">Saqlash</button>
                 </div>
             </form>
         </div>
@@ -277,14 +424,76 @@
 
 {% block extra_js %}
 <script>
-    function editUser(id, username, fullName, role, isActive) {
+    function editUserFromBtn(btn) {
+        var id = btn.getAttribute('data-user-id');
         document.getElementById('editUserForm').action = '/info/users/edit/' + id;
-        document.getElementById('edit_username').value = username;
-        document.getElementById('edit_full_name').value = fullName;
-        document.getElementById('edit_role').value = role;
-        document.getElementById('edit_is_active').checked = isActive;
+        document.getElementById('edit_username').value = btn.getAttribute('data-username') || '';
+        document.getElementById('edit_full_name').value = btn.getAttribute('data-full-name') || '';
+        document.getElementById('edit_role').value = btn.getAttribute('data-role') || 'user';
+        document.getElementById('edit_is_active').checked = btn.getAttribute('data-active') === 'true';
+        function fillList(idsStr, namesStr, containerId, listId, inputName) {
+            var container = document.getElementById(containerId);
+            var listEl = document.getElementById(listId);
+            container.innerHTML = '';
+            listEl.innerHTML = '';
+            if (!idsStr || !namesStr) return;
+            var ids = idsStr.split(',').filter(Boolean);
+            var names = namesStr.split('|||');
+            for (var i = 0; i < ids.length; i++) {
+                var id = ids[i].trim();
+                var name = names[i] ? names[i].trim() : id;
+                var inp = document.createElement('input');
+                inp.type = 'hidden';
+                inp.name = inputName;
+                inp.value = id;
+                container.appendChild(inp);
+                var chip = document.createElement('span');
+                chip.className = 'badge bg-primary small d-inline-flex align-items-center gap-1 py-1 px-2';
+                chip.innerHTML = name + ' <button type="button" class="btn btn-link p-0 border-0 text-white" style="font-size:0.65rem;line-height:1" aria-label="O\'chirish">&times;</button>';
+                chip.querySelector('button').addEventListener('click', function() {
+                    var rid = this.getAttribute('data-id');
+                    container.querySelector('input[value="' + rid + '"]').remove();
+                    this.closest('.badge').remove();
+                });
+                chip.querySelector('button').setAttribute('data-id', id);
+                listEl.appendChild(chip);
+            }
+        }
+        fillList(btn.getAttribute('data-department-ids') || '', btn.getAttribute('data-department-names') || '', 'edit_department_ids_container', 'edit_department_list', 'department_ids');
+        fillList(btn.getAttribute('data-warehouse-ids') || '', btn.getAttribute('data-warehouse-names') || '', 'edit_warehouse_ids_container', 'edit_warehouse_list', 'warehouse_ids');
+        fillList(btn.getAttribute('data-cash-register-ids') || '', btn.getAttribute('data-cash-register-names') || '', 'edit_cash_register_ids_container', 'edit_cash_register_list', 'cash_register_ids');
         new bootstrap.Modal(document.getElementById('editUserModal')).show();
     }
+    (function() {
+        function addEditToList(selectId, containerId, listId, inputName) {
+            var sel = document.getElementById(selectId);
+            var container = document.getElementById(containerId);
+            var listEl = document.getElementById(listId);
+            if (!sel || !container || !listEl) return;
+            var opt = sel.options[sel.selectedIndex];
+            if (!opt || !opt.value) return;
+            var id = opt.value;
+            var name = opt.text;
+            if (container.querySelector('input[value="' + id + '"]')) return;
+            var inp = document.createElement('input');
+            inp.type = 'hidden';
+            inp.name = inputName;
+            inp.value = id;
+            container.appendChild(inp);
+            var chip = document.createElement('span');
+            chip.className = 'badge bg-primary small d-inline-flex align-items-center gap-1 py-1 px-2';
+            chip.innerHTML = name + ' <button type="button" class="btn btn-link p-0 border-0 text-white" style="font-size:0.65rem;line-height:1" data-id="' + id + '" aria-label="O\'chirish">&times;</button>';
+            chip.querySelector('button').addEventListener('click', function() {
+                var rid = this.getAttribute('data-id');
+                container.querySelector('input[value="' + rid + '"]').remove();
+                this.closest('.badge').remove();
+            });
+            listEl.appendChild(chip);
+        }
+        document.getElementById('edit_btn_department').addEventListener('click', function() { addEditToList('edit_department_id', 'edit_department_ids_container', 'edit_department_list', 'department_ids'); });
+        document.getElementById('edit_btn_warehouse').addEventListener('click', function() { addEditToList('edit_warehouse_id', 'edit_warehouse_ids_container', 'edit_warehouse_list', 'warehouse_ids'); });
+        document.getElementById('edit_btn_cash_register').addEventListener('click', function() { addEditToList('edit_cash_register_id', 'edit_cash_register_ids_container', 'edit_cash_register_list', 'cash_register_ids'); });
+    })();
 
     function toggleUserFields() {
         const role = document.getElementById('userRole').value;

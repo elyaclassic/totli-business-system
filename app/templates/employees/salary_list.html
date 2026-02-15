@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    {% if request.query_params.get('saved') %}
+    <div class="alert alert-success alert-dismissible fade show py-2 small">
+        <i class="bi bi-check-circle"></i> Oylik yozuvlari saqlandi.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0"><i class="bi bi-calculator"></i> Oylik hisoblash</h5>
+        <a href="/employees" class="btn btn-outline-secondary btn-sm"><i class="bi bi-person-badge"></i> Xodimlar</a>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <form method="get" action="/employees/salary" class="row g-2 align-items-end">
+                <div class="col-auto">
+                    <label class="form-label small mb-0">Oy</label>
+                    <select name="month" class="form-select form-select-sm" style="width: auto;">
+                        {% for m in range(1, 13) %}
+                        <option value="{{ m }}" {% if month == m %}selected{% endif %}>{{ m }} — {% if m == 1 %}Yanvar{% elif m == 2 %}Fevral{% elif m == 3 %}Mart{% elif m == 4 %}Aprel{% elif m == 5 %}May{% elif m == 6 %}Iyun{% elif m == 7 %}Iyul{% elif m == 8 %}Avgust{% elif m == 9 %}Sentabr{% elif m == 10 %}Oktabr{% elif m == 11 %}Noyabr{% else %}Dekabr{% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <label class="form-label small mb-0">Yil</label>
+                    <input type="number" name="year" class="form-control form-control-sm" value="{{ year }}" min="2020" max="2030" style="width: 90px;">
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-sm btn-primary">Ko'rsatish</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <span>Oylik — {{ year }}-yil {{ month }}-oy</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Xodim</th>
+                            <th class="text-end">Oylik (asos)</th>
+                            <th class="text-end">Bonus</th>
+                            <th class="text-end">Ushlab qolish</th>
+                            <th class="text-end">Avans</th>
+                            <th class="text-end">Jami</th>
+                            <th class="text-end">To'langan</th>
+                            <th>Holat</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                        <tr>
+                            <td>{{ row.employee.full_name }} <small class="text-muted">({{ row.employee.code }})</small></td>
+                            <td class="text-end">
+                                <input type="number" name="base_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:100px" step="1000" value="{{ row.base_salary }}">
+                            </td>
+                            <td class="text-end">
+                                <input type="number" name="bonus_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:90px" step="1000" value="{{ row.bonus }}">
+                            </td>
+                            <td class="text-end">
+                                <input type="number" name="deduction_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:90px" step="1000" value="{{ row.deduction }}">
+                            </td>
+                            <td class="text-end">
+                                <input type="number" name="advance_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:90px" step="1000" value="{{ row.advance_deduction }}">
+                            </td>
+                            <td class="text-end fw-bold">{{ "{:,.0f}".format(row.total) }}</td>
+                            <td class="text-end">{{ "{:,.0f}".format(row.paid) }}</td>
+                            <td>
+                                {% if row.status == 'paid' %}
+                                <span class="badge bg-success">To'langan</span>
+                                {% else %}
+                                <span class="badge bg-warning text-dark">Kutilmoqda</span>
+                                <form method="post" action="/employees/salary/mark-paid/{{ row.employee.id }}" class="d-inline">
+                                    <input type="hidden" name="year" value="{{ year }}">
+                                    <input type="hidden" name="month" value="{{ month }}">
+                                    <input type="hidden" name="paid_amount" value="{{ row.total }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-success ms-1">To'langan deb belgilash</button>
+                                </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="8" class="text-center text-muted py-4">Xodimlar yo'q.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-footer">
+            <form id="salaryForm" method="post" action="/employees/salary/save">
+                <input type="hidden" name="year" value="{{ year }}">
+                <input type="hidden" name="month" value="{{ month }}">
+                <button type="submit" class="btn btn-success"><i class="bi bi-check-lg"></i> Barcha o'zgarishlarni saqlash</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

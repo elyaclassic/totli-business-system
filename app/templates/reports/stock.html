@@ -37,7 +37,7 @@
                             {% endif %}
                         </td>
                         <td>{{ stock.warehouse.name }}</td>
-                        <td class="fw-bold">{{ "{:,.2f}".format(stock.quantity) }}</td>
+                        <td class="fw-bold">{{ "{:,.3f}".format(stock.quantity) }}</td>
                         <td>{{ stock.product.unit.code if stock.product.unit else '-' }}</td>
                         <td>{{ "{:,.0f}".format(stock.product.purchase_price or 0) }}</td>
                         <td class="text-success">{{ "{:,.0f}".format(stock.quantity * (stock.product.purchase_price or 0)) }}</td>

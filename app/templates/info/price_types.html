@@ -44,12 +44,12 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <form method="POST" action="/info/price-types/add">
-                <div class="modal-header"><h5 class="modal-title">Yangi narx turi</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-                <div class="modal-body">
-                    <div class="mb-3"><label class="form-label">Nomi *</label><input type="text" class="form-control" name="name" required placeholder="Masalan: Chakana"></div>
-                    <div class="mb-3"><label class="form-label">Kod</label><input type="text" class="form-control" name="code" placeholder="chakana (ixtiyoriy)"></div>
+                <div class="modal-header py-2"><h6 class="modal-title mb-0">Yangi narx turi</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body py-2">
+                    <div class="mb-2"><label class="form-label small mb-0">Nomi *</label><input type="text" class="form-control form-control-sm" name="name" required placeholder="Masalan: Chakana"></div>
+                    <div class="mb-2"><label class="form-label small mb-0">Kod</label><input type="text" class="form-control form-control-sm" name="code" placeholder="chakana"></div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor</button><button type="submit" class="btn btn-success">Saqlash</button></div>
+                <div class="modal-footer py-2"><button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Bekor</button><button type="submit" class="btn btn-sm btn-success">Saqlash</button></div>
             </form>
         </div>
     </div>
@@ -59,12 +59,12 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <form id="editForm" method="POST">
-                <div class="modal-header"><h5 class="modal-title">Narx turini tahrirlash</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-                <div class="modal-body">
-                    <div class="mb-3"><label class="form-label">Nomi *</label><input type="text" class="form-control" name="name" id="edit_name" required></div>
-                    <div class="mb-3"><label class="form-label">Kod</label><input type="text" class="form-control" name="code" id="edit_code"></div>
+                <div class="modal-header py-2"><h6 class="modal-title mb-0">Narx turini tahrirlash</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body py-2">
+                    <div class="mb-2"><label class="form-label small mb-0">Nomi *</label><input type="text" class="form-control form-control-sm" name="name" id="edit_name" required></div>
+                    <div class="mb-2"><label class="form-label small mb-0">Kod</label><input type="text" class="form-control form-control-sm" name="code" id="edit_code"></div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor</button><button type="submit" class="btn btn-primary">Saqlash</button></div>
+                <div class="modal-footer py-2"><button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Bekor</button><button type="submit" class="btn btn-sm btn-primary">Saqlash</button></div>
             </form>
         </div>
     </div>

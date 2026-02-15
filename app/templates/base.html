@@ -284,6 +284,14 @@
         .modal-backdrop { z-index: 1050 !important; }
         .modal-dialog, .modal-content { pointer-events: auto !important; }
 
+        /* Sotuvchi: sidebar va top-bar ko'rinmasin, kontent to'liq ekran */
+        body.pos-fullscreen .main-content {
+            margin-left: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            padding-top: 0 !important;
+        }
+
         /* MOBILE RESPONSIVE - FORCED */
         @media screen and (max-width: 768px) {
             .sidebar {
@@ -323,10 +331,12 @@
     </style>
 
     {% block extra_css %}{% endblock %}
+    {% set sotuvchi_no_sidebar = (current_user.role if current_user else '') == 'sotuvchi' %}
 </head>
 
-<body>
-    <!-- Mobile Header -->
+<body class="{% if sotuvchi_no_sidebar %}pos-fullscreen{% endif %}">
+    <!-- Sidebar va mobile header sotuvchi uchun ko'rinmasin -->
+    {% if not sotuvchi_no_sidebar %}
     <div class="mobile-header">
         <div class="hamburger" onclick="toggleSidebar()">
             <i class="bi bi-list"></i>
@@ -351,6 +361,8 @@
         {% set agent_menu = user_role in ['agent', 'driver'] %}
         {% set production_menu = user_role == 'production' %}
         {% set qadoqlash_menu = user_role == 'qadoqlash' %}
+        {% set sotuvchi_menu = user_role == 'sotuvchi' %}
+        {% set pos_fullscreen = sotuvchi_menu and page_title == 'Sotuv oynasi' %}
 
         <ul class="nav flex-column mt-3">
             <li class="nav-item">
@@ -419,6 +431,11 @@
                 <div class="collapse" id="malumotlarMenu">
                     <ul class="nav flex-column ms-3">
                         <li class="nav-item">
+                            <a class="nav-link {% if 'Bo\'limlar, Omborlar' in page_title %}active{% endif %}" href="/info/rosters">
+                                <i class="bi bi-list-ul"></i> Bo'limlar, Omborlar, Kassalar
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link {% if 'O\'lchov birliklari' in page_title %}active{% endif %}"
                                 href="/info/units">
                                 <i class="bi bi-rulers"></i> O'lchov birliklari
@@ -431,24 +448,13 @@
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link {% if 'Ombor' in page_title %}active{% endif %}" href="/info/warehouses">
-                                <i class="bi bi-building"></i> Omborlar
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if 'Kassalar' in page_title %}active{% endif %}" href="/info/cash">
-                                <i class="bi bi-cash-stack"></i> Kassalar
-                            </a>
-                        </li>
-                        <li class="nav-item">
                             <a class="nav-link {% if page_title == 'Qoldiqlar' %}active{% endif %}" href="/qoldiqlar">
                                 <i class="bi bi-wallet2"></i> Qoldiqlar
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link {% if 'Bo\'limlar' in page_title %}active{% endif %}"
-                                href="/info/departments">
-                                <i class="bi bi-diagram-3"></i> Bo'limlar
+                            <a class="nav-link {% if page_title and 'Kassadan kassaga' in page_title %}active{% endif %}" href="/cash/transfers">
+                                <i class="bi bi-bank"></i> Kassadan kassaga o'tkazish
                             </a>
                         </li>
                         <li class="nav-item">
@@ -503,8 +509,28 @@
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link {% if 'Xodimlar' in page_title %}active{% endif %}" href="/employees">
-                                <i class="bi bi-person-badge"></i> Xodimlar
+                            <a class="nav-link {% if page_title == 'Xodimlar' or page_title == 'Xodimni tahrirlash' %}active{% endif %}" href="/employees">
+                                <i class="bi bi-person-plus"></i> Ishga qabul qilish
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if page_title == 'Ishga qabul qilish hujjatlari' or (page_title and ('Ishga qabul hujjati' in page_title or page_title.startswith('Ishga qabul '))) %}active{% endif %}" href="/employees/hiring-docs">
+                                <i class="bi bi-file-earmark-person"></i> Ishga qabul hujjati
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'Kunlik tabellar' in page_title or 'Tabel' in page_title or 'Davomat' in page_title %}active{% endif %}" href="/employees/attendance">
+                                <i class="bi bi-calendar-check"></i> Kunlik tabellar
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'Avans' in page_title %}active{% endif %}" href="/employees/advances">
+                                <i class="bi bi-cash-coin"></i> Avans berish
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'Oylik hisoblash' in page_title %}active{% endif %}" href="/employees/salary">
+                                <i class="bi bi-calculator"></i> Oylik hisoblash
                             </a>
                         </li>
                         <li class="nav-item">
@@ -543,14 +569,23 @@
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link {% if 'Sotuv' in page_title %}active{% endif %}" href="/sales">
+                            <a class="nav-link {% if 'Sotuv' in page_title and 'oynasi' not in page_title %}active{% endif %}" href="/sales">
                                 <i class="bi bi-cart3"></i> Sotuvlar
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link {% if 'Ombor' in page_title and 'Omborlar' not in page_title and 'tkazish' not in page_title %}active{% endif %}"
-                                href="/warehouse">
-                                <i class="bi bi-box"></i> Ombor qoldiqlari
+                            <a class="nav-link {% if 'Sotuv oynasi' in page_title %}active{% endif %}" href="/sales/pos">
+                                <i class="bi bi-cart-check"></i> Sotuv oynasi
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if 'Savdodan qaytarish' in page_title %}active{% endif %}" href="/sales/returns">
+                                <i class="bi bi-arrow-return-left"></i> Savdodan qaytarish
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if page_title == 'Qoldiqlar' %}active{% endif %}" href="/qoldiqlar">
+                                <i class="bi bi-wallet2"></i> Qoldiqlar
                             </a>
                         </li>
                         <li class="nav-item">
@@ -638,18 +673,13 @@
                 </a>
             </li>
             <li class="nav-item">
-                <a class="nav-link {% if 'Ombor' in page_title %}active{% endif %}" href="/info/warehouses">
-                    <i class="bi bi-building"></i> Omborlar
-                </a>
-            </li>
-            <li class="nav-item">
                 <a class="nav-link {% if 'Uskunalar' in page_title %}active{% endif %}" href="/info/machines">
                     <i class="bi bi-gear-wide-connected"></i> Uskunalar
                 </a>
             </li>
             <li class="nav-item">
-                <a class="nav-link {% if 'Ombor' in page_title and 'Omborlar' not in page_title %}active{% endif %}" href="/warehouse">
-                    <i class="bi bi-box"></i> Ombor qoldiqlari
+                <a class="nav-link {% if page_title == 'Qoldiqlar' %}active{% endif %}" href="/qoldiqlar">
+                    <i class="bi bi-wallet2"></i> Qoldiqlar
                 </a>
             </li>
             <li class="nav-item">
@@ -671,18 +701,21 @@
                 </a>
             </li>
             <li class="nav-item">
-                <a class="nav-link {% if 'Ombor' in page_title %}active{% endif %}" href="/info/warehouses">
-                    <i class="bi bi-building"></i> Omborlar
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link {% if 'Ombor' in page_title and 'Omborlar' not in page_title %}active{% endif %}" href="/warehouse">
-                    <i class="bi bi-box"></i> Ombor qoldiqlari
+                <a class="nav-link {% if page_title == 'Qoldiqlar' %}active{% endif %}" href="/qoldiqlar">
+                    <i class="bi bi-wallet2"></i> Qoldiqlar
                 </a>
             </li>
             <li class="nav-item">
                 <a class="nav-link {% if 'Hisobot' in page_title %}active{% endif %}" href="/reports">
                     <i class="bi bi-bar-chart-line"></i> Hisobotlar
+                </a>
+            </li>
+
+            {% elif sotuvchi_menu %}
+            <!-- Sotuvchi uchun: faqat sotuv oynasi -->
+            <li class="nav-item mt-2">
+                <a class="nav-link {% if 'Sotuv oynasi' in page_title %}active{% endif %}" href="/sales/pos">
+                    <i class="bi bi-cart-check"></i> Sotuv oynasi
                 </a>
             </li>
 
@@ -732,10 +765,11 @@
             </small>
         </div>
     </nav>
+    {% endif %}
 
     <!-- Main Content -->
     <div class="main-content">
-        <div class="top-bar">
+        <div class="top-bar {% if sotuvchi_no_sidebar %}d-none{% endif %}">
             <h5>{{ page_title }}</h5>
             <div class="d-flex align-items-center">
                 {% if current_user %}

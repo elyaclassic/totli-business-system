@@ -62,7 +62,7 @@
                                 <tr>
                                     <td>{{ loop.index }}</td>
                                     <td>{{ item.product.name if item.product else '-' }}</td>
-                                    <td>{{ item.quantity }}</td>
+                                    <td>{{ "{:,.3f}".format(item.quantity or 0) }}</td>
                                     <td>{{ "{:,.0f}".format(item.price) }} so'm</td>
                                     <td><strong>{{ "{:,.0f}".format(item.total) }} so'm</strong></td>
                                     {% if order.status == 'draft' %}

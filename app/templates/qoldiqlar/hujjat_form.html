@@ -4,6 +4,19 @@
 <style>
     .product-results { box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #dee2e6; border-radius: 0.25rem; margin-top: 2px; background: white; }
     .product-results .list-group-item:hover { background-color: #f8f9fa; cursor: pointer; }
+    /* Jadval ixcham va simmetrik, hajmi o‘rtacha */
+    .table-compact { font-size: 0.875rem; table-layout: fixed; width: 100%; }
+    .table-compact th, .table-compact td { padding: 0.35rem 0.5rem; vertical-align: middle; }
+    .table-compact .form-control, .table-compact .form-select { font-size: 0.875rem; padding: 0.25rem 0.5rem; min-height: 1.9rem; height: 1.9rem; box-sizing: border-box; }
+    .table-compact input[type="number"] { min-width: 0; width: 100%; max-width: 100%; white-space: nowrap; }
+    .table-compact select { min-width: 0; width: 100%; max-width: 100%; }
+    .table-compact .btn { padding: 0.2rem 0.4rem; font-size: 0.875rem; }
+    .table-compact .col-tovar { width: 180px; min-width: 180px; max-width: 180px; word-wrap: break-word; overflow-wrap: break-word; }
+    .table-compact .col-number { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+    .table-compact td.text-end .row-sum-tannarx,
+    .table-compact td.text-end .row-sum-sotuv { white-space: nowrap; display: inline-block; }
+    .hujjat-doc-info .row { margin-bottom: 0.25rem; }
+    .hujjat-doc-info p { margin-bottom: 0.2rem; font-size: 0.875rem; }
 </style>
 
 <div class="container-fluid">
@@ -12,8 +25,8 @@
     </div>
 
     <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="mb-0">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <h5 class="mb-0" style="font-size: 1.1rem;">
                 {% if doc %}
                 Tovar qoldiqlari {{ doc.number }} ({{ doc.date.strftime('%d.%m.%Y %H:%M') if doc.date else '-' }})
                 {% else %}
@@ -35,88 +48,102 @@
             </form>
             {% endif %}
         </div>
-        <div class="card-body">
+        <div class="card-body py-2">
             {% if doc %}
-            <div class="row mb-3">
+            <div class="row hujjat-doc-info mb-2">
                 <div class="col-md-6">
-                    <p class="mb-1"><strong>Hujjat raqami:</strong> <span class="badge bg-primary">{{ doc.number }}</span></p>
-                    <p class="mb-1"><strong>Sana:</strong> {{ doc.date.strftime('%d.%m.%Y %H:%M') if doc.date else '-' }}</p>
-                    <p class="mb-1"><strong>Foydalanuvchi:</strong> {{ doc.user.full_name or doc.user.username if doc.user else '-' }}</p>
+                    <p class="mb-0"><strong>Hujjat raqami:</strong> <span class="badge bg-primary">{{ doc.number }}</span> &nbsp; <strong>Sana:</strong> {{ doc.date.strftime('%d.%m.%Y %H:%M') if doc.date else '-' }} &nbsp; <strong>Foydalanuvchi:</strong> {{ doc.user.full_name or doc.user.username if doc.user else '-' }}</p>
                 </div>
                 <div class="col-md-6">
-                    <p class="mb-1"><strong>Holat:</strong> 
-                        {% if doc.status == 'draft' %}
-                        <span class="badge bg-warning text-dark">Qoralama</span>
-                        {% else %}
-                        <span class="badge bg-success">Tasdiqlangan</span>
-                        {% endif %}
-                    </p>
-                    <p class="mb-1"><strong>Jami summa tannarx:</strong> <span class="text-success fw-bold">{{ "{:,.0f}".format(doc.total_tannarx or 0) }}</span> so'm</p>
-                    <p class="mb-1"><strong>Jami sotuv summa:</strong> <span class="text-primary fw-bold">{{ "{:,.0f}".format(doc.total_sotuv or 0) }}</span> so'm</p>
+                    <p class="mb-0"><strong>Holat:</strong> {% if doc.status == 'draft' %}<span class="badge bg-warning text-dark">Qoralama</span>{% else %}<span class="badge bg-success">Tasdiqlangan</span>{% endif %}
+                    &nbsp; <strong>Jami tannarx:</strong> <span class="text-success fw-bold">{{ "{:,.0f}".format(doc.total_tannarx or 0) }}</span> so'm
+                    &nbsp; <strong>Jami sotuv:</strong> <span class="text-primary fw-bold">{{ "{:,.0f}".format(doc.total_sotuv or 0) }}</span> so'm</p>
                 </div>
             </div>
-            <hr>
+            <hr class="my-2">
             {% endif %}
 
             {% if doc %}
-            <!-- Mavjud qatorlar - 1C uslubida -->
-            <div class="mb-3">
-                <h6 class="mb-2"><i class="bi bi-list-ul"></i> Hujjat qatorlari ({{ doc.items|length }} ta)</h6>
+            <div class="mb-1 d-flex flex-wrap align-items-center gap-2">
+                <h6 class="mb-0 small"><i class="bi bi-list-ul"></i> Hujjat qatorlari ({{ doc.items|length }} ta)</h6>
+                <input type="text" class="form-control form-control-sm hujjat-row-search" placeholder="Tovar nomi bo'yicha qidirish (masalan: alpen gold plitka)..." style="max-width: 280px;" autocomplete="off">
+                <span class="small text-muted hujjat-search-count"></span>
             </div>
-            <div class="table-responsive mb-4">
-                <table class="table table-sm table-bordered table-hover" style="font-size: 0.9rem;">
+            <div class="table-responsive mb-3">
+                <table class="table table-sm table-bordered table-hover table-compact">
                     <thead class="table-light">
                         <tr>
                             <th style="width: 40px;" class="text-center">№</th>
-                            <th>Tovar</th>
-                            <th style="width: 150px;">Ombor</th>
-                            <th style="width: 100px;" class="text-end">Qoldiq</th>
-                            <th style="width: 120px;" class="text-end">Tannarx (so'm)</th>
-                            <th style="width: 140px;" class="text-end">Summa tannarx</th>
-                            <th style="width: 120px;" class="text-end">Sotuv narx (so'm)</th>
-                            <th style="width: 140px;" class="text-end">Sotuv summa</th>
-                            {% if doc.status == 'draft' %}<th style="width: 60px;" class="text-center">Amal</th>{% endif %}
+                            <th class="col-tovar">Tovar</th>
+                            <th style="width: 135px;">Ombor</th>
+                            <th style="width: 88px;" class="text-end">Qoldiq</th>
+                            <th style="width: 98px;" class="text-end">Tannarx</th>
+                            <th style="width: 108px;" class="text-end">Summa tann.</th>
+                            <th style="width: 98px;" class="text-end">Sotuv narx</th>
+                            <th style="width: 108px;" class="text-end">Sotuv summa</th>
+                            {% if doc.status == 'draft' %}<th style="width: 64px;" class="text-center">Amal</th>{% endif %}
                         </tr>
                     </thead>
                     <tbody>
                         {% for item in doc.items %}
-                        <tr>
+                        <tr class="hujjat-data-row {% if doc.status == 'draft' %}edit-row{% endif %}" data-item-id="{{ item.id }}" data-search="{{ (item.product.name if item.product else '')|lower }} {{ (item.product.code or '')|lower }} {{ (item.quantity)|string|lower }} {{ (item.warehouse.name if item.warehouse else '')|lower }}">
                             <td class="text-center">{{ loop.index }}</td>
-                            <td>
+                            <td class="small col-tovar">
                                 <strong>{{ item.product.name if item.product else '-' }}</strong>
                                 {% if item.product and (item.product.code or item.product.barcode) %}
-                                <br><small class="text-muted"><code>{{ item.product.code or item.product.barcode }}</code></small>
+                                <br><span class="text-muted" style="font-size: 0.75rem;"><code>{{ item.product.code or item.product.barcode }}</code></span>
                                 {% endif %}
                                 {% if item.product and item.product.unit %}
-                                <br><small class="text-muted">{{ item.product.unit.name }}</small>
+                                <br><span class="text-muted" style="font-size: 0.75rem;">{{ item.product.unit.name }}</span>
                                 {% endif %}
                             </td>
-                            <td>{{ item.warehouse.name if item.warehouse else '-' }}</td>
-                            <td class="text-end fw-bold">{{ "{:,.2f}".format(item.quantity) }}</td>
-                            <td class="text-end">{{ "{:,.0f}".format(item.cost_price or 0) }}</td>
-                            <td class="text-end"><strong class="text-success">{{ "{:,.0f}".format((item.quantity or 0) * (item.cost_price or 0)) }}</strong></td>
-                            <td class="text-end">{{ "{:,.0f}".format(item.sale_price or 0) }}</td>
-                            <td class="text-end"><strong class="text-primary">{{ "{:,.0f}".format((item.quantity or 0) * (item.sale_price or 0)) }}</strong></td>
                             {% if doc.status == 'draft' %}
+                            <td>
+                                <select form="edit-form-{{ item.id }}" name="warehouse_id" class="form-select form-select-sm" required>
+                                    {% for wh in warehouses %}
+                                    <option value="{{ wh.id }}" {% if item.warehouse_id == wh.id %}selected{% endif %}>{{ wh.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td class="text-end col-number">
+                                <input form="edit-form-{{ item.id }}" type="number" name="quantity" class="form-control form-control-sm text-end" step="0.001" min="0.001" required value="{{ item.quantity }}">
+                            </td>
+                            <td class="text-end col-number">
+                                <input form="edit-form-{{ item.id }}" type="number" name="cost_price" class="form-control form-control-sm text-end row-cost" step="0.01" min="0" value="{{ item.cost_price or 0 }}">
+                            </td>
+                            <td class="text-end col-number"><strong class="text-success row-sum-tannarx">{{ "{:,.0f}".format((item.quantity or 0) * (item.cost_price or 0)) }}</strong></td>
+                            <td class="text-end col-number">
+                                <input form="edit-form-{{ item.id }}" type="number" name="sale_price" class="form-control form-control-sm text-end row-sale" step="0.01" min="0" value="{{ item.sale_price or 0 }}">
+                            </td>
+                            <td class="text-end col-number"><strong class="text-primary row-sum-sotuv">{{ "{:,.0f}".format((item.quantity or 0) * (item.sale_price or 0)) }}</strong></td>
                             <td class="text-center">
+                                <form id="edit-form-{{ item.id }}" method="post" action="/qoldiqlar/tovar/hujjat/{{ doc.id }}/edit-row/{{ item.id }}" class="d-inline"></form>
+                                <button type="submit" form="edit-form-{{ item.id }}" class="btn btn-sm btn-success py-0 px-1" title="Saqlash"><i class="bi bi-check-lg"></i></button>
                                 <form method="post" action="/qoldiqlar/tovar/hujjat/{{ doc.id }}/delete-row/{{ item.id }}" class="d-inline" onsubmit="return confirm('Ushbu qatorni o\'chirishni xohlaysizmi?');">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="O'chirish"><i class="bi bi-trash"></i></button>
+                                    <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1" title="O'chirish"><i class="bi bi-trash"></i></button>
                                 </form>
                             </td>
+                            {% else %}
+                            <td>{{ item.warehouse.name if item.warehouse else '-' }}</td>
+                            <td class="text-end fw-bold col-number">{{ "{:,.3f}".format(item.quantity) }}</td>
+                            <td class="text-end col-number">{{ "{:,.0f}".format(item.cost_price or 0) }}</td>
+                            <td class="text-end col-number"><strong class="text-success">{{ "{:,.0f}".format((item.quantity or 0) * (item.cost_price or 0)) }}</strong></td>
+                            <td class="text-end col-number">{{ "{:,.0f}".format(item.sale_price or 0) }}</td>
+                            <td class="text-end col-number"><strong class="text-primary">{{ "{:,.0f}".format((item.quantity or 0) * (item.sale_price or 0)) }}</strong></td>
                             {% endif %}
                         </tr>
                         {% else %}
                         <tr><td colspan="{% if doc.status == 'draft' %}9{% else %}8{% endif %}" class="text-muted text-center py-4">Hozircha qatorlar yo'q.</td></tr>
                         {% endfor %}
                         {% if doc.items %}
-                        <tr class="table-info fw-bold">
-                            <td colspan="3" class="text-end">JAMI:</td>
-                            <td class="text-end">{{ "{:,.2f}".format(doc.items|sum(attribute='quantity')) }}</td>
-                            <td colspan="1"></td>
-                            <td class="text-end">{{ "{:,.0f}".format(doc.total_tannarx or 0) }}</td>
-                            <td colspan="1"></td>
-                            <td class="text-end">{{ "{:,.0f}".format(doc.total_sotuv or 0) }}</td>
-                            {% if doc.status == 'draft' %}<td></td>{% endif %}
+                        <tr class="table-info fw-bold table-compact hujjat-jami-row">
+                            <td colspan="3" class="text-end py-1">JAMI:</td>
+                            <td class="text-end py-1 col-number">{{ "{:,.3f}".format(doc.items|sum(attribute='quantity')) }}</td>
+                            <td class="py-1"></td>
+                            <td class="text-end py-1 col-number">{{ "{:,.0f}".format(doc.total_tannarx or 0) }}</td>
+                            <td class="py-1"></td>
+                            <td class="text-end py-1 col-number">{{ "{:,.0f}".format(doc.total_sotuv or 0) }}</td>
+                            {% if doc.status == 'draft' %}<td class="py-1"></td>{% endif %}
                         </tr>
                         {% endif %}
                     </tbody>
@@ -222,10 +249,30 @@
 
 <script>
 (function() {
+    // Inline qator: soni / tannarx / sotuv narx o'zgarganda summalarni yangilash
+    document.querySelectorAll('tr.edit-row').forEach(function(tr) {
+        var qtyInput = tr.querySelector('input[name="quantity"]');
+        var costInput = tr.querySelector('input[name="cost_price"]');
+        var saleInput = tr.querySelector('input[name="sale_price"]');
+        var sumTannarx = tr.querySelector('.row-sum-tannarx');
+        var sumSotuv = tr.querySelector('.row-sum-sotuv');
+        function formatNum(n) { return (Math.round(n) || 0).toLocaleString('uz-UZ'); }
+        function updateSums() {
+            var q = parseFloat(qtyInput && qtyInput.value) || 0;
+            var c = parseFloat(costInput && costInput.value) || 0;
+            var s = parseFloat(saleInput && saleInput.value) || 0;
+            if (sumTannarx) sumTannarx.textContent = formatNum(q * c);
+            if (sumSotuv) sumSotuv.textContent = formatNum(q * s);
+        }
+        if (qtyInput) qtyInput.addEventListener('input', updateSums);
+        if (costInput) costInput.addEventListener('input', updateSums);
+        if (saleInput) saleInput.addEventListener('input', updateSums);
+    });
+
     const productList = document.getElementById('product_list') || document.getElementById('add_row_product_list');
-    if (!productList) return;
 
     function filterProducts(term) {
+        if (!productList || !productList.options) return [];
         term = (term || '').trim().toLowerCase();
         if (!term) return [];
         return Array.from(productList.options).filter(function(opt) {
@@ -363,6 +410,33 @@
         if (ev.target.closest('.product-search') || ev.target.closest('.product-results')) return;
         document.querySelectorAll('.product-results').forEach(function(el) { el.style.display = 'none'; });
     });
+
+    // Hujjat qatorlari bo'yicha qidiruv (tovar nomi, kod, miqdor, ombor) — tasdiqlangan va qoralama hujjatlar uchun
+    var rowSearch = document.querySelector('.hujjat-row-search');
+    var searchCount = document.querySelector('.hujjat-search-count');
+    var dataRows = document.querySelectorAll('tr.hujjat-data-row');
+    var jamiRow = document.querySelector('tr.hujjat-jami-row');
+    if (rowSearch) {
+        function applyRowSearch() {
+            var q = (rowSearch.value || '').trim().toLowerCase();
+            var visible = 0;
+            if (dataRows && dataRows.length) {
+                dataRows.forEach(function(tr) {
+                    var text = (tr.getAttribute('data-search') || '').toLowerCase();
+                    var show = !q || text.indexOf(q) !== -1;
+                    tr.style.display = show ? '' : 'none';
+                    if (show) visible++;
+                });
+            }
+            if (searchCount) {
+                if (q) searchCount.textContent = visible + ' ta topildi';
+                else searchCount.textContent = '';
+            }
+            if (jamiRow) jamiRow.style.display = '';
+        }
+        rowSearch.addEventListener('input', applyRowSearch);
+        rowSearch.addEventListener('keyup', applyRowSearch);
+    }
 })();
 </script>
 {% endblock %}
