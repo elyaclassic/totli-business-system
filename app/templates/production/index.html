@@ -29,7 +29,7 @@
             <div class="d-flex justify-content-between">
                 <div>
                     <p>Bugun ishlab chiqarildi</p>
-                    <h3>{{ "%.1f"|format(today_quantity) }} kg</h3>
+                    <h3>{{ "%.1f"|format(today_quantity or 0) }} kg</h3>
                 </div>
                 <div class="icon green">
                     <i class="bi bi-box-seam"></i>
@@ -171,7 +171,7 @@
                             </td>
                             <td>
                                 {% set _unit = (prod.recipe.product.unit.name if prod.recipe and prod.recipe.product and prod.recipe.product.unit else 'kg') %}
-                                {{ "%.1f"|format(prod.quantity) }} {{ _unit }}{% if _unit|lower != 'kg' and prod.recipe and prod.recipe.output_quantity %} <span class="text-muted small">({{ "%.1f"|format(prod.quantity * (prod.recipe.output_quantity or 1)) }} kg)</span>{% endif %}
+                                {{ "%.2f"|format(prod.quantity or 0) }} {{ _unit }}{% if _unit|lower != 'kg' and prod.recipe and prod.recipe.output_quantity %} <span class="text-muted small">({{ "%.2f"|format(prod.quantity * (prod.recipe.output_quantity or 1)) }} kg)</span>{% endif %}
                             </td>
                             <td>{{ prod.date.strftime('%d.%m.%Y %H:%M') if prod.date else '-' }}</td>
                             <td>

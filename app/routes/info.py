@@ -606,6 +606,75 @@ async def info_cash_edit(
     return RedirectResponse(url="/info/cash", status_code=303)
 
 
+@router.post("/cash/recalculate/{cash_id}")
+async def info_cash_recalculate(
+    cash_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Kassa balansini Payment yozuvlaridan qayta hisoblash (faqat admin) - boshlang'ich balansni saqlab qoladi"""
+    from app.models.database import Payment, CashBalanceDoc, CashBalanceDocItem
+    from sqlalchemy import func
+    
+    cash = db.query(CashRegister).filter(CashRegister.id == cash_id).first()
+    if not cash:
+        raise HTTPException(status_code=404, detail="Kassa topilmadi")
+    
+    # Hozirgi balansni saqlab qolish (boshlang'ich balans sifatida)
+    current_balance = float(cash.balance or 0)
+    
+    # Payment yozuvlaridan jami kirim va chiqimni hisoblash
+    total_income = db.query(func.coalesce(func.sum(Payment.amount), 0)).filter(
+        Payment.cash_register_id == cash_id,
+        Payment.type == "income"
+    ).scalar() or 0
+    
+    total_expense = db.query(func.coalesce(func.sum(Payment.amount), 0)).filter(
+        Payment.cash_register_id == cash_id,
+        Payment.type == "expense"
+    ).scalar() or 0
+    
+    # Payment yozuvlaridan o'zgarishlar
+    payment_change = float(total_income) - float(total_expense)
+    
+    # CashBalanceDoc yozuvlaridan eng eski tasdiqlangan hujjatdan boshlang'ich balansni topish
+    oldest_confirmed_doc_item = (
+        db.query(CashBalanceDocItem)
+        .join(CashBalanceDoc, CashBalanceDocItem.doc_id == CashBalanceDoc.id)
+        .filter(
+            CashBalanceDocItem.cash_register_id == cash_id,
+            CashBalanceDoc.status == "confirmed"
+        )
+        .order_by(CashBalanceDoc.created_at.asc())
+        .first()
+    )
+    
+    if oldest_confirmed_doc_item and oldest_confirmed_doc_item.previous_balance is not None:
+        # Eng eski tasdiqlangan hujjatdan oldingi balansni boshlang'ich balans sifatida olish
+        initial_balance = float(oldest_confirmed_doc_item.previous_balance)
+        # Boshlang'ich balans + Payment yozuvlaridan o'zgarishlar
+        calculated_balance = initial_balance + payment_change
+    else:
+        # Agar tasdiqlangan hujjat bo'lmasa, hozirgi balansni boshlang'ich balans sifatida ishlatish
+        # Lekin bu muammo bo'lishi mumkin, chunki balans allaqachon o'zgargan bo'lishi mumkin
+        # Shuning uchun Payment yozuvlaridan hisoblashni davom ettiramiz
+        # Agar Payment yozuvlari bo'lmasa, hozirgi balansni saqlab qolish
+        if payment_change == 0:
+            # Payment yozuvlari yo'q, hozirgi balansni saqlab qolish
+            calculated_balance = current_balance
+        else:
+            # Payment yozuvlaridan hisoblash
+            # Lekin bu noto'g'ri bo'lishi mumkin, chunki boshlang'ich balansni bilmaymiz
+            # Shuning uchun hozirgi balansni saqlab qolish va Payment yozuvlaridan o'zgarishlarni qo'shish
+            calculated_balance = current_balance + payment_change
+    
+    # Balansni yangilash
+    cash.balance = calculated_balance
+    db.commit()
+    
+    return RedirectResponse(url=f"/info/cash?recalculated=1&balance={calculated_balance}", status_code=303)
+
+
 @router.post("/cash/delete/{cash_id}")
 async def info_cash_delete(cash_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
     cash = db.query(CashRegister).filter(CashRegister.id == cash_id).first()

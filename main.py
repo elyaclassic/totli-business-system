@@ -2171,19 +2171,9 @@ async def qoldiqlar_page(request: Request, db: Session = Depends(get_db), curren
     })
 
 
-@app.post("/qoldiqlar/kassa/{cash_id}")
-async def qoldiqlar_kassa_save(
-    cash_id: int,
-    balance: float = Form(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Kassa qoldig'ini yangilash (eski tezkor forma uchun qolgan)"""
-    cash = db.query(CashRegister).filter(CashRegister.id == cash_id).first()
-    if not cash:
-        raise HTTPException(status_code=404, detail="Kassa topilmadi")
-    cash.balance = balance
-    db.commit()
+@app.get("/qoldiqlar/kassa/hujjat")
+async def qoldiqlar_kassa_hujjat_list_redirect(db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
+    """Kassa hujjatlar ro'yxati — asl ro'yxat qoldiqlar sahifasida (#kassa), shu yerga yo'naltiramiz."""
     return RedirectResponse(url="/qoldiqlar#kassa", status_code=303)
 
 
@@ -2323,13 +2313,42 @@ async def qoldiqlar_kassa_hujjat_delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Kassa hujjatini o'chirish (faqat qoralama, faqat admin)"""
+    """Kassa hujjatini o'chirish (faqat admin): draft -> o'chirish, confirmed -> CashRegister balansini qaytarish va o'chirish"""
     doc = db.query(CashBalanceDoc).filter(CashBalanceDoc.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
-    if doc.status != "draft":
-        raise HTTPException(status_code=400, detail="Faqat qoralama holatidagi hujjatni o'chirish mumkin. Avval tasdiqni bekor qiling.")
-    db.delete(doc)
+    if doc.status == "draft":
+        # Qoralama holatida: to'g'ridan-to'g'ri o'chirish
+        db.delete(doc)
+        db.commit()
+        return RedirectResponse(url="/qoldiqlar#kassa", status_code=303)
+    elif doc.status == "confirmed":
+        # Tasdiqlangan holatida: CashRegister balanslarini qaytarish va o'chirish
+        for item in doc.items:
+            cash_register = db.query(CashRegister).filter(CashRegister.id == item.cash_register_id).first()
+            if cash_register and item.previous_balance is not None:
+                # Oldingi balansni qaytarish
+                cash_register.balance = item.previous_balance
+        # Hujjatni o'chirish
+        db.delete(doc)
+        db.commit()
+        return RedirectResponse(url="/qoldiqlar#kassa?deleted=1", status_code=303)
+    else:
+        raise HTTPException(status_code=400, detail="Faqat qoralama yoki tasdiqlangan hujjatni o'chirish mumkin.")
+
+
+@app.post("/qoldiqlar/kassa/{cash_id}")
+async def qoldiqlar_kassa_save(
+    cash_id: int,
+    balance: float = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Kassa qoldig'ini yangilash (eski tezkor forma uchun qolgan)"""
+    cash = db.query(CashRegister).filter(CashRegister.id == cash_id).first()
+    if not cash:
+        raise HTTPException(status_code=404, detail="Kassa topilmadi")
+    cash.balance = balance
     db.commit()
     return RedirectResponse(url="/qoldiqlar#kassa", status_code=303)
 
@@ -2532,6 +2551,12 @@ async def cash_transfer_delete(
 
 
 # --- Kontragent qoldiq HUJJATLARI (1C uslubida) ---
+@app.get("/qoldiqlar/kontragent/hujjat")
+async def qoldiqlar_kontragent_hujjat_list_redirect(db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
+    """Kontragent hujjatlar ro'yxati — qoldiqlar sahifasida #kontragent."""
+    return RedirectResponse(url="/qoldiqlar#kontragent", status_code=303)
+
+
 @app.get("/qoldiqlar/kontragent/hujjat/new", response_class=HTMLResponse)
 async def qoldiqlar_kontragent_hujjat_new(
     request: Request,
@@ -2595,6 +2620,105 @@ async def qoldiqlar_kontragent_hujjat_create(
         db.add(PartnerBalanceDocItem(doc_id=doc.id, partner_id=pid, balance=bal))
     db.commit()
     return RedirectResponse(url=f"/qoldiqlar/kontragent/hujjat/{doc.id}", status_code=303)
+
+
+@app.get("/qoldiqlar/kontragent/andoza")
+async def qoldiqlar_kontragent_andoza(db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
+    """Kontragent qoldiqlari Excel andozasi."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Kontragent"
+    ws.append(["Kontragent nomi (yoki kodi)", "Balans (so'm)"])
+    for c in range(1, 3):
+        ws.cell(row=1, column=c).font = openpyxl.styles.Font(bold=True)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return Response(
+        buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=kontragent_qoldiq_andoza.xlsx"},
+    )
+
+
+@app.post("/qoldiqlar/kontragent/import-excel")
+async def qoldiqlar_kontragent_import_excel(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Exceldan kontragent qoldiqlarini yuklash — hujjat qoralama holatida yaratiladi, tasdiqlashdan keyin balanslar yangilanadi."""
+    from urllib.parse import quote
+    form = await request.form()
+    file = form.get("file") or form.get("excel_file")
+    if not file or not getattr(file, "filename", None):
+        return RedirectResponse(url="/qoldiqlar?error=import&detail=" + quote("Excel fayl tanlang") + "#kontragent", status_code=303)
+    try:
+        contents = await file.read()
+        if not contents:
+            return RedirectResponse(url="/qoldiqlar?error=import&detail=" + quote("Fayl bo'sh") + "#kontragent", status_code=303)
+        wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=False, data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(min_row=2, values_only=True))
+    except Exception as e:
+        return RedirectResponse(url="/qoldiqlar?error=import&detail=" + quote(str(e)[:120]) + "#kontragent", status_code=303)
+    items_data = []
+    missing = []
+    for row in rows:
+        if not row or (row[0] is None and (len(row) < 2 or row[1] is None)):
+            continue
+        key = str(row[0] or "").strip() if len(row) > 0 else ""
+        if not key:
+            continue
+        try:
+            bal = float(row[1]) if len(row) > 1 and row[1] is not None and str(row[1]).strip() != "" else 0.0
+        except (TypeError, ValueError):
+            bal = 0.0
+        partner = (
+            db.query(Partner)
+            .filter(
+                Partner.is_active == True,
+                or_(
+                    and_(Partner.name.isnot(None), func.lower(func.trim(Partner.name)) == key.lower()),
+                    and_(Partner.code.isnot(None), func.lower(func.trim(Partner.code)) == key.lower()),
+                ),
+            )
+            .first()
+        )
+        if not partner and key:
+            partner = (
+                db.query(Partner)
+                .filter(Partner.is_active == True, Partner.name.isnot(None), func.lower(Partner.name).contains(key.lower()))
+                .first()
+            )
+        if not partner:
+            if key not in missing:
+                missing.append(key)
+            continue
+        items_data.append((partner.id, bal))
+    if not items_data:
+        detail = "Hech qanday to'g'ri qator topilmadi."
+        if missing:
+            detail += " Topilmadi: " + ", ".join(missing[:10])
+        return RedirectResponse(url="/qoldiqlar?error=import&detail=" + quote(detail) + "#kontragent", status_code=303)
+    today = datetime.now()
+    count = db.query(PartnerBalanceDoc).filter(
+        PartnerBalanceDoc.date >= today.replace(hour=0, minute=0, second=0)
+    ).count()
+    number = f"KNT-{today.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
+    doc = PartnerBalanceDoc(
+        number=number,
+        date=today,
+        user_id=current_user.id if current_user else None,
+        status="draft",
+    )
+    db.add(doc)
+    db.flush()
+    for pid, bal in items_data:
+        db.add(PartnerBalanceDocItem(doc_id=doc.id, partner_id=pid, balance=bal))
+    db.commit()
+    msg = quote("Hujjat qoralama. Balanslarni yangilash uchun «Tasdiqlash» bosing.")
+    return RedirectResponse(url=f"/qoldiqlar/kontragent/hujjat/{doc.id}?from=import&msg={msg}", status_code=303)
 
 
 @app.get("/qoldiqlar/kontragent/hujjat/{doc_id}", response_class=HTMLResponse)
@@ -2669,15 +2793,29 @@ async def qoldiqlar_kontragent_hujjat_delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Kontragent hujjatini o'chirish (faqat qoralama, faqat admin)"""
+    """Kontragent hujjatini o'chirish (faqat admin): draft -> o'chirish, confirmed -> Partner balansini qaytarish va o'chirish"""
     doc = db.query(PartnerBalanceDoc).filter(PartnerBalanceDoc.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
-    if doc.status != "draft":
-        raise HTTPException(status_code=400, detail="Faqat qoralama holatidagi hujjatni o'chirish mumkin. Avval tasdiqni bekor qiling.")
-    db.delete(doc)
-    db.commit()
-    return RedirectResponse(url="/qoldiqlar#kontragent", status_code=303)
+    
+    if doc.status == "draft":
+        # Qoralama holatida: to'g'ridan-to'g'ri o'chirish
+        db.delete(doc)
+        db.commit()
+        return RedirectResponse(url="/qoldiqlar#kontragent", status_code=303)
+    elif doc.status == "confirmed":
+        # Tasdiqlangan holatida: Partner balansini qaytarish va o'chirish
+        if doc.partner_id:
+            partner = db.query(Partner).filter(Partner.id == doc.partner_id).first()
+            if partner and doc.previous_balance is not None:
+                # Oldingi balansni qaytarish
+                partner.balance = doc.previous_balance
+        # Hujjatni o'chirish
+        db.delete(doc)
+        db.commit()
+        return RedirectResponse(url="/qoldiqlar#kontragent?deleted=1", status_code=303)
+    else:
+        raise HTTPException(status_code=400, detail="Faqat qoralama yoki tasdiqlangan hujjatni o'chirish mumkin.")
 
 
 @app.post("/qoldiqlar/tovar")
@@ -2877,6 +3015,14 @@ async def qoldiqlar_tovar_import_excel(
     file = form.get("file") or form.get("excel_file")
     if not file or not getattr(file, "filename", None):
         return RedirectResponse(url="/qoldiqlar?error=import&detail=" + quote("Excel fayl tanlang") + "#tovar", status_code=303)
+    doc_date_str = (form.get("doc_date") or "").strip()
+    try:
+        if doc_date_str:
+            doc_date = datetime.strptime(doc_date_str, "%Y-%m-%d").replace(hour=23, minute=59, second=0, microsecond=0)
+        else:
+            doc_date = datetime.now()
+    except ValueError:
+        doc_date = datetime.now()
     try:
         contents = await file.read()
         if not contents:
@@ -2956,16 +3102,18 @@ async def qoldiqlar_tovar_import_excel(
                 url="/qoldiqlar?error=import&detail=" + quote(detail) + "#tovar",
                 status_code=303,
             )
-        today = datetime.now()
+        doc_date_start = doc_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        doc_date_end = doc_date_start + timedelta(days=1)
         count = db.query(StockAdjustmentDoc).filter(
-            StockAdjustmentDoc.date >= today.replace(hour=0, minute=0, second=0)
+            StockAdjustmentDoc.date >= doc_date_start,
+            StockAdjustmentDoc.date < doc_date_end,
         ).count()
-        number = f"QLD-{today.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
+        number = f"QLD-{doc_date.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
         total_tannarx = sum(qty * cp for _, _, qty, cp, _ in items_data)
         total_sotuv = sum(qty * sp for _, _, qty, _, sp in items_data)
         doc = StockAdjustmentDoc(
             number=number,
-            date=today,
+            date=doc_date,
             user_id=current_user.id if current_user else None,
             status="draft",
             total_tannarx=total_tannarx,
@@ -3086,6 +3234,267 @@ async def qoldiqlar_tovar_hujjat_delete_row(
     return RedirectResponse(url=f"/qoldiqlar/tovar/hujjat/{doc_id}", status_code=303)
 
 
+@app.post("/qoldiqlar/tovar/hujjat/{doc_id}/update-date")
+async def qoldiqlar_tovar_hujjat_update_date(
+    doc_id: int,
+    date: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Hujjat sanasini yangilash (faqat qoralama) - hujjat raqamini ham yangilaydi"""
+    doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Hujjat topilmadi")
+    if doc.status != "draft":
+        raise HTTPException(status_code=400, detail="Faqat qoralama holatidagi hujjatning sanasini o'zgartirish mumkin")
+    
+    try:
+        # datetime-local format: "YYYY-MM-DDTHH:MM"
+        new_date = datetime.strptime(date, "%Y-%m-%dT%H:%M")
+        old_date = doc.date
+        
+        # Hujjat raqamidagi sanani tekshirish va yangilash
+        # Hujjat raqami format: QLD-YYYYMMDD-NNNN
+        current_number_date = None
+        if doc.number and len(doc.number) >= 12:
+            try:
+                # QLD-YYYYMMDD-NNNN formatidan sanani ajratish
+                parts = doc.number.split('-')
+                if len(parts) >= 2:
+                    date_str = parts[1]  # YYYYMMDD
+                    if len(date_str) == 8:
+                        current_number_date = datetime.strptime(date_str, "%Y%m%d").date()
+            except (ValueError, IndexError):
+                pass
+        
+        # Agar sana o'zgarsa yoki hujjat raqamidagi sana yangi sanadan farq qilsa, yangilash
+        should_update_number = False
+        if old_date:
+            if old_date.date() != new_date.date():
+                should_update_number = True
+        else:
+            should_update_number = True
+        
+        # Hujjat raqamidagi sana yangi sanadan farq qilsa ham yangilash
+        if current_number_date and current_number_date != new_date.date():
+            should_update_number = True
+        
+        if should_update_number:
+            # Yangi sanadan hujjatlar sonini hisoblash
+            new_date_start = new_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            count = db.query(StockAdjustmentDoc).filter(
+                StockAdjustmentDoc.date >= new_date_start,
+                StockAdjustmentDoc.id != doc_id  # O'zini hisobga olmaslik
+            ).count()
+            # Yangi hujjat raqamini yaratish
+            new_number = f"QLD-{new_date.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
+            
+            # Hujjat raqami unique bo'lishi kerak, tekshirish
+            existing = db.query(StockAdjustmentDoc).filter(
+                StockAdjustmentDoc.number == new_number,
+                StockAdjustmentDoc.id != doc_id
+            ).first()
+            if existing:
+                # Agar raqam band bo'lsa, keyingi raqamni topish
+                same_date_docs = db.query(StockAdjustmentDoc).filter(
+                    StockAdjustmentDoc.number.like(f"QLD-{new_date.strftime('%Y%m%d')}-%"),
+                    StockAdjustmentDoc.id != doc_id
+                ).all()
+                max_num = 0
+                for d in same_date_docs:
+                    try:
+                        num_part = int(d.number.split('-')[-1])
+                        if num_part > max_num:
+                            max_num = num_part
+                    except (ValueError, IndexError):
+                        pass
+                new_number = f"QLD-{new_date.strftime('%Y%m%d')}-{str(max_num + 1).zfill(4)}"
+            
+            doc.number = new_number
+        
+        doc.date = new_date
+        db.commit()
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=f"Noto'g'ri sana formati: {str(e)}")
+    
+    return RedirectResponse(url=f"/qoldiqlar/tovar/hujjat/{doc_id}", status_code=303)
+
+
+# ==========================================
+# INVENTARIZATSIYA
+# ==========================================
+
+@app.get("/inventory", response_class=HTMLResponse)
+async def inventory_index(
+    request: Request,
+    warehouse_id: int = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Inventarizatsiya sahifasi - ombordagi tovarlarni ko'rsatish"""
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
+    
+    # Agar ombor tanlangan bo'lsa, tovarlarni ko'rsatish
+    products_data = []
+    if warehouse_id:
+        warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+        if warehouse:
+            # Ombordagi barcha tovarlarni olish; bir mahsulot bir marta (product_id bo'yicha qoldiqlarni yig'amiz)
+            stocks = db.query(Stock).filter(
+                Stock.warehouse_id == warehouse_id
+            ).options(
+                joinedload(Stock.product)
+            ).all()
+            
+            # Bir xil product_id uchun bitta qator, qoldiqlar yig'indisi
+            qty_by_product = {}
+            product_info = {}
+            for stock in stocks:
+                if not stock.product or not stock.product.is_active:
+                    continue
+                pid = stock.product.id
+                qty = float(stock.quantity or 0)
+                qty_by_product[pid] = qty_by_product.get(pid, 0) + qty
+                product_info[pid] = {
+                    'product_id': pid,
+                    'product_name': stock.product.name,
+                    'product_code': stock.product.code or '',
+                    'cost_price': stock.product.purchase_price or 0,
+                    'sale_price': stock.product.sale_price or 0,
+                }
+            
+            for pid, qty in qty_by_product.items():
+                info = product_info.get(pid)
+                if info:
+                    products_data.append({
+                        'product_id': info['product_id'],
+                        'product_name': info['product_name'],
+                        'product_code': info['product_code'],
+                        'current_quantity': qty,
+                        'cost_price': info['cost_price'],
+                        'sale_price': info['sale_price'],
+                    })
+            
+            # Qoldiq bo'lmagan, lekin aktiv bo'lgan tovarlarni ham qo'shish
+            all_products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
+            existing_product_ids = set(qty_by_product.keys())
+            for product in all_products:
+                if product.id not in existing_product_ids:
+                    products_data.append({
+                        'product_id': product.id,
+                        'product_name': product.name,
+                        'product_code': product.code or '',
+                        'current_quantity': 0,
+                        'cost_price': product.purchase_price or 0,
+                        'sale_price': product.sale_price or 0,
+                    })
+            
+            # Nom bo'yicha tartiblash
+            products_data.sort(key=lambda x: (x['product_name'] or '').lower())
+    
+    return templates.TemplateResponse("inventory/index.html", {
+        "request": request,
+        "warehouses": warehouses,
+        "selected_warehouse_id": warehouse_id,
+        "products_data": products_data,
+        "current_user": current_user,
+        "page_title": "Inventarizatsiya",
+    })
+
+
+@app.post("/inventory/confirm")
+async def inventory_confirm(
+    request: Request,
+    warehouse_id: int = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Inventarizatsiya natijalarini tasdiqlash va StockAdjustmentDoc yaratish"""
+    form = await request.form()
+    
+    # Formadan tovarlar ma'lumotlarini olish
+    product_ids = form.getlist("product_id")
+    actual_quantities = form.getlist("actual_quantity")
+    
+    warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+    if not warehouse:
+        raise HTTPException(status_code=404, detail="Ombor topilmadi")
+    
+    items_data = []
+    for i, pid_str in enumerate(product_ids):
+        if not pid_str:
+            continue
+        try:
+            pid = int(pid_str)
+            actual_qty_str = actual_quantities[i] if i < len(actual_quantities) else ""
+            if not actual_qty_str or actual_qty_str.strip() == "":
+                continue
+            actual_qty = float(actual_qty_str)
+            if actual_qty < 0:
+                continue
+            
+            # Joriy qoldiqni olish
+            stock = db.query(Stock).filter(
+                Stock.warehouse_id == warehouse_id,
+                Stock.product_id == pid
+            ).first()
+            current_qty = stock.quantity if stock else 0
+            
+            # Agar haqiqiy qoldiq joriy qoldiqdan farq qilsa, qo'shish
+            if abs(actual_qty - current_qty) > 0.001:  # Kichik farqlarni e'tiborsiz qoldirish
+                product = db.query(Product).filter(Product.id == pid).first()
+                if product:
+                    cost_price = product.purchase_price or 0
+                    sale_price = product.sale_price or 0
+                    items_data.append((pid, actual_qty, cost_price, sale_price))
+        except (ValueError, TypeError):
+            continue
+    
+    if not items_data:
+        return RedirectResponse(
+            url=f"/inventory?warehouse_id={warehouse_id}&message=Farq+topilmadi",
+            status_code=303
+        )
+    
+    # StockAdjustmentDoc yaratish
+    today = datetime.now()
+    count = db.query(StockAdjustmentDoc).filter(
+        StockAdjustmentDoc.date >= today.replace(hour=0, minute=0, second=0)
+    ).count()
+    number = f"QLD-{today.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
+    
+    total_tannarx = sum(qty * cp for _, qty, cp, _ in items_data)
+    total_sotuv = sum(qty * sp for _, qty, _, sp in items_data)
+    
+    doc = StockAdjustmentDoc(
+        number=number,
+        date=today,
+        user_id=current_user.id if current_user else None,
+        status="draft",
+        total_tannarx=total_tannarx,
+        total_sotuv=total_sotuv,
+    )
+    db.add(doc)
+    db.flush()
+    
+    for pid, qty, cp, sp in items_data:
+        db.add(StockAdjustmentDocItem(
+            doc_id=doc.id,
+            product_id=pid,
+            warehouse_id=warehouse_id,
+            quantity=qty,
+            cost_price=cp,
+            sale_price=sp,
+        ))
+    
+    db.commit()
+    
+    return RedirectResponse(
+        url=f"/qoldiqlar/tovar/hujjat/{doc.id}?from=inventory",
+        status_code=303
+    )
+
+
 @app.post("/qoldiqlar/tovar/hujjat/{doc_id}/edit-row/{item_id}")
 async def qoldiqlar_tovar_hujjat_edit_row(
     doc_id: int,
@@ -3128,7 +3537,7 @@ async def qoldiqlar_tovar_hujjat_tasdiqlash(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Hujjatni tasdiqlash — ombor qoldiqlariga qo'shiladi"""
+    """Hujjatni tasdiqlash — ombor qoldig'i hujjatdagi miqdorga o'rnatiladi (qo'shilmaydi). Bir (ombor, mahsulot) uchun bitta harakat yoziladi — manbai sahifasida hujjat takrorlanmasligi uchun."""
     doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
@@ -3137,43 +3546,49 @@ async def qoldiqlar_tovar_hujjat_tasdiqlash(
     if not doc.items:
         raise HTTPException(status_code=400, detail="Kamida bitta qator bo'lishi kerak")
 
+    # Bir xil (ombor, mahsulot) uchun bitta qator — dublikat qatorlar bitta harakatga birlashtiriladi
+    seen = set()  # (warehouse_id, product_id)
     for item in doc.items:
-        # Eski qoldiqni olish
-        stock = db.query(Stock).filter(
+        key = (item.warehouse_id, item.product_id)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        stocks = db.query(Stock).filter(
             Stock.warehouse_id == item.warehouse_id,
             Stock.product_id == item.product_id,
-        ).first()
-        old_quantity = stock.quantity if stock else 0
-        
-        # Yangi qoldiqni hisoblash
+        ).all()
+        old_quantity = sum(float(s.quantity or 0) for s in stocks)
         new_quantity = item.quantity
         quantity_change = new_quantity - old_quantity
-        
-        if stock:
-            stock.quantity = new_quantity
-            stock.updated_at = datetime.now()
+
+        if stocks:
+            keep = stocks[0]
+            keep.quantity = new_quantity
+            keep.updated_at = datetime.now()
+            for s in stocks[1:]:
+                db.delete(s)
         else:
             db.add(Stock(
                 warehouse_id=item.warehouse_id,
                 product_id=item.product_id,
                 quantity=item.quantity,
             ))
-        
-        # StockMovement yozuvini yaratish (adjustment)
+
         if quantity_change != 0:
             create_stock_movement(
                 db=db,
                 warehouse_id=item.warehouse_id,
                 product_id=item.product_id,
-                quantity_change=quantity_change,  # O'zgarish (+ yoki -)
+                quantity_change=quantity_change,
                 operation_type="adjustment",
                 document_type="StockAdjustmentDoc",
                 document_id=doc.id,
                 document_number=doc.number,
                 user_id=current_user.id if current_user else None,
-                note=f"Qoldiq tuzatish: {doc.number}"
+                note=f"Qoldiq tuzatish: {doc.number}",
+                update_stock=False,
             )
-        # Tannarxni mahsulotga yozish — Narxni o'rnatish sahifasida ko'rinsin
         if (item.cost_price or 0) > 0:
             prod = db.query(Product).filter(Product.id == item.product_id).first()
             if prod:
@@ -3189,22 +3604,40 @@ async def qoldiqlar_tovar_hujjat_revert(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Tovar qoldiq hujjati tasdiqini bekor qilish (faqat admin) — ombor qoldig'ini kamaytirish"""
+    """Tovar qoldiq hujjati tasdiqini bekor qilish (faqat admin) — qoldiq hujjat tasdiqlanishidan oldingi holatga qaytariladi. Bir (ombor, mahsulot) uchun bir marta qaytariladi."""
     doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
     if doc.status != "confirmed":
         raise HTTPException(status_code=400, detail="Faqat tasdiqlangan hujjatning tasdiqini bekor qilish mumkin")
+    seen = set()
     for item in doc.items:
+        key = (item.warehouse_id, item.product_id)
+        if key in seen:
+            continue
+        seen.add(key)
         stock = db.query(Stock).filter(
             Stock.warehouse_id == item.warehouse_id,
             Stock.product_id == item.product_id,
         ).first()
-        if stock:
+        if not stock:
+            continue
+        mov = db.query(StockMovement).filter(
+            StockMovement.document_type == "StockAdjustmentDoc",
+            StockMovement.document_id == doc_id,
+            StockMovement.warehouse_id == item.warehouse_id,
+            StockMovement.product_id == item.product_id,
+        ).first()
+        if mov is not None:
+            prev_qty = float(mov.quantity_after or 0) - float(mov.quantity_change or 0)
+            if prev_qty < 0:
+                prev_qty = 0
+            stock.quantity = prev_qty
+        else:
             stock.quantity = (stock.quantity or 0) - item.quantity
             if stock.quantity < 0:
                 stock.quantity = 0
-            stock.updated_at = datetime.now()
+        stock.updated_at = datetime.now()
     doc.status = "draft"
     db.commit()
     return RedirectResponse(url=f"/qoldiqlar/tovar/hujjat/{doc_id}", status_code=303)
@@ -3216,15 +3649,36 @@ async def qoldiqlar_tovar_hujjat_delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Tovar qoldiq hujjatini o'chirish (faqat qoralama, faqat admin)"""
+    """Tovar qoldiq hujjatini o'chirish (faqat admin): draft -> o'chirish, confirmed -> avval revert qilish kerak"""
+    from urllib.parse import quote
     doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
-    if doc.status != "draft":
-        raise HTTPException(status_code=400, detail="Faqat qoralama holatidagi hujjatni o'chirish mumkin. Avval tasdiqni bekor qiling.")
-    db.delete(doc)
-    db.commit()
-    return RedirectResponse(url="/qoldiqlar#tovar", status_code=303)
+    
+    if doc.status == "draft":
+        # Qoralama holatida: to'g'ridan-to'g'ri o'chirish
+        db.delete(doc)
+        db.commit()
+        return RedirectResponse(url="/qoldiqlar#tovar", status_code=303)
+    elif doc.status == "confirmed":
+        # Tasdiqlangan holatida: Stock yozuvlarini qaytarish va o'chirish
+        for item in doc.items:
+            stock = db.query(Stock).filter(
+                Stock.warehouse_id == item.warehouse_id,
+                Stock.product_id == item.product_id,
+            ).first()
+            if stock:
+                # Qoldiq o'zgarishini teskari qilish
+                stock.quantity = (stock.quantity or 0) - item.quantity
+                if stock.quantity < 0:
+                    stock.quantity = 0
+                stock.updated_at = datetime.now()
+        # Hujjatni o'chirish
+        db.delete(doc)
+        db.commit()
+        return RedirectResponse(url="/qoldiqlar#tovar?deleted=1", status_code=303)
+    else:
+        raise HTTPException(status_code=400, detail="Faqat qoralama yoki tasdiqlangan hujjatni o'chirish mumkin.")
 
 
 # Bo'limlar bo'limi
@@ -4087,36 +4541,42 @@ def create_stock_movement(
     document_id: int,
     document_number: str = None,
     user_id: int = None,
-    note: str = None
+    note: str = None,
+    update_stock: bool = True,
 ):
-    """Har bir operatsiya uchun StockMovement yozuvini yaratish"""
-    # Stock ni topish yoki yaratish
+    """Har bir operatsiya uchun StockMovement yozuvini yaratish. update_stock=False bo'lsa faqat yozuv yoziladi, Stock o'zgartirilmaydi (masalan qoldiq tuzatishda Stock allaqachon o'rnatilgan bo'ladi)."""
     stock = db.query(Stock).filter(
         Stock.warehouse_id == warehouse_id,
         Stock.product_id == product_id
     ).first()
-    
-    # Qoldiqni yangilash
-    if stock:
-        stock.quantity = (stock.quantity or 0) + quantity_change
-        if stock.quantity < 0:
-            stock.quantity = 0
-        stock.updated_at = datetime.now()
-        stock_id = stock.id
-        quantity_after = stock.quantity
+
+    if update_stock:
+        if stock:
+            stock.quantity = (stock.quantity or 0) + quantity_change
+            if stock.quantity < 0:
+                stock.quantity = 0
+            stock.updated_at = datetime.now()
+            stock_id = stock.id
+            quantity_after = stock.quantity
+        else:
+            quantity_after = quantity_change if quantity_change > 0 else 0
+            stock = Stock(
+                warehouse_id=warehouse_id,
+                product_id=product_id,
+                quantity=quantity_after
+            )
+            db.add(stock)
+            db.flush()
+            stock_id = stock.id
     else:
-        # Yangi stock yaratish
-        quantity_after = quantity_change if quantity_change > 0 else 0
-        stock = Stock(
-            warehouse_id=warehouse_id,
-            product_id=product_id,
-            quantity=quantity_after
-        )
-        db.add(stock)
-        db.flush()  # ID olish uchun
-        stock_id = stock.id
-    
-    # StockMovement yozuvini yaratish
+        # Faqat yozuv: Stock ni tegmang, hozirgi qoldiqdan quantity_after olamiz
+        if stock:
+            stock_id = stock.id
+            quantity_after = float(stock.quantity or 0)
+        else:
+            stock_id = None
+            quantity_after = quantity_change if quantity_change > 0 else 0
+
     movement = StockMovement(
         stock_id=stock_id,
         warehouse_id=warehouse_id,
@@ -5734,7 +6194,7 @@ async def sales_revert(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Sotuv tasdiqini bekor qilish (faqat admin): ombor qoldig'ini qaytarish, holatni qoralamaga o'tkazish"""
+    """Sotuv tasdiqini bekor qilish (faqat admin): ombor qoldig'ini qaytarish, kassa balansini qaytarish, holatni qoralamaga o'tkazish"""
     from urllib.parse import quote
     order = db.query(Order).filter(Order.id == order_id, Order.type == "sale").first()
     if not order:
@@ -5744,6 +6204,15 @@ async def sales_revert(
             url=f"/sales/edit/{order_id}?error=revert&detail=" + quote("Faqat bajarilgan sotuvning tasdiqini bekor qilish mumkin."),
             status_code=303
         )
+    # Payment yozuvlarini topib, CashRegister balansini qaytarish
+    payments = db.query(Payment).filter(Payment.order_id == order_id).all()
+    for payment in payments:
+        if payment.cash_register_id and payment.amount:
+            cash_register = db.query(CashRegister).filter(CashRegister.id == payment.cash_register_id).first()
+            if cash_register:
+                # To'lov summasini kassa balansidan ayirish
+                cash_register.balance = (cash_register.balance or 0) - (payment.amount or 0)
+    # Ombor qoldig'ini qaytarish
     for item in order.items:
         stock = db.query(Stock).filter(
             Stock.warehouse_id == order.warehouse_id,
@@ -5762,19 +6231,39 @@ async def sales_delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """Sotuvni o'chirish (faqat qoralama, faqat admin)"""
+    """Sotuvni o'chirish (faqat admin): draft -> cancelled, cancelled -> DB dan o'chirish"""
+    from urllib.parse import quote
     order = db.query(Order).filter(Order.id == order_id, Order.type == "sale").first()
     if not order:
         raise HTTPException(status_code=404, detail="Sotuv topilmadi")
-    if order.status != "draft":
-        from urllib.parse import quote
+    
+    if order.status == "draft":
+        # Qoralama holatida: faqat cancelled holatiga o'tkazish
+        order.status = "cancelled"
+        db.commit()
+        return RedirectResponse(url="/sales", status_code=303)
+    elif order.status == "cancelled":
+        # Bekor qilingan holatida: DB dan to'liq o'chirish
+        # Payment yozuvlarini o'chirishdan oldin CashRegister balansini qaytarish
+        payments = db.query(Payment).filter(Payment.order_id == order_id).all()
+        for payment in payments:
+            if payment.cash_register_id and payment.amount:
+                cash_register = db.query(CashRegister).filter(CashRegister.id == payment.cash_register_id).first()
+                if cash_register:
+                    # To'lov summasini kassa balansidan ayirish
+                    cash_register.balance = (cash_register.balance or 0) - (payment.amount or 0)
+        # OrderItem va Payment bilan birga o'chirish
+        db.query(OrderItem).filter(OrderItem.order_id == order_id).delete()
+        db.query(Payment).filter(Payment.order_id == order_id).delete()
+        db.delete(order)
+        db.commit()
+        return RedirectResponse(url="/sales?deleted=1", status_code=303)
+    else:
+        # Boshqa holatlar: xatolik
         return RedirectResponse(
-            url="/sales?error=delete&detail=" + quote("Faqat qoralama holatidagi sotuvni o'chirish mumkin. Avval tasdiqni bekor qiling."),
+            url="/sales?error=delete&detail=" + quote("Faqat qoralama yoki bekor qilingan sotuvni o'chirish mumkin."),
             status_code=303
         )
-    order.status = "cancelled"
-    db.commit()
-    return RedirectResponse(url="/sales", status_code=303)
 
 
 # ---------- Sotuvchi uchun POS (Sotuv oynasi) ----------
@@ -7711,7 +8200,7 @@ async def production_index_page(request: Request, db: Session = Depends(get_db),
         Production.date >= today,
         Production.status == "completed"
     ).all()
-    today_quantity = sum(p.quantity for p in today_productions)
+    today_quantity = sum((p.quantity or 0) for p in today_productions)
     pending_productions = db.query(Production).filter(
         Production.status == "draft"
     ).count()
@@ -7906,6 +8395,34 @@ async def delete_recipe_item(
     return RedirectResponse(url=f"/production/recipes/{recipe_id}", status_code=303)
 
 
+@app.post("/production/recipes/{recipe_id}/delete")
+async def delete_recipe(
+    recipe_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Retseptni o'chirish (faqat admin)"""
+    from urllib.parse import quote
+    
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Retsept topilmadi")
+    
+    # Retsept ishlatilganmi tekshirish (Production'da)
+    production_count = db.query(Production).filter(Production.recipe_id == recipe_id).count()
+    if production_count > 0:
+        return RedirectResponse(
+            url=f"/production/recipes?error=delete&detail=" + quote(f"Bu retsept {production_count} ta ishlab chiqarishda ishlatilgan. O'chirish mumkin emas."),
+            status_code=303
+        )
+    
+    # Retseptni o'chirish (cascade orqali items va stages ham o'chadi)
+    db.delete(recipe)
+    db.commit()
+    
+    return RedirectResponse(url="/production/recipes?success=deleted", status_code=303)
+
+
 @app.get("/production/{prod_id}/materials", response_class=HTMLResponse)
 async def production_edit_materials(
     prod_id: int,
@@ -8091,35 +8608,40 @@ async def create_production(
 
 
 def _do_complete_production_stock(db, production, recipe):
-    """Xom ashyo ayirish, tayyor mahsulot qo'shish. RedirectResponse qaytaradi xato bo'lsa."""
+    """Xom ashyo ayirish, tayyor mahsulot qo'shish. Kerak=0 bo'lsa o'tkazib yuboriladi; yetmasa borini tortadi (min(kerak, mavjud))."""
     from urllib.parse import quote
     if production.production_items:
         items_to_use = [(pi.product_id, pi.quantity) for pi in production.production_items]
     else:
         items_to_use = [(item.product_id, item.quantity * production.quantity) for item in recipe.items]
+    # Har bir mahsulot uchun haqiqiy ishlatiladigan miqdor: kerak=0 bo'lsa 0, yetmasa mavjudini (borini) tortamiz
+    items_actual = []
     for product_id, required in items_to_use:
+        if required is None or required <= 0:
+            items_actual.append((product_id, 0.0))
+            continue
         stock = db.query(Stock).filter(
             Stock.warehouse_id == production.warehouse_id,
             Stock.product_id == product_id
         ).first()
-        if not stock or stock.quantity < required:
-            product_name = db.query(Product).filter(Product.id == product_id).first()
-            name = product_name.name if product_name else f"#{product_id}"
-            msg = quote(f"Yetarli yo'q: {name} (kerak: {required}, mavjud: {stock.quantity if stock else 0})", safe="")
-            return RedirectResponse(url=f"/production/orders?error=insufficient_stock&detail={msg}", status_code=303)
-    # Xom ashyolarni ayirish va StockMovement yozuvlarini yaratish
-    for product_id, required in items_to_use:
+        available = (stock.quantity if stock else 0) or 0
+        actual_use = min(required, available)
+        items_actual.append((product_id, actual_use))
+    # Xom ashyolarni ayirish va StockMovement yozuvlarini yaratish (haqiqiy ishlatilgan miqdor bo'yicha)
+    for product_id, actual_use in items_actual:
+        if actual_use <= 0:
+            continue
         stock = db.query(Stock).filter(
             Stock.warehouse_id == production.warehouse_id,
             Stock.product_id == product_id
         ).first()
         if stock:
-            # StockMovement yozuvini yaratish (chiqim)
+            stock.quantity -= actual_use
             create_stock_movement(
                 db=db,
                 warehouse_id=production.warehouse_id,
                 product_id=product_id,
-                quantity_change=-required,  # Chiqim
+                quantity_change=-actual_use,
                 operation_type="production_consumption",
                 document_type="Production",
                 document_id=production.id,
@@ -8129,10 +8651,10 @@ def _do_complete_production_stock(db, production, recipe):
             )
     
     total_material_cost = 0.0
-    for product_id, required in items_to_use:
+    for product_id, actual_use in items_actual:
         product = db.query(Product).filter(Product.id == product_id).first()
         if product and getattr(product, "purchase_price", None) is not None:
-            total_material_cost += required * (product.purchase_price or 0)
+            total_material_cost += actual_use * (product.purchase_price or 0)
     output_units = production.quantity * (recipe.output_quantity or 1)
     cost_per_unit = (total_material_cost / output_units) if output_units > 0 else 0
     out_wh_id = production.output_warehouse_id if production.output_warehouse_id else production.warehouse_id

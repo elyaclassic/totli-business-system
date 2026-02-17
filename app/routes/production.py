@@ -41,32 +41,37 @@ def _recipe_max_stage(recipe) -> int:
 
 
 def _do_complete_production_stock(db, production, recipe):
+    """Kerak=0 bo'lsa o'tkazib yuboriladi; yetmasa borini tortadi (min(kerak, mavjud))."""
     if production.production_items:
         items_to_use = [(pi.product_id, pi.quantity) for pi in production.production_items]
     else:
         items_to_use = [(item.product_id, item.quantity * production.quantity) for item in recipe.items]
+    items_actual = []
     for product_id, required in items_to_use:
+        if required is None or required <= 0:
+            items_actual.append((product_id, 0.0))
+            continue
         stock = db.query(Stock).filter(
             Stock.warehouse_id == production.warehouse_id,
             Stock.product_id == product_id,
         ).first()
-        if not stock or stock.quantity < required:
-            product_name = db.query(Product).filter(Product.id == product_id).first()
-            name = product_name.name if product_name else f"#{product_id}"
-            msg = quote(f"Yetarli yo'q: {name} (kerak: {required}, mavjud: {stock.quantity if stock else 0})", safe="")
-            return RedirectResponse(url=f"/production/orders?error=insufficient_stock&detail={msg}", status_code=303)
-    for product_id, required in items_to_use:
+        available = (stock.quantity if stock else 0) or 0
+        actual_use = min(required, available)
+        items_actual.append((product_id, actual_use))
+    for product_id, actual_use in items_actual:
+        if actual_use <= 0:
+            continue
         stock = db.query(Stock).filter(
             Stock.warehouse_id == production.warehouse_id,
             Stock.product_id == product_id,
         ).first()
         if stock:
-            stock.quantity -= required
+            stock.quantity -= actual_use
     total_material_cost = 0.0
-    for product_id, required in items_to_use:
+    for product_id, actual_use in items_actual:
         product = db.query(Product).filter(Product.id == product_id).first()
         if product and getattr(product, "purchase_price", None) is not None:
-            total_material_cost += required * (product.purchase_price or 0)
+            total_material_cost += actual_use * (product.purchase_price or 0)
     output_units = production.quantity * (recipe.output_quantity or 1)
     cost_per_unit = (total_material_cost / output_units) if output_units > 0 else 0
     out_wh_id = production.output_warehouse_id if production.output_warehouse_id else production.warehouse_id

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card mb-3">
+    <div class="card-body">
+        <a href="/reports/stock" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> Qoldiq hisoboti</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-diagram-3"></i> Qoldiq manbai — qayerdan kelgani
+    </div>
+    <div class="card-body">
+        <p class="mb-2">
+            <strong>Ombor:</strong> {{ warehouse.name if warehouse else '-' }} &nbsp;|&nbsp;
+            <strong>Mahsulot:</strong> {{ product.name if product else '-' }} ({{ product.code or product.barcode or '-' }})
+        </p>
+        <p class="text-success fw-bold mb-0">Hozirgi qoldiq (Stock jadvalidagi yig‘indi): <strong>{{ "{:,.3f}".format(current_qty) }}</strong></p>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-hover table-sm">
+            <thead class="table-light">
+                <tr>
+                    <th>Sana</th>
+                    <th>Hujjat turi</th>
+                    <th>Hujjat raqami</th>
+                    <th class="text-end">O'zgarish (+/−)</th>
+                    <th class="text-end">Qoldiq (harakatdan keyin)</th>
+                    <th>Hujjat</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if movements %}
+                    {% for m in movements %}
+                    <tr>
+                        <td>{{ m.date }}</td>
+                        <td>{{ m.document_type_label }}</td>
+                        <td><code>{{ m.document_number }}</code></td>
+                        <td class="text-end {% if m.quantity_change >= 0 %}text-success{% else %}text-danger{% endif %}">
+                            {{ "{:+,.3f}".format(m.quantity_change) }}
+                        </td>
+                        <td class="text-end">{{ "{:,.3f}".format(m.quantity_after) }}</td>
+                        <td>
+                            <a href="{{ m.document_url }}" target="_blank" class="btn btn-sm btn-outline-primary">Ochish</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-4">
+                            Ushbu ombor va mahsulot uchun <code>StockMovement</code> yozuvlari topilmadi. Qoldiq eski tizimdan yoki importdan kiritilgan bo'lishi mumkin.
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

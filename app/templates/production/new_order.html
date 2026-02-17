@@ -422,9 +422,10 @@ function calculateMaterials() {
     if (recipeId && recipes[recipeId]) {
         var recipe = recipes[recipeId];
         
-        // Chiqish miqdori
+        // Chiqish miqdori — yaxlitlanmasin, kiritilgan miqdor bo'yicha (2 xona kasr)
+        var outputVal = quantity * recipe.output;
         document.getElementById('outputQuantity').textContent = 
-            (quantity * recipe.output).toFixed(1) + ' kg';
+            (Math.round(outputVal * 100) / 100).toFixed(2) + ' kg';
         
         // Xom ashyolar (editable)
         var html = '';

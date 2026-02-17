@@ -50,11 +50,32 @@
                         <tr>
                             <td><a href="/sales/return/document/{{ doc.number }}">{{ doc.number }}</a></td>
                             <td>{{ doc.created_at.strftime('%d.%m.%Y %H:%M') if doc.created_at else '-' }}</td>
-                            <td>{% if doc.status == 'completed' %}<span class="badge bg-success">Tasdiqlangan</span>{% else %}<span class="badge bg-secondary">Bekor qilingan</span>{% endif %}</td>
+                            <td>
+                                {% if doc.status == 'completed' %}
+                                <span class="badge bg-success">Tasdiqlangan</span>
+                                {% elif doc.status == 'cancelled' %}
+                                <span class="badge bg-secondary">Bekor qilingan</span>
+                                {% else %}
+                                <span class="badge bg-warning text-dark">{{ doc.status or 'Noma\'lum' }}</span>
+                                {% endif %}
+                            </td>
                             <td>{{ doc.partner.name if doc.partner else '-' }}</td>
                             <td>{{ doc.warehouse.name if doc.warehouse else '-' }}</td>
                             <td>{{ "{:,.0f}".format(doc.total or 0) }} so'm</td>
-                            <td><a href="/sales/return/document/{{ doc.number }}" class="btn btn-sm btn-outline-primary">Hujjat</a></td>
+                            <td>
+                                <a href="/sales/return/document/{{ doc.number }}" class="btn btn-sm btn-outline-primary">Hujjat</a>
+                                {% if doc.status == 'completed' and current_user and current_user.role == 'admin' %}
+                                <form method="POST" action="/sales/return/revert/{{ doc.id }}" class="d-inline ms-1" onsubmit="return confirm('Tasdiqni bekor qilish — omborga qo\'shilgan qoldiq olib tashlanadi. Davom etasizmi?');">
+                                    <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-warning" title="Tasdiqni bekor qilish"><i class="bi bi-arrow-counterclockwise"></i></button>
+                                </form>
+                                {% elif doc.status == 'cancelled' and current_user and current_user.role == 'admin' %}
+                                <form method="POST" action="/sales/return/delete/{{ doc.id }}" class="d-inline ms-1" onsubmit="return confirm('Ushbu bekor qilingan qaytarish hujjatini o\'chirmoqchimisiz?');">
+                                    <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="O'chirish"><i class="bi bi-trash"></i></button>
+                                </form>
+                                {% endif %}
+                            </td>
                         </tr>
                         {% else %}
                         <tr><td colspan="7" class="text-muted text-center py-3">Qaytarish hujjatlari yo'q.</td></tr>

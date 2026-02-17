@@ -172,9 +172,13 @@
 
         <!-- Kontragent qoldiqlari — forma spiska (1C uslubida) -->
         <div class="tab-pane fade" id="kontragent" role="tabpanel">
-            <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
                 <div>
                     <a href="/qoldiqlar/kontragent/hujjat/new" class="btn btn-success"><i class="bi bi-plus-circle"></i> Yaratish</a>
+                    <button type="button" class="btn btn-outline-primary btn-sm ms-2" data-bs-toggle="modal" data-bs-target="#kontragentExcelImportModal">
+                        <i class="bi bi-upload"></i> Exceldan yuklash
+                    </button>
+                    <a href="/qoldiqlar/kontragent/andoza" class="btn btn-outline-secondary btn-sm ms-2" target="_blank" rel="noopener"><i class="bi bi-file-earmark-excel"></i> Andoza</a>
                 </div>
             </div>
             <div class="card">
@@ -232,6 +236,32 @@
     </div>
 </div>
 
+<!-- Kontragent qoldiqlari: Exceldan yuklash modal -->
+<div class="modal fade" id="kontragentExcelImportModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form action="/qoldiqlar/kontragent/import-excel" method="post" enctype="multipart/form-data">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-upload"></i> Exceldan kontragent qoldiqlarini yuklash</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small">Hujjat qoralama holatida yaratiladi. Tasdiqlashdan keyin kontragent balanslari yangilanadi.</p>
+                    <p class="small mb-2">Ustunlar: <strong>Kontragent nomi (yoki kodi)</strong>, <strong>Balans (so'm)</strong>. Birinchi qator sarlavha bo'lsin. <a href="/qoldiqlar/kontragent/andoza" target="_blank">Andoza yuklash</a></p>
+                    <div class="mb-0">
+                        <label class="form-label">Excel fayl (.xlsx)</label>
+                        <input type="file" class="form-control" name="file" accept=".xlsx,.xls" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-upload"></i> Yuklash</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Tovar qoldiqlari: Exceldan yuklash modal -->
 <div class="modal fade" id="tovarExcelImportModal" tabindex="-1">
     <div class="modal-dialog">
@@ -244,6 +274,10 @@
                 <div class="modal-body">
                     <p class="text-muted small">Hujjat yaratiladi (QLD-... raqami) va ro'yxatda ko'rinadi. Tasdiqlashdan keyin ombor qoldiqlari yangilanadi.</p>
                     <p class="small mb-2">Ustunlar: <strong>Ombor nomi (yoki kodi)</strong>, <strong>Mahsulot nomi (yoki kodi)</strong>, <strong>Qoldiq</strong>, ixtiyoriy: Tannarx (so'm), Sotuv narxi (so'm). <a href="/warehouse/template" target="_blank">Andoza yuklash</a></p>
+                    <div class="mb-2">
+                        <label class="form-label">Hujjat sanasi</label>
+                        <input type="date" class="form-control" name="doc_date" id="tovar-import-doc-date" title="Kerakli sanani tanlang (masalan 15.02.2026). Bo'sh qoldirilsa bugungi sana ishlatiladi.">
+                    </div>
                     <div class="mb-0">
                         <label class="form-label">Excel fayl (.xlsx)</label>
                         <input type="file" class="form-control" name="file" accept=".xlsx,.xls" required>
@@ -259,10 +293,24 @@
 </div>
 
 <script>
-// URL da #tovar bo'lsa, Tovar qoldiqlari tabini ochish
+// URL da #tovar yoki #kontragent bo'lsa, tegishli tabni ochish
 if (window.location.hash === '#tovar') {
     var tovarTab = document.querySelector('#tovar-tab');
     if (tovarTab) { tovarTab.click(); }
+} else if (window.location.hash === '#kontragent') {
+    var kontragentTab = document.querySelector('#kontragent-tab');
+    if (kontragentTab) { kontragentTab.click(); }
+}
+// Tovar Excel import modal ochilganda hujjat sanasi default bugungi sana
+var tovarImportModal = document.getElementById('tovarExcelImportModal');
+if (tovarImportModal) {
+    tovarImportModal.addEventListener('show.bs.modal', function () {
+        var inp = document.getElementById('tovar-import-doc-date');
+        if (inp && !inp.value) {
+            var d = new Date();
+            inp.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+    });
 }
 </script>
 {% endblock %}

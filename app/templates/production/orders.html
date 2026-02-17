@@ -84,9 +84,9 @@
                     <td>
                         {% set unit_name = (prod.recipe.product.unit.name if prod.recipe and prod.recipe.product and prod.recipe.product.unit else 'kg') %}
                         {% set qty_kg = (prod.quantity * (prod.recipe.output_quantity or 1)) if (prod.recipe and prod.recipe.output_quantity) else prod.quantity %}
-                        <strong>{{ "%.1f"|format(prod.quantity) }} {{ unit_name }}</strong>
+                        <strong>{{ "%.2f"|format(prod.quantity) }} {{ unit_name }}</strong>
                         {% if unit_name|lower != 'kg' and prod.recipe and prod.recipe.output_quantity %}
-                        <span class="text-muted small">({{ "%.1f"|format(qty_kg) }} kg)</span>
+                        <span class="text-muted small">({{ "%.2f"|format(qty_kg) }} kg)</span>
                         {% endif %}
                     </td>
                     <td>

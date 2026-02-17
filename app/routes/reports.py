@@ -2,17 +2,17 @@
 Hisobotlar — savdo, qoldiq, qarzdorlik va Excel export.
 """
 import io
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, Depends, File, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_, and_
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 
 from app.core import templates
-from app.models.database import get_db, Order, Stock, Product, Partner, Warehouse, User
-from app.deps import get_current_user, require_auth
+from app.models.database import get_db, Order, Stock, StockMovement, Product, Partner, Warehouse, User, Production, Recipe, StockAdjustmentDoc, StockAdjustmentDocItem
+from app.deps import get_current_user, require_auth, require_admin
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -111,29 +111,264 @@ async def report_sales_export(
 
 
 @router.get("/stock", response_class=HTMLResponse)
-async def report_stock(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
+async def report_stock(
+    request: Request,
+    warehouse_id: str = None,
+    merged: int = None,
+    cleared: int = None,
+    msg: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Qoldiq hisoboti — ombor bo'yicha qoldiqlar. Bir ombor + mahsulot uchun bitta qator (dublikatlar yig'indisi)."""
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
-    stocks = db.query(Stock).join(Product).all()
+    wh_id = None
+    if warehouse_id is not None and str(warehouse_id).strip() != "":
+        try:
+            wh_id = int(warehouse_id)
+        except (ValueError, TypeError):
+            wh_id = None
+    values = _stock_report_filtered(db, wh_id)
+    stocks = [{"warehouse": v["warehouse"], "product": v["product"], "quantity": v["quantity"]} for v in values]
+    # Jami summa: har bir qator uchun quantity * purchase_price yig'indisi (anniq)
+    total_sum = 0.0
+    for v in stocks:
+        qty = float(v.get("quantity") or 0)
+        price = float(getattr(v.get("product"), "purchase_price", None) or 0)
+        total_sum += qty * price
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
     return templates.TemplateResponse("reports/stock.html", {
         "request": request,
         "stocks": stocks,
+        "total_sum": total_sum,
+        "warehouses": warehouses,
+        "selected_warehouse_id": wh_id,
+        "merged": merged,
+        "cleared": cleared,
+        "msg": msg,
+        "today": datetime.now().strftime("%Y-%m-%d"),
         "page_title": "Qoldiq hisoboti",
         "current_user": current_user,
     })
 
 
-@router.get("/stock/export")
-async def report_stock_export(db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
+def _document_type_label(doc_type: str) -> str:
+    """Hujjat turi uchun o'qiladigan nom"""
+    labels = {
+        "Purchase": "Kirim (sotib olish)",
+        "Production": "Ishlab chiqarish",
+        "WarehouseTransfer": "Ombordan omborga",
+        "StockAdjustmentDoc": "Qoldiq tuzatish",
+        "Sale": "Sotuv",
+        "SaleReturn": "Qaytish",
+    }
+    return labels.get(doc_type, doc_type or "—")
+
+
+def _document_url(doc_type: str, doc_id: int) -> str:
+    """Hujjat turi va ID bo'yicha ko'rish havolasi"""
+    if doc_type == "Purchase":
+        return f"/purchases/edit/{doc_id}"
+    if doc_type == "Production":
+        return f"/production/orders"
+    if doc_type == "WarehouseTransfer":
+        return f"/warehouse/transfers/{doc_id}"
+    if doc_type == "StockAdjustmentDoc":
+        return f"/qoldiqlar/tovar/hujjat/{doc_id}"
+    if doc_type == "Sale":
+        return f"/sales/edit/{doc_id}"
+    return "#"
+
+
+@router.get("/stock/source", response_class=HTMLResponse)
+async def report_stock_source(
+    request: Request,
+    warehouse_id: int = None,
+    product_id: int = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Berilgan ombor + mahsulot uchun qoldiq manbai — barcha harakatlar (qaysi hujjatdan kirgan/chiqqan)."""
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
-    stocks = (
+    if not warehouse_id or not product_id:
+        return RedirectResponse(url="/reports/stock", status_code=303)
+    warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not warehouse or not product:
+        return RedirectResponse(url="/reports/stock", status_code=303)
+    movements = (
+        db.query(StockMovement)
+        .filter(
+            StockMovement.warehouse_id == warehouse_id,
+            StockMovement.product_id == product_id,
+        )
+        .order_by(StockMovement.created_at.desc())
+        .all()
+    )
+    # Faqat tasdiqlangan qoldiq tuzatish hujjatlarini ko'rsatamiz; qoralama/o'chirilganlarni olib tashlaymiz
+    doc_ids = [m.document_id for m in movements if (m.document_type or "") == "StockAdjustmentDoc" and m.document_id]
+    doc_dates = {}
+    confirmed_adj_ids = set()
+    if doc_ids:
+        for doc in db.query(StockAdjustmentDoc).filter(
+            StockAdjustmentDoc.id.in_(doc_ids),
+            StockAdjustmentDoc.status == "confirmed",
+        ).all():
+            doc_dates[doc.id] = doc.date
+            confirmed_adj_ids.add(doc.id)
+    # Bir xil hujjat (document_type, document_id) uchun bitta qator — dublikat harakatlar birlashtiriladi
+    rows = []
+    seen_doc = set()  # (document_type, document_id)
+    for m in movements:
+        # Qoldiq tuzatish: faqat tasdiqlangan hujjat ko'rinsin
+        if (m.document_type or "") == "StockAdjustmentDoc" and m.document_id not in confirmed_adj_ids:
+            continue
+        key = (m.document_type or "", m.document_id)
+        if key in seen_doc:
+            continue
+        seen_doc.add(key)
+        if (m.document_type or "") == "StockAdjustmentDoc" and m.document_id and m.document_id in doc_dates and doc_dates[m.document_id]:
+            display_date = doc_dates[m.document_id].strftime("%d.%m.%Y %H:%M")
+        else:
+            display_date = m.created_at.strftime("%d.%m.%Y %H:%M") if m.created_at else "—"
+        rows.append({
+            "date": display_date,
+            "document_type": m.document_type or "",
+            "document_type_label": _document_type_label(m.document_type or ""),
+            "document_number": m.document_number or f"{m.document_type}-{m.document_id}",
+            "document_url": _document_url(m.document_type or "", m.document_id),
+            "quantity_change": float(m.quantity_change or 0),
+            "quantity_after": float(m.quantity_after or 0),
+        })
+    current_stock = db.query(Stock).filter(
+        Stock.warehouse_id == warehouse_id,
+        Stock.product_id == product_id,
+    ).all()
+    current_qty = sum(float(s.quantity or 0) for s in current_stock)
+    return templates.TemplateResponse("reports/stock_source.html", {
+        "request": request,
+        "warehouse": warehouse,
+        "product": product,
+        "movements": rows,
+        "current_qty": current_qty,
+        "page_title": "Qoldiq manbai",
+        "current_user": current_user,
+    })
+
+
+@router.post("/stock/merge-duplicates")
+async def report_stock_merge_duplicates(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Bir xil (ombor, mahsulot) uchun bitta Stock qatori qoldiradi, qolganlarini o'chirib yig'indini bitta qatorga yozadi (faqat admin)."""
+    from collections import defaultdict
+    all_stocks = db.query(Stock).all()
+    by_key = defaultdict(list)
+    for s in all_stocks:
+        by_key[(s.warehouse_id, s.product_id)].append(s)
+    merged = 0
+    for key, group in by_key.items():
+        if len(group) <= 1:
+            continue
+        total = sum(float(s.quantity or 0) for s in group)
+        keep = group[0]
+        keep.quantity = total
+        if hasattr(keep, "updated_at"):
+            keep.updated_at = datetime.now()
+        for s in group[1:]:
+            db.delete(s)
+            merged += 1
+    db.commit()
+    return RedirectResponse(
+        url=f"/reports/stock?merged={merged}",
+        status_code=303,
+    )
+
+
+@router.post("/stock/clear")
+async def report_stock_clear(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Stock jadvalini to'liq tozalash — barcha qoldiq yozuvlarini o'chirish (faqat admin). StockMovement tarixi saqlanadi."""
+    db.query(StockMovement).filter(StockMovement.stock_id.isnot(None)).update({StockMovement.stock_id: None}, synchronize_session=False)
+    deleted = db.query(Stock).delete()
+    db.commit()
+    from urllib.parse import quote
+    return RedirectResponse(
+        url=f"/reports/stock?cleared={deleted}&msg=" + quote("Stock jadvali tozalandi. Qoldiq hisoboti endi bo'sh."),
+        status_code=303,
+    )
+
+
+def _stock_report_filtered(db: Session, wh_id: int = None):
+    """Stock jadvalidan faqat tasdiqlangan manba va qoldiq > 0 bo'lgan qatorlarni qaytaradi (hisobot va eksport uchun)."""
+    q = (
         db.query(Stock)
         .join(Product, Stock.product_id == Product.id)
         .join(Warehouse, Stock.warehouse_id == Warehouse.id)
         .order_by(Warehouse.name, Product.name)
-        .all()
     )
+    if wh_id:
+        q = q.filter(Stock.warehouse_id == wh_id)
+    rows = q.all()
+    aggregated = {}
+    for s in rows:
+        key = (s.warehouse_id, s.product_id)
+        if key not in aggregated:
+            aggregated[key] = {"warehouse": s.warehouse, "product": s.product, "quantity": 0}
+        aggregated[key]["quantity"] += float(s.quantity or 0)
+    keys = list(aggregated.keys())
+    allowed_keys = set()
+    if keys:
+        mov_q = db.query(StockMovement).filter(
+            or_(*[and_(StockMovement.warehouse_id == k[0], StockMovement.product_id == k[1]) for k in keys])
+        ).all()
+        adj_doc_ids = {m.document_id for m in mov_q if (m.document_type or "") == "StockAdjustmentDoc" and m.document_id}
+        confirmed_adj_ids = set()
+        if adj_doc_ids:
+            confirmed_adj_ids = {
+                d.id for d in db.query(StockAdjustmentDoc.id).filter(
+                    StockAdjustmentDoc.id.in_(adj_doc_ids),
+                    StockAdjustmentDoc.status == "confirmed",
+                ).all()
+            }
+        for m in mov_q:
+            key = (m.warehouse_id, m.product_id)
+            if key not in aggregated:
+                continue
+            if (m.document_type or "") == "StockAdjustmentDoc":
+                if m.document_id in confirmed_adj_ids:
+                    allowed_keys.add(key)
+            else:
+                allowed_keys.add(key)
+    if allowed_keys:
+        aggregated = {k: v for k, v in aggregated.items() if k in allowed_keys}
+    else:
+        aggregated = {}
+    aggregated = {k: v for k, v in aggregated.items() if float(v.get("quantity") or 0) > 0}
+    return sorted(aggregated.values(), key=lambda x: ((x["warehouse"].name or "").lower(), (x["product"].name or "").lower()))
+
+
+@router.get("/stock/export")
+async def report_stock_export(
+    warehouse_id: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    wh_id = None
+    if warehouse_id is not None and str(warehouse_id).strip() != "":
+        try:
+            wh_id = int(warehouse_id)
+        except (ValueError, TypeError):
+            wh_id = None
+    values = _stock_report_filtered(db, wh_id)
+    stocks = [{"warehouse": v["warehouse"], "product": v["product"], "quantity": v["quantity"]} for v in values]
     wb = Workbook()
     ws = wb.active
     ws.title = "Qoldiq"
@@ -192,17 +427,36 @@ async def report_stock_andoza(current_user: User = Depends(require_auth)):
 
 @router.post("/stock/import")
 async def report_stock_import(
-    file: UploadFile = File(...),
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Exceldan qoldiqlarni yuklash. Ustunlar: Ombor nomi (yoki kodi), Mahsulot nomi (yoki kodi), Qoldiq; ixtiyoriy: Tannarx, Sotuv narxi."""
+    """Exceldan qoldiqlarni yuklash — hujjat qoralama holatida yaratiladi. doc_date bo'lsa shu sana ishlatiladi."""
+    from urllib.parse import quote
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
-    contents = await file.read()
+    form = await request.form()
+    file = form.get("file") or form.get("excel_file")
+    if not file or not getattr(file, "filename", None):
+        return RedirectResponse(url="/reports/stock?error=" + quote("Excel fayl tanlang"), status_code=303)
+    try:
+        contents = await file.read() if hasattr(file, "read") else (getattr(file, "file", None) and file.file.read() or b"")
+    except Exception:
+        contents = b""
+    if not contents:
+        return RedirectResponse(url="/reports/stock?error=" + quote("Fayl bo'sh"), status_code=303)
+    doc_date_str = (form.get("doc_date") or "").strip()
+    try:
+        if doc_date_str:
+            doc_date = datetime.strptime(doc_date_str, "%Y-%m-%d").replace(hour=23, minute=59, second=0, microsecond=0)
+        else:
+            doc_date = datetime.now()
+    except ValueError:
+        doc_date = datetime.now()
     wb = load_workbook(io.BytesIO(contents))
     ws = wb.active
     rows = list(ws.iter_rows(min_row=2, values_only=True))
+    items_data = []  # (product_id, warehouse_id, qty, tannarx, sotuv_narxi)
     for row in rows:
         if not row or (row[0] is None or row[0] == "") or (row[1] is None or row[1] == ""):
             continue
@@ -216,8 +470,8 @@ async def report_stock_import(
             qty = float(row[2]) if row[2] is not None and row[2] != "" else 0
         except (TypeError, ValueError):
             qty = 0
-        tannarx = None
-        sotuv_narxi = None
+        tannarx = 0.0
+        sotuv_narxi = 0.0
         if len(row) > 3 and row[3] is not None and row[3] != "":
             try:
                 tannarx = float(row[3])
@@ -241,21 +495,85 @@ async def report_stock_import(
             ).first()
         if not wh or not product:
             continue
-        stock = db.query(Stock).filter(
-            Stock.warehouse_id == wh.id,
-            Stock.product_id == product.id,
-        ).first()
-        if stock:
-            stock.quantity = qty
-        else:
-            stock = Stock(warehouse_id=wh.id, product_id=product.id, quantity=qty)
-            db.add(stock)
-        if tannarx is not None:
+        if tannarx > 0:
             product.purchase_price = tannarx
-        if sotuv_narxi is not None:
+        if sotuv_narxi > 0:
             product.sale_price = sotuv_narxi
-        db.commit()
-    return RedirectResponse(url="/reports/stock", status_code=303)
+        items_data.append((product.id, wh.id, qty, tannarx, sotuv_narxi))
+    if not items_data:
+        return RedirectResponse(
+            url="/reports/stock?error=" + quote("Hech qanday to'g'ri qator topilmadi"),
+            status_code=303,
+        )
+    doc_date_start = doc_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    doc_date_end = doc_date_start + timedelta(days=1)
+    count = db.query(StockAdjustmentDoc).filter(
+        StockAdjustmentDoc.date >= doc_date_start,
+        StockAdjustmentDoc.date < doc_date_end,
+    ).count()
+    number = f"QLD-{doc_date.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
+    total_tannarx = sum(qty * cp for _, _, qty, cp, _ in items_data)
+    total_sotuv = sum(qty * sp for _, _, qty, _, sp in items_data)
+    doc = StockAdjustmentDoc(
+        number=number,
+        date=doc_date,
+        user_id=current_user.id if current_user else None,
+        status="draft",
+        total_tannarx=total_tannarx,
+        total_sotuv=total_sotuv,
+    )
+    db.add(doc)
+    db.flush()
+    for pid, wid, qty, cp, sp in items_data:
+        db.add(StockAdjustmentDocItem(
+            doc_id=doc.id,
+            product_id=pid,
+            warehouse_id=wid,
+            quantity=qty,
+            cost_price=cp,
+            sale_price=sp,
+        ))
+    db.commit()
+    return RedirectResponse(
+        url=f"/qoldiqlar/tovar/hujjat/{doc.id}?from=import&msg=" + quote("Hujjat qoralama. Qoldiq hisobotida ko'rinishi uchun «Tasdiqlash» bosing."),
+        status_code=303,
+    )
+
+
+@router.get("/production", response_class=HTMLResponse)
+async def report_production(
+    request: Request,
+    start_date: str = None,
+    end_date: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Ishlab chiqarish hisoboti"""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    if not start_date:
+        start_date = datetime.now().replace(day=1).strftime("%Y-%m-%d")
+    if not end_date:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+    q = (
+        db.query(Production)
+        .filter(
+            Production.date >= start_date,
+            Production.date <= end_date + " 23:59:59",
+        )
+        .order_by(Production.date.desc())
+    )
+    productions = q.all()
+    total_qty = sum(p.quantity for p in productions if p.status == "completed")
+    return templates.TemplateResponse("reports/production.html", {
+        "request": request,
+        "productions": productions,
+        "total_qty": total_qty,
+        "start_date": start_date,
+        "end_date": end_date,
+        "page_title": "Ishlab chiqarish hisoboti",
+        "current_user": current_user,
+    })
 
 
 @router.get("/debts", response_class=HTMLResponse)

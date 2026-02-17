@@ -49,10 +49,27 @@
             {% endif %}
         </div>
         <div class="card-body py-2">
+            {% if request.query_params.get('msg') %}
+            <div class="alert alert-info py-2 small">{{ request.query_params.get('msg') }}</div>
+            {% endif %}
             {% if doc %}
             <div class="row hujjat-doc-info mb-2">
                 <div class="col-md-6">
-                    <p class="mb-0"><strong>Hujjat raqami:</strong> <span class="badge bg-primary">{{ doc.number }}</span> &nbsp; <strong>Sana:</strong> {{ doc.date.strftime('%d.%m.%Y %H:%M') if doc.date else '-' }} &nbsp; <strong>Foydalanuvchi:</strong> {{ doc.user.full_name or doc.user.username if doc.user else '-' }}</p>
+                    <p class="mb-0">
+                        <strong>Hujjat raqami:</strong> <span class="badge bg-primary">{{ doc.number }}</span> &nbsp;
+                        {% if doc.status == 'draft' %}
+                        <strong>Sana:</strong>
+                        <form method="post" action="/qoldiqlar/tovar/hujjat/{{ doc.id }}/update-date" class="d-inline" id="dateForm">
+                            <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
+                            <input type="datetime-local" name="date" value="{{ doc.date.strftime('%Y-%m-%dT%H:%M') if doc.date else '' }}" 
+                                   class="form-control form-control-sm d-inline-block" style="width: auto; display: inline;" 
+                                   onchange="document.getElementById('dateForm').submit();">
+                        </form>
+                        {% else %}
+                        <strong>Sana:</strong> {{ doc.date.strftime('%d.%m.%Y %H:%M') if doc.date else '-' }}
+                        {% endif %}
+                        &nbsp; <strong>Foydalanuvchi:</strong> {{ doc.user.full_name or doc.user.username if doc.user else '-' }}
+                    </p>
                 </div>
                 <div class="col-md-6">
                     <p class="mb-0"><strong>Holat:</strong> {% if doc.status == 'draft' %}<span class="badge bg-warning text-dark">Qoralama</span>{% else %}<span class="badge bg-success">Tasdiqlangan</span>{% endif %}

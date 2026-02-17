@@ -770,7 +770,7 @@ async def qoldiqlar_tovar_hujjat_tasdiqlash(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Hujjatni tasdiqlash — ombor qoldiqlariga qo'shiladi"""
+    """Hujjatni tasdiqlash — ombor qoldig'i hujjatdagi miqdorga o'rnatiladi (qo'shilmaydi). Bir ombor+mahsulot uchun bitta Stock qatori qoladi."""
     doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
@@ -780,18 +780,22 @@ async def qoldiqlar_tovar_hujjat_tasdiqlash(
         raise HTTPException(status_code=400, detail="Kamida bitta qator bo'lishi kerak")
 
     for item in doc.items:
-        stock = db.query(Stock).filter(
+        stocks = db.query(Stock).filter(
             Stock.warehouse_id == item.warehouse_id,
             Stock.product_id == item.product_id,
-        ).first()
-        if stock:
-            stock.quantity = (stock.quantity or 0) + item.quantity
-            stock.updated_at = datetime.now()
+        ).all()
+        new_quantity = item.quantity
+        if stocks:
+            keep = stocks[0]
+            keep.quantity = new_quantity
+            keep.updated_at = datetime.now()
+            for s in stocks[1:]:
+                db.delete(s)
         else:
             db.add(Stock(
                 warehouse_id=item.warehouse_id,
                 product_id=item.product_id,
-                quantity=item.quantity,
+                quantity=new_quantity,
             ))
     doc.status = "confirmed"
     db.commit()

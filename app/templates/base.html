@@ -331,12 +331,13 @@
     </style>
 
     {% block extra_css %}{% endblock %}
-    {% set sotuvchi_no_sidebar = (current_user.role if current_user else '') == 'sotuvchi' %}
+    {% set user_role_for_sidebar = (current_user.role if current_user else '')|lower %}
+    {% set no_sidebar = user_role_for_sidebar not in ['admin', 'manager'] %}
 </head>
 
-<body class="{% if sotuvchi_no_sidebar %}pos-fullscreen{% endif %}">
-    <!-- Sidebar va mobile header sotuvchi uchun ko'rinmasin -->
-    {% if not sotuvchi_no_sidebar %}
+<body class="{% if no_sidebar %}pos-fullscreen{% endif %}">
+    <!-- Sidebar va mobile header sotuvchi, production, qadoqlash uchun ko'rinmasin -->
+    {% if not no_sidebar %}
     <div class="mobile-header">
         <div class="hamburger" onclick="toggleSidebar()">
             <i class="bi bi-list"></i>
@@ -450,6 +451,11 @@
                         <li class="nav-item">
                             <a class="nav-link {% if page_title == 'Qoldiqlar' %}active{% endif %}" href="/qoldiqlar">
                                 <i class="bi bi-wallet2"></i> Qoldiqlar
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if page_title == 'Inventarizatsiya' %}active{% endif %}" href="/inventory">
+                                <i class="bi bi-clipboard-check"></i> Inventarizatsiya
                             </a>
                         </li>
                         <li class="nav-item">
@@ -769,7 +775,7 @@
 
     <!-- Main Content -->
     <div class="main-content">
-        <div class="top-bar {% if sotuvchi_no_sidebar %}d-none{% endif %}">
+        <div class="top-bar {% if no_sidebar %}d-none{% endif %}">
             <h5>{{ page_title }}</h5>
             <div class="d-flex align-items-center">
                 {% if current_user %}

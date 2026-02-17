@@ -35,6 +35,9 @@
             {% endif %}
         </div>
         <div class="card-body">
+            {% if request.query_params.get('msg') %}
+            <div class="alert alert-info py-2 small">{{ request.query_params.get('msg') }}</div>
+            {% endif %}
             {% if doc %}
             <p class="text-muted small mb-2">Foydalanuvchi: {{ doc.user.full_name or doc.user.username if doc.user else '-' }}</p>
             <p class="small mb-3 text-muted"><strong>Balans:</strong> musbat = mijoz bizga qarzdor (uning qarzi), manfiy = biz unga qarzdormiz (bizning qarzimiz).</p>

@@ -7,6 +7,20 @@
     <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addRecipeModal"><i class="bi bi-plus-circle"></i> Yaratish</button>
 </div>
 
+{% if request.query_params.get('error') == 'delete' and request.query_params.get('detail') %}
+<div class="alert alert-danger alert-dismissible fade show" role="alert">
+    <i class="bi bi-exclamation-triangle"></i> {{ request.query_params.get('detail') }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+{% if request.query_params.get('success') == 'deleted' %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    <i class="bi bi-check-circle"></i> Retsept muvaffaqiyatli o'chirildi.
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
 <div class="row g-3">
     {% for recipe in recipes %}
     <div class="col-md-4">
@@ -47,6 +61,14 @@
                 <button class="btn btn-sm btn-success" onclick="quickProduce({{ recipe.id }}, '{{ recipe.name }}')">
                     <i class="bi bi-play-fill"></i> Ishlab chiqarish
                 </button>
+                {% if current_user and current_user.role == 'admin' %}
+                <form method="POST" action="/production/recipes/{{ recipe.id }}/delete" class="d-inline" onsubmit="return confirm('Ushbu retseptni o\'chirmoqchimisiz? Bu amalni qaytarib bo\'lmaydi.');">
+                    <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                        <i class="bi bi-trash"></i> O'chirish
+                    </button>
+                </form>
+                {% endif %}
             </div>
         </div>
     </div>

@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% if request.query_params.get('recalculated') == '1' %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    <strong>Balans qayta hisoblandi!</strong> Yangi balans: {{ "{:,.0f}".format(request.query_params.get('balance')|float) }} so'm
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
 <div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="mb-0"><i class="bi bi-cash-stack"></i> Kassalar</h4>
@@ -50,6 +56,12 @@
                                 onclick="editCash({{ cash.id }}, `{{ cash.name }}`, {{ cash.balance }}, {{ cash.department_id or 'null' }})">
                                 <i class="bi bi-pencil"></i>
                             </button>
+                            {% if current_user and current_user.role == 'admin' %}
+                            <button class="btn btn-sm btn-outline-warning" title="Balansni qayta hisoblash (Payment yozuvlaridan)"
+                                onclick="recalculateCash({{ cash.id }}, `{{ cash.name }}`)">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            {% endif %}
                             <button class="btn btn-sm btn-outline-danger" title="O'chirish"
                                 onclick="deleteCash({{ cash.id }}, `{{ cash.name }}`)">
                                 <i class="bi bi-trash"></i>
@@ -217,6 +229,22 @@
             var form = document.createElement('form');
             form.method = 'POST';
             form.action = '/info/cash/delete/' + id;
+            var csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            var meta = document.querySelector('meta[name="csrf-token"]');
+            csrfInput.value = meta ? meta.getAttribute('content') : '';
+            form.appendChild(csrfInput);
+            document.body.appendChild(form);
+            form.submit();
+        }
+    }
+
+    function recalculateCash(id, name) {
+        if (confirm('"' + name + '" kassa balansini Payment yozuvlaridan qayta hisoblashni xohlaysizmi?\n\n⚠️ Bu amal mavjud balansni Payment yozuvlaridan hisoblangan balansga o\'zgartiradi.')) {
+            var form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/info/cash/recalculate/' + id;
             var csrfInput = document.createElement('input');
             csrfInput.type = 'hidden';
             csrfInput.name = 'csrf_token';

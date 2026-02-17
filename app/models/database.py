@@ -214,7 +214,7 @@ class Warehouse(Base):
     is_active = Column(Boolean, default=True)
     
     stocks = relationship("Stock", back_populates="warehouse")
-    department = relationship("Department")
+    department = relationship("Department", back_populates="warehouses")
 
 
 class Stock(Base):
@@ -697,7 +697,7 @@ class CashRegister(Base):
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)  # Bo'limga biriktirish
     is_active = Column(Boolean, default=True)
     
-    department = relationship("Department")
+    department = relationship("Department", back_populates="cash_registers")
 
 
 # Foydalanuvchi — bir nechta bo'lim, ombor, kassa (many-to-many)
@@ -1048,8 +1048,8 @@ class Department(Base):
     created_at = Column(DateTime, default=datetime.now)
     
     # Relationships
-    warehouses = relationship("Warehouse", backref="warehouse_department")
-    cash_registers = relationship("CashRegister", backref="cash_department")
+    warehouses = relationship("Warehouse", back_populates="department")
+    cash_registers = relationship("CashRegister", back_populates="department")
 
 
 class Direction(Base):

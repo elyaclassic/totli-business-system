@@ -12,7 +12,7 @@
 
 <div class="alert alert-info">
     <strong>{{ production.number }}</strong> — {{ recipe.name }}<br>
-    <strong>Ishlab chiqarish miqdori: {{ "%.1f"|format(production.quantity) }} kg</strong> (o'zgarmaydi).<br>
+    <strong>Ishlab chiqarish miqdori: {{ "%.2f"|format(production.quantity) }} kg</strong> (o'zgarmaydi).<br>
     {% if read_only %}
     <span class="badge bg-success">Yakunlangan</span> — faqat ko'rish rejimi. Tasdiqni bekor qilish uchun pastdagi tugmani bosing.
     {% else %}

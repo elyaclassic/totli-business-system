@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    .inventory-table { font-size: 0.875rem; }
+    .inventory-table th, .inventory-table td { padding: 0.5rem; vertical-align: middle; }
+    .inventory-table input[type="number"] { width: 100%; min-width: 80px; }
+    .diff-positive { color: #28a745; font-weight: bold; }
+    .diff-negative { color: #dc3545; font-weight: bold; }
+    .diff-zero { color: #6c757d; }
+</style>
+
+<div class="container-fluid">
+    <div class="mb-3">
+        <h4 class="mb-0"><i class="bi bi-clipboard-check"></i> Inventarizatsiya</h4>
+        <p class="text-muted small mb-3">Ombordagi tovarlarni hisobga olish va haqiqiy qoldiqlarni kiritish</p>
+    </div>
+
+    {% if request.query_params.get('message') %}
+    <div class="alert alert-info alert-dismissible fade show" role="alert">
+        {{ request.query_params.get('message') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="get" action="/inventory" class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label">Ombor tanlang</label>
+                    <select name="warehouse_id" class="form-select" required onchange="this.form.submit();">
+                        <option value="">Tanlang...</option>
+                        {% for wh in warehouses %}
+                        <option value="{{ wh.id }}" {% if selected_warehouse_id == wh.id %}selected{% endif %}>
+                            {{ wh.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-8">
+                    {% if selected_warehouse_id %}
+                    <a href="/inventory" class="btn btn-outline-secondary">Omborni o'zgartirish</a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if selected_warehouse_id and products_data %}
+    <form method="post" action="/inventory/confirm" id="inventoryForm">
+        <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
+        <input type="hidden" name="warehouse_id" value="{{ selected_warehouse_id }}">
+        
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Tovarlar ro'yxati ({{ products_data|length }} ta)</h5>
+                <button type="submit" class="btn btn-success" onclick="return confirm('Inventarizatsiya natijalarini tasdiqlashni xohlaysizmi? Farq bo\'lgan tovarlar uchun qoldiq hujjati yaratiladi.');">
+                    <i class="bi bi-check-circle"></i> Tasdiqlash
+                </button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover inventory-table mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 40px;">№</th>
+                                <th>Tovar</th>
+                                <th style="width: 120px;" class="text-end">Hisobiy qoldiq</th>
+                                <th style="width: 120px;" class="text-end">Haqiqiy qoldiq</th>
+                                <th style="width: 120px;" class="text-end">Farq</th>
+                                <th style="width: 100px;" class="text-end">Tannarx</th>
+                                <th style="width: 100px;" class="text-end">Sotuv narx</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in products_data %}
+                            <tr>
+                                <td class="text-center">{{ loop.index }}</td>
+                                <td>
+                                    <strong>{{ item.product_name }}</strong>
+                                    {% if item.product_code %}
+                                    <br><small class="text-muted"><code>{{ item.product_code }}</code></small>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">
+                                    <span class="fw-bold">{{ "{:,.3f}".format(item.current_quantity) }}</span>
+                                </td>
+                                <td class="text-end">
+                                    <input type="hidden" name="product_id" value="{{ item.product_id }}">
+                                    <input type="number" 
+                                           name="actual_quantity" 
+                                           class="form-control form-control-sm text-end" 
+                                           step="0.001" 
+                                           min="0" 
+                                           value="{{ "%.3f"|format(item.current_quantity) }}"
+                                           data-current="{{ "%.3f"|format(item.current_quantity) }}"
+                                           onchange="updateDiff(this);">
+                                </td>
+                                <td class="text-end">
+                                    <span class="diff-value diff-zero" data-product-id="{{ item.product_id }}">0.000</span>
+                                </td>
+                                <td class="text-end">{{ "{:,.0f}".format(item.cost_price) }}</td>
+                                <td class="text-end">{{ "{:,.0f}".format(item.sale_price) }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="7" class="text-muted text-center py-4">
+                                    Bu omborda tovarlar topilmadi.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </form>
+    {% elif selected_warehouse_id %}
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i> Bu omborda tovarlar topilmadi.
+    </div>
+    {% else %}
+    <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i> Inventarizatsiya qilish uchun ombor tanlang.
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function updateDiff(input) {
+    const currentQty = parseFloat(input.getAttribute('data-current')) || 0;
+    const actualQty = parseFloat(input.value) || 0;
+    const diff = actualQty - currentQty;
+    
+    const row = input.closest('tr');
+    const diffSpan = row.querySelector('.diff-value');
+    
+    if (diffSpan) {
+        diffSpan.textContent = diff.toFixed(3);
+        diffSpan.className = 'diff-value';
+        
+        if (diff > 0.001) {
+            diffSpan.classList.add('diff-positive');
+        } else if (diff < -0.001) {
+            diffSpan.classList.add('diff-negative');
+        } else {
+            diffSpan.classList.add('diff-zero');
+        }
+    }
+}
+
+// Barcha inputlarni yangilash
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('input[name="actual_quantity"]').forEach(function(input) {
+        updateDiff(input);
+    });
+});
+</script>
+{% endblock %}
