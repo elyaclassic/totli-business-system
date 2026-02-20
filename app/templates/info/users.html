@@ -67,6 +67,7 @@
                             data-full-name="{{ user.full_name }}"
                             data-role="{{ user.role }}"
                             data-active="{{ 'true' if user.is_active else 'false' }}"
+                            data-allowed-sections="{{ user.allowed_sections or '' }}"
                             data-department-ids="{% if user.departments_list %}{% for d in user.departments_list %}{{ d.id }}{% if not loop.last %},{% endif %}{% endfor %}{% endif %}"
                             data-department-names="{% if user.departments_list %}{% for d in user.departments_list %}{{ d.name }}{% if not loop.last %}|||{% endif %}{% endfor %}{% endif %}"
                             data-warehouse-ids="{% if user.warehouses_list %}{% for w in user.warehouses_list %}{{ w.id }}{% if not loop.last %},{% endif %}{% endfor %}{% endif %}"
@@ -205,6 +206,38 @@
                         </div>
                     </div>
                     <small class="text-muted small d-block mb-2" style="font-size:0.7rem">Sotuvchi: bo'lim/ombor → sotuv oynasi; kassa — biriktiriladi.</small>
+
+                    <!-- Ruxsatlar (Hisobotlar) -->
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">Hisobotlar ruxsati</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="allowed_sections" value="reports_sales" id="perm_sales">
+                                <label class="form-check-label small" for="perm_sales">Savdo hisoboti</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="allowed_sections" value="reports_stock" id="perm_stock">
+                                <label class="form-check-label small" for="perm_stock">Qoldiq hisoboti</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="allowed_sections" value="reports_debts" id="perm_debts">
+                                <label class="form-check-label small" for="perm_debts">Qarzdorlik</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="allowed_sections" value="reports_production" id="perm_production">
+                                <label class="form-check-label small" for="perm_production">Ishlab chiqarish</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="allowed_sections" value="reports_employees" id="perm_employees">
+                                <label class="form-check-label small" for="perm_employees">Xodimlar</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="allowed_sections" value="reports_profit" id="perm_profit">
+                                <label class="form-check-label small" for="perm_profit">Foyda hisoboti</label>
+                            </div>
+                        </div>
+                        <small class="text-muted small d-block mt-1" style="font-size:0.7rem">Admin uchun barcha hisobotlar avtomatik ochiq.</small>
+                    </div>
 
                     <!-- PWA uchun qo'shimcha maydonlar -->
                     <div id="pwaFields" style="display:none;" class="mb-2">
@@ -380,6 +413,37 @@
                             <div id="edit_cash_register_list" class="d-flex flex-wrap gap-1 mt-1"></div>
                         </div>
                     </div>
+                    <!-- Ruxsatlar (Hisobotlar) -->
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">Hisobotlar ruxsati</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="allowed_sections" value="reports_sales" id="edit_perm_sales">
+                                <label class="form-check-label small" for="edit_perm_sales">Savdo hisoboti</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="allowed_sections" value="reports_stock" id="edit_perm_stock">
+                                <label class="form-check-label small" for="edit_perm_stock">Qoldiq hisoboti</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="allowed_sections" value="reports_debts" id="edit_perm_debts">
+                                <label class="form-check-label small" for="edit_perm_debts">Qarzdorlik</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="allowed_sections" value="reports_production" id="edit_perm_production">
+                                <label class="form-check-label small" for="edit_perm_production">Ishlab chiqarish</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="allowed_sections" value="reports_employees" id="edit_perm_employees">
+                                <label class="form-check-label small" for="edit_perm_employees">Xodimlar</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="allowed_sections" value="reports_profit" id="edit_perm_profit">
+                                <label class="form-check-label small" for="edit_perm_profit">Foyda hisoboti</label>
+                            </div>
+                        </div>
+                        <small class="text-muted small d-block mt-1" style="font-size:0.7rem">Admin uchun barcha hisobotlar avtomatik ochiq.</small>
+                    </div>
                 </div>
                 <div class="modal-footer py-2">
                     <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
@@ -431,6 +495,31 @@
         document.getElementById('edit_full_name').value = btn.getAttribute('data-full-name') || '';
         document.getElementById('edit_role').value = btn.getAttribute('data-role') || 'user';
         document.getElementById('edit_is_active').checked = btn.getAttribute('data-active') === 'true';
+        // Ruxsatlarni to'ldirish
+        var allowedSectionsStr = btn.getAttribute('data-allowed-sections') || '';
+        if (allowedSectionsStr) {
+            try {
+                var allowedSections = JSON.parse(allowedSectionsStr);
+                if (Array.isArray(allowedSections)) {
+                    document.getElementById('edit_perm_sales').checked = allowedSections.indexOf('reports_sales') !== -1;
+                    document.getElementById('edit_perm_stock').checked = allowedSections.indexOf('reports_stock') !== -1;
+                    document.getElementById('edit_perm_debts').checked = allowedSections.indexOf('reports_debts') !== -1;
+                    document.getElementById('edit_perm_production').checked = allowedSections.indexOf('reports_production') !== -1;
+                    document.getElementById('edit_perm_employees').checked = allowedSections.indexOf('reports_employees') !== -1;
+                    document.getElementById('edit_perm_profit').checked = allowedSections.indexOf('reports_profit') !== -1;
+                }
+            } catch (e) {
+                console.warn('allowed_sections parse error:', e);
+            }
+        } else {
+            // Ruxsatlar yo'q bo'lsa, barcha checkbox'larni o'chirish
+            document.getElementById('edit_perm_sales').checked = false;
+            document.getElementById('edit_perm_stock').checked = false;
+            document.getElementById('edit_perm_debts').checked = false;
+            document.getElementById('edit_perm_production').checked = false;
+            document.getElementById('edit_perm_employees').checked = false;
+            document.getElementById('edit_perm_profit').checked = false;
+        }
         function fillList(idsStr, namesStr, containerId, listId, inputName) {
             var container = document.getElementById(containerId);
             var listEl = document.getElementById(listId);

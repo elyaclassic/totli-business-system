@@ -1,6 +1,27 @@
 {% extends "base.html" %}
 
 {% block content %}
+<style>
+    .recipe_search_results {
+        position: fixed !important;
+        z-index: 9999 !important;
+        max-height: 300px !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        display: none !important;
+        background: white !important;
+        border: 1px solid #dee2e6 !important;
+        border-radius: 0.25rem !important;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15) !important;
+    }
+    .recipe_search_results.show {
+        display: block !important;
+    }
+    .recipe_search_results .list-group-item:hover {
+        background-color: #f8f9fa;
+        cursor: pointer;
+    }
+</style>
 <div class="d-flex justify-content-between mb-4">
     <div>
         <a href="/production" class="btn btn-outline-secondary btn-sm mb-2">
@@ -21,12 +42,21 @@
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label class="form-label">Retsept <span class="text-danger">*</span></label>
-                            <select class="form-select" name="recipe_id" id="recipeSelect" required onchange="updateRecipeInfo()">
+                            <div class="recipe-search-wrapper" style="position: relative;">
+                                <input type="text" class="form-control recipe-search-input" id="recipeSearch" 
+                                    placeholder="Retsept nomini yozib qidiring..." autocomplete="off">
+                                <input type="hidden" name="recipe_id" id="recipeSelect" required>
+                                <div class="recipe_search_results list-group" id="recipeSearchResults" style="display: none;"></div>
+                            </div>
+                            <select id="recipeSelectHidden" style="display: none;" onchange="updateRecipeInfo()">
                                 <option value="">Tanlang...</option>
                                 {% for recipe in recipes %}
                                 <option value="{{ recipe.id }}" 
+                                        data-name="{{ recipe.name|e }}"
                                         data-items="{{ recipe.items|length }}"
-                                        data-output="{{ recipe.output_quantity }}">
+                                        data-output="{{ recipe.output_quantity }}"
+                                        data-default-warehouse="{{ recipe.default_warehouse_id or '' }}"
+                                        data-default-output-warehouse="{{ recipe.default_output_warehouse_id or '' }}">
                                     {{ recipe.name }}
                                 </option>
                                 {% endfor %}
@@ -74,9 +104,9 @@
                         <div class="col-md-6">
                             <label class="form-label">Operator (xodim)</label>
                             <select class="form-select" name="operator_id">
-                                <option value="">— Tanlash —</option>
+                                <option value="" {% if not current_user_employee_id %}selected{% endif %}>{{ current_user.full_name if (current_user and not current_user_employee_id) else '— Tanlash —' }}</option>
                                 {% for emp in employees or [] %}
-                                <option value="{{ emp.id }}">{{ emp.full_name }}</option>
+                                <option value="{{ emp.id }}" {% if current_user_employee_id and emp.id == current_user_employee_id %}selected{% endif %}>{{ emp.full_name }}</option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -392,6 +422,116 @@ var recipes = {
     }{% if not loop.last %},{% endif %}
     {% endfor %}
 };
+
+// Retsept qidirish funksiyasi
+(function() {
+    var recipeSearch = document.getElementById('recipeSearch');
+    var recipeSelect = document.getElementById('recipeSelect');
+    var recipeSelectHidden = document.getElementById('recipeSelectHidden');
+    var recipeSearchResults = document.getElementById('recipeSearchResults');
+    
+    if (!recipeSearch || !recipeSelect || !recipeSelectHidden || !recipeSearchResults) return;
+    
+    function showRecipeResults(term) {
+        term = (term || '').trim().toLowerCase();
+        recipeSearchResults.innerHTML = '';
+        recipeSearchResults.classList.remove('show');
+        recipeSearchResults.style.setProperty('display', 'none', 'important');
+        
+        if (!term) {
+            recipeSelect.value = '';
+            updateRecipeInfo();
+            return;
+        }
+        
+        const options = Array.from(recipeSelectHidden.options).slice(1);
+        const matches = options.filter(function(opt) {
+            const name = (opt.dataset.name || opt.textContent || '').toLowerCase();
+            return name.indexOf(term) !== -1;
+        });
+        
+        if (matches.length > 0) {
+            const inputRect = recipeSearch.getBoundingClientRect();
+            recipeSearchResults.style.position = 'fixed';
+            recipeSearchResults.style.left = inputRect.left + 'px';
+            recipeSearchResults.style.top = (inputRect.bottom + 2) + 'px';
+            recipeSearchResults.style.width = inputRect.width + 'px';
+            recipeSearchResults.style.maxHeight = '300px';
+            recipeSearchResults.style.overflowY = 'auto';
+            recipeSearchResults.style.zIndex = '9999';
+            recipeSearchResults.classList.add('show');
+            recipeSearchResults.style.setProperty('display', 'block', 'important');
+            
+            matches.forEach(function(opt) {
+                const item = document.createElement('a');
+                item.href = '#';
+                item.className = 'list-group-item list-group-item-action';
+                const displayName = opt.dataset.name || opt.textContent || '';
+                const defaultWh = opt.getAttribute('data-default-warehouse') || '';
+                const defaultOutWh = opt.getAttribute('data-default-output-warehouse') || '';
+                item.innerHTML = '<strong>' + displayName + '</strong>';
+                item.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    recipeSearch.value = displayName;
+                    recipeSelect.value = opt.value;
+                    recipeSearchResults.classList.remove('show');
+                    recipeSearchResults.style.setProperty('display', 'none', 'important');
+                    if (defaultWh) {
+                        var s = document.querySelector('select[name="warehouse_id"]');
+                        if (s) s.value = defaultWh;
+                    }
+                    if (defaultOutWh) {
+                        var s = document.querySelector('select[name="output_warehouse_id"]');
+                        if (s) s.value = defaultOutWh;
+                    }
+                    updateRecipeInfo();
+                });
+                recipeSearchResults.appendChild(item);
+            });
+        } else {
+            const inputRect = recipeSearch.getBoundingClientRect();
+            recipeSearchResults.style.position = 'fixed';
+            recipeSearchResults.style.left = inputRect.left + 'px';
+            recipeSearchResults.style.top = (inputRect.bottom + 2) + 'px';
+            recipeSearchResults.style.width = inputRect.width + 'px';
+            recipeSearchResults.style.zIndex = '9999';
+            recipeSearchResults.classList.add('show');
+            recipeSearchResults.style.setProperty('display', 'block', 'important');
+            recipeSearchResults.innerHTML = '<div class="list-group-item text-muted">Topilmadi.</div>';
+        }
+    }
+    
+    recipeSearch.addEventListener('focus', function() {
+        const currentValue = this.value.trim();
+        if (currentValue) {
+            showRecipeResults(currentValue);
+        }
+    });
+    
+    recipeSearch.addEventListener('input', function() {
+        showRecipeResults(this.value);
+    });
+    
+    recipeSearch.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            recipeSearchResults.classList.remove('show');
+            recipeSearchResults.style.setProperty('display', 'none', 'important');
+        }
+    });
+    
+    document.addEventListener('click', function(e) {
+        if (!recipeSearch.contains(e.target) && !recipeSearchResults.contains(e.target)) {
+            recipeSearchResults.classList.remove('show');
+            recipeSearchResults.style.setProperty('display', 'none', 'important');
+        }
+    });
+    
+    // Retsept tanlanganda avtomatik yangilash
+    recipeSelect.addEventListener('input', function() {
+        updateRecipeInfo();
+    });
+})();
 
 function updateRecipeInfo() {
     var select = document.getElementById('recipeSelect');

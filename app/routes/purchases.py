@@ -24,6 +24,11 @@ from app.models.database import (
 )
 from app.deps import require_auth, require_admin
 from app.utils.notifications import check_low_stock_and_notify
+from app.utils.product_price import get_suggested_price
+from fastapi.responses import JSONResponse
+from fastapi import Query
+from app.utils.product_price import get_suggested_price
+from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/purchases", tags=["purchases"])
 
@@ -285,21 +290,47 @@ async def purchase_confirm(
     total_expenses = purchase.total_expenses or 0
     items_total = purchase.total or 0
     for item in purchase.items:
+        # Avval eski qoldiqni olish (tasdiqlashdan oldin)
         stock = db.query(Stock).filter(
             Stock.warehouse_id == purchase.warehouse_id,
             Stock.product_id == item.product_id,
         ).first()
+        
+        product = db.query(Product).filter(Product.id == item.product_id).first()
+        if product:
+            # Xarajatlar ulushini hisoblash
+            expense_share_per_unit = 0.0
+            if total_expenses > 0 and items_total > 0 and item.total and item.quantity:
+                expense_share = (item.total / items_total) * total_expenses
+                expense_share_per_unit = expense_share / item.quantity
+            
+            # Yangi narx (xarajatlar bilan)
+            new_cost_per_unit = item.price + expense_share_per_unit
+            new_total_cost = item.quantity * new_cost_per_unit
+            
+            # Eski qoldiq va narx
+            old_quantity = stock.quantity if stock else 0.0
+            old_price = product.purchase_price if product.purchase_price else 0.0
+            
+            # O'rtacha tannarxni hisoblash
+            if old_quantity > 0 and old_price > 0:
+                # O'rtacha tannarx = (Eski miqdor * Eski narx + Yangi miqdor * Yangi narx) / (Eski miqdor + Yangi miqdor)
+                old_total_cost = old_quantity * old_price
+                total_quantity = old_quantity + item.quantity
+                total_cost = old_total_cost + new_total_cost
+                average_cost = total_cost / total_quantity if total_quantity > 0 else new_cost_per_unit
+            else:
+                # Agar eski qoldiq yo'q bo'lsa, yangi narxni ishlatish
+                average_cost = new_cost_per_unit
+            
+            # Mahsulotning o'rtacha tannarxini yangilash
+            product.purchase_price = average_cost
+        
+        # Qoldiqni yangilash
         if stock:
             stock.quantity += item.quantity
         else:
             db.add(Stock(warehouse_id=purchase.warehouse_id, product_id=item.product_id, quantity=item.quantity))
-        product = db.query(Product).filter(Product.id == item.product_id).first()
-        if product:
-            cost_per_unit = item.price
-            if total_expenses > 0 and items_total > 0 and item.total and item.quantity:
-                expense_share = (item.total / items_total) * total_expenses
-                cost_per_unit = item.price + (expense_share / item.quantity)
-            product.purchase_price = cost_per_unit
     purchase.status = "confirmed"
     total_with_expenses = items_total + total_expenses
     if purchase.partner_id:
@@ -309,6 +340,28 @@ async def purchase_confirm(
     db.commit()
     check_low_stock_and_notify(db)
     return RedirectResponse(url="/purchases", status_code=303)
+
+
+@router.get("/api/product-price")
+async def get_product_price(
+    product_id: int,
+    warehouse_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """
+    Mahsulot uchun taklif qilingan narxni olish (oxirgi narx yoki o'rtacha tannarx).
+    """
+    try:
+        price = get_suggested_price(
+            db=db,
+            product_id=product_id,
+            warehouse_id=warehouse_id,
+            use_average=True  # O'rtacha tannarxni ishlatish
+        )
+        return JSONResponse({"price": price})
+    except Exception as e:
+        return JSONResponse({"price": 0, "error": str(e)}, status_code=500)
 
 
 @router.post("/{purchase_id}/revert")
@@ -349,6 +402,28 @@ async def purchase_revert(
     purchase.status = "draft"
     db.commit()
     return RedirectResponse(url=f"/purchases/edit/{purchase_id}", status_code=303)
+
+
+@router.get("/api/product-price")
+async def get_product_price_api(
+    product_id: int = Query(...),
+    warehouse_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """
+    Mahsulot uchun taklif qilingan narxni olish (oxirgi narx yoki o'rtacha tannarx).
+    """
+    try:
+        price = get_suggested_price(
+            db=db,
+            product_id=product_id,
+            warehouse_id=warehouse_id,
+            use_average=True  # O'rtacha tannarxni ishlatish
+        )
+        return JSONResponse({"price": price})
+    except Exception as e:
+        return JSONResponse({"price": 0, "error": str(e)}, status_code=500)
 
 
 @router.post("/{purchase_id}/delete")

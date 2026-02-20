@@ -2,6 +2,7 @@
 Hisobotlar — savdo, qoldiq, qarzdorlik va Excel export.
 """
 import io
+import json
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, Depends, File, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -17,15 +18,64 @@ from app.deps import get_current_user, require_auth, require_admin
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
+def get_allowed_report_types(user: User) -> list:
+    """Foydalanuvchiga ruxsat berilgan hisobot turlarini qaytaradi."""
+    if not user:
+        return []
+    # Admin uchun barcha hisobotlar
+    if user.role == "admin":
+        return ["sales", "stock", "debts", "production", "employees", "profit"]
+    # allowed_sections bo'sh yoki None bo'lsa, hech narsa ko'rsatilmaydi
+    if not user.allowed_sections:
+        return []
+    try:
+        sections = json.loads(user.allowed_sections) if isinstance(user.allowed_sections, str) else user.allowed_sections
+        if not isinstance(sections, list):
+            return []
+        # allowed_sections ichida "reports_sales", "reports_stock" kabi formatda bo'lishi mumkin
+        report_types = []
+        for s in sections:
+            if isinstance(s, str) and s.startswith("reports_"):
+                report_type = s.replace("reports_", "")
+                if report_type in ["sales", "stock", "debts", "production", "employees", "profit"]:
+                    report_types.append(report_type)
+        return report_types
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return []
+
+
 @router.get("", response_class=HTMLResponse)
 async def reports_index(request: Request, current_user: User = Depends(require_auth)):
     """Hisobotlar bosh sahifasi"""
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
+    allowed_types = get_allowed_report_types(current_user)
     return templates.TemplateResponse("reports/index.html", {
         "request": request,
         "page_title": "Hisobotlar",
         "current_user": current_user,
+        "allowed_report_types": allowed_types,
+    })
+
+
+@router.get("/form", response_class=HTMLResponse)
+async def reports_form(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
+    """Hisobotlar formasi — hisobot turi va filtrlarni tanlash"""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    today = datetime.now()
+    start_date = today.replace(day=1).strftime("%Y-%m-%d")
+    end_date = today.strftime("%Y-%m-%d")
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
+    allowed_types = get_allowed_report_types(current_user)
+    return templates.TemplateResponse("reports/form.html", {
+        "request": request,
+        "page_title": "Hisobotlar formasi",
+        "current_user": current_user,
+        "start_date": start_date,
+        "end_date": end_date,
+        "warehouses": warehouses,
+        "allowed_report_types": allowed_types,
     })
 
 

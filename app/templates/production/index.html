@@ -1,6 +1,27 @@
 {% extends "base.html" %}
 
 {% block content %}
+<style>
+    .recipe_search_results {
+        position: fixed !important;
+        z-index: 9999 !important;
+        max-height: 300px !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        display: none !important;
+        background: white !important;
+        border: 1px solid #dee2e6 !important;
+        border-radius: 0.25rem !important;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15) !important;
+    }
+    .recipe_search_results.show {
+        display: block !important;
+    }
+    .recipe_search_results .list-group-item:hover {
+        background-color: #f8f9fa;
+        cursor: pointer;
+    }
+</style>
 <div class="d-flex justify-content-between mb-4">
     <h4><i class="bi bi-gear-fill"></i> Ishlab chiqarish</h4>
     <a href="/production/new" class="btn btn-primary">
@@ -77,10 +98,16 @@
                 <form method="POST" action="/production/create">
                     <div class="mb-3">
                         <label class="form-label">Retsept</label>
-                        <select class="form-select" name="recipe_id" id="quickRecipeSelect" required>
+                        <div class="recipe-search-wrapper" style="position: relative;">
+                            <input type="text" class="form-control recipe-search-input" id="quickRecipeSearch" 
+                                placeholder="Retsept nomini yozib qidiring..." autocomplete="off">
+                            <input type="hidden" name="recipe_id" id="quickRecipeSelect" required>
+                            <div class="recipe_search_results list-group" id="quickRecipeSearchResults" style="display: none;"></div>
+                        </div>
+                        <select id="quickRecipeSelectHidden" style="display: none;">
                             <option value="">Tanlang...</option>
                             {% for recipe in recipes %}
-                            <option value="{{ recipe.id }}" data-unit="{{ recipe.product.unit.name if recipe.product and recipe.product.unit else 'kg' }}">{{ recipe.name }}</option>
+                            <option value="{{ recipe.id }}" data-name="{{ recipe.name|e }}" data-unit="{{ recipe.product.unit.name if recipe.product and recipe.product.unit else 'kg' }}" data-default-warehouse="{{ recipe.default_warehouse_id or '' }}" data-default-output-warehouse="{{ recipe.default_output_warehouse_id or '' }}">{{ recipe.name }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -353,15 +380,149 @@
         if (qtyInput) qtyInput.addEventListener('keydown', function(e) {
             if (e.key === 'F4') { e.preventDefault(); openCalcForInput(this); }
         });
+        // Retsept qidirish funksiyasi
+        var quickRecipeSearch = document.getElementById('quickRecipeSearch');
         var quickRecipeSelect = document.getElementById('quickRecipeSelect');
+        var quickRecipeSelectHidden = document.getElementById('quickRecipeSelectHidden');
+        var quickRecipeSearchResults = document.getElementById('quickRecipeSearchResults');
         var quickQuantityUnit = document.getElementById('quickQuantityUnit');
-        if (quickRecipeSelect && quickQuantityUnit) {
-            quickRecipeSelect.addEventListener('change', function() {
-                var opt = this.options[this.selectedIndex];
-                quickQuantityUnit.textContent = (opt && opt.getAttribute('data-unit')) ? opt.getAttribute('data-unit') : 'kg';
+        
+        function showRecipeResults(term) {
+            term = (term || '').trim().toLowerCase();
+            quickRecipeSearchResults.innerHTML = '';
+            quickRecipeSearchResults.classList.remove('show');
+            quickRecipeSearchResults.style.setProperty('display', 'none', 'important');
+            
+            if (!term) {
+                quickRecipeSelect.value = '';
+                if (quickQuantityUnit) quickQuantityUnit.textContent = 'kg';
+                return;
+            }
+            
+            if (!quickRecipeSelectHidden) return;
+            
+            const options = Array.from(quickRecipeSelectHidden.options).slice(1);
+            const matches = options.filter(function(opt) {
+                const name = (opt.dataset.name || opt.textContent || '').toLowerCase();
+                return name.indexOf(term) !== -1;
             });
-            var opt = quickRecipeSelect.options[quickRecipeSelect.selectedIndex];
-            if (opt && opt.getAttribute('data-unit')) quickQuantityUnit.textContent = opt.getAttribute('data-unit');
+            
+            if (matches.length > 0) {
+                const inputRect = quickRecipeSearch.getBoundingClientRect();
+                quickRecipeSearchResults.style.position = 'fixed';
+                quickRecipeSearchResults.style.left = inputRect.left + 'px';
+                quickRecipeSearchResults.style.top = (inputRect.bottom + 2) + 'px';
+                quickRecipeSearchResults.style.width = inputRect.width + 'px';
+                quickRecipeSearchResults.style.maxHeight = '300px';
+                quickRecipeSearchResults.style.overflowY = 'auto';
+                quickRecipeSearchResults.style.zIndex = '9999';
+                quickRecipeSearchResults.classList.add('show');
+                quickRecipeSearchResults.style.setProperty('display', 'block', 'important');
+                
+                matches.forEach(function(opt) {
+                    const item = document.createElement('a');
+                    item.href = '#';
+                    item.className = 'list-group-item list-group-item-action';
+                    const displayName = opt.dataset.name || opt.textContent || '';
+                    item.innerHTML = '<strong>' + displayName + '</strong>';
+                    item.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        quickRecipeSearch.value = displayName;
+                        quickRecipeSelect.value = opt.value;
+                        quickRecipeSearchResults.classList.remove('show');
+                        quickRecipeSearchResults.style.setProperty('display', 'none', 'important');
+                        
+                        // Unit ni yangilash
+                        if (quickQuantityUnit) {
+                            const unit = opt.getAttribute('data-unit') || 'kg';
+                            quickQuantityUnit.textContent = unit;
+                        }
+                        // Retseptga biriktirilgan omborlarni to'ldirish
+                        var dw = opt.getAttribute('data-default-warehouse');
+                        var dow = opt.getAttribute('data-default-output-warehouse');
+                        if (dw) {
+                            var sel = document.querySelector('form[action="/production/create"] select[name="warehouse_id"]');
+                            if (sel) sel.value = dw;
+                        }
+                        if (dow) {
+                            var sel = document.querySelector('form[action="/production/create"] select[name="output_warehouse_id"]');
+                            if (sel) sel.value = dow;
+                        }
+                    });
+                    quickRecipeSearchResults.appendChild(item);
+                });
+            } else {
+                const inputRect = quickRecipeSearch.getBoundingClientRect();
+                quickRecipeSearchResults.style.position = 'fixed';
+                quickRecipeSearchResults.style.left = inputRect.left + 'px';
+                quickRecipeSearchResults.style.top = (inputRect.bottom + 2) + 'px';
+                quickRecipeSearchResults.style.width = inputRect.width + 'px';
+                quickRecipeSearchResults.style.zIndex = '9999';
+                quickRecipeSearchResults.classList.add('show');
+                quickRecipeSearchResults.style.setProperty('display', 'block', 'important');
+                quickRecipeSearchResults.innerHTML = '<div class="list-group-item text-muted">Topilmadi.</div>';
+            }
+        }
+        
+        if (quickRecipeSearch && quickRecipeSelectHidden) {
+            quickRecipeSearch.addEventListener('focus', function() {
+                const currentValue = this.value.trim();
+                if (currentValue) {
+                    showRecipeResults(currentValue);
+                }
+            });
+            
+            quickRecipeSearch.addEventListener('input', function() {
+                showRecipeResults(this.value);
+            });
+            
+            quickRecipeSearch.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    quickRecipeSearchResults.classList.remove('show');
+                    quickRecipeSearchResults.style.setProperty('display', 'none', 'important');
+                }
+            });
+            
+            document.addEventListener('click', function(e) {
+                if (!quickRecipeSearch.contains(e.target) && !quickRecipeSearchResults.contains(e.target)) {
+                    quickRecipeSearchResults.classList.remove('show');
+                    quickRecipeSearchResults.style.setProperty('display', 'none', 'important');
+                }
+            });
+        }
+        
+        // Retsept tanlanganda unit ni yangilash
+        if (quickRecipeSelect && quickQuantityUnit && quickRecipeSelectHidden) {
+            // Hidden input o'zgarganda unit ni yangilash
+            var observer = new MutationObserver(function(mutations) {
+                if (quickRecipeSelect.value) {
+                    var opt = Array.from(quickRecipeSelectHidden.options).find(function(o) {
+                        return o.value === quickRecipeSelect.value;
+                    });
+                    if (opt && opt.getAttribute('data-unit')) {
+                        quickQuantityUnit.textContent = opt.getAttribute('data-unit');
+                    } else {
+                        quickQuantityUnit.textContent = 'kg';
+                    }
+                }
+            });
+            
+            // Input event listener qo'shish
+            if (quickRecipeSelect.addEventListener) {
+                quickRecipeSelect.addEventListener('input', function() {
+                    if (this.value && quickRecipeSelectHidden) {
+                        var opt = Array.from(quickRecipeSelectHidden.options).find(function(o) {
+                            return o.value === this.value;
+                        });
+                        if (opt && opt.getAttribute('data-unit')) {
+                            quickQuantityUnit.textContent = opt.getAttribute('data-unit');
+                        } else {
+                            quickQuantityUnit.textContent = 'kg';
+                        }
+                    }
+                });
+            }
         }
     });
 })();

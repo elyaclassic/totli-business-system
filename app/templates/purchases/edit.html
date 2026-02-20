@@ -1,6 +1,27 @@
 {% extends "base.html" %}
 
 {% block content %}
+<style>
+    .product_search_results {
+        position: fixed !important;
+        z-index: 9999 !important;
+        max-height: 300px !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        display: none !important;
+        background: white !important;
+        border: 1px solid #dee2e6 !important;
+        border-radius: 0.25rem !important;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15) !important;
+    }
+    .product_search_results.show {
+        display: block !important;
+    }
+    .product_search_results .list-group-item:hover {
+        background-color: #f8f9fa;
+        cursor: pointer;
+    }
+</style>
 <div class="container-fluid">
     {% if revert_error and revert_detail %}
     <div class="alert alert-danger alert-dismissible fade show" role="alert">
@@ -151,13 +172,19 @@
                     <h6 class="mb-0">Mahsulot qo'shish</h6>
                 </div>
                 <div class="card-body">
-                    <form method="POST" action="/purchases/{{ purchase.id }}/add-item">
+                    <form method="POST" action="/purchases/{{ purchase.id }}/add-item" id="purchaseEditAddItemForm">
                         <div class="mb-3">
                             <label class="form-label">Mahsulot</label>
-                            <select name="product_id" class="form-select" required>
+                            <div class="product-search-wrapper" style="position: relative;">
+                                <input type="text" class="form-control product-search-input" id="purchaseEditProductSearch" 
+                                    placeholder="Nomi yoki kod bo'yicha qidiring..." autocomplete="off">
+                                <input type="hidden" name="product_id" id="purchaseEditProductId" required>
+                                <div class="product_search_results list-group" id="purchaseEditProductSearchResults" style="display: none;"></div>
+                            </div>
+                            <select id="purchaseEditProductSelect" style="display: none;">
                                 <option value="">Tanlang...</option>
                                 {% for product in products %}
-                                <option value="{{ product.id }}">{{ product.name }}</option>
+                                <option value="{{ product.id }}" data-name="{{ product.name|e }}" data-code="{{ product.code or '' }}">{{ product.name }}</option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -199,4 +226,115 @@
         </div>
     </div>
 </div>
+
+<script>
+(function() {
+    var productSearch = document.getElementById('purchaseEditProductSearch');
+    var productId = document.getElementById('purchaseEditProductId');
+    var productSelect = document.getElementById('purchaseEditProductSelect');
+    var productSearchResults = document.getElementById('purchaseEditProductSearchResults');
+    var form = document.getElementById('purchaseEditAddItemForm');
+
+    if (!productSearch || !productId || !productSelect || !productSearchResults) return;
+
+    function showProductResults(term) {
+        term = (term || '').trim().toLowerCase();
+        productSearchResults.innerHTML = '';
+        productSearchResults.classList.remove('show');
+        productSearchResults.style.setProperty('display', 'none', 'important');
+        
+        if (!term) {
+            productId.value = '';
+            return;
+        }
+        
+        const options = Array.from(productSelect.options).slice(1);
+        const matches = options.filter(function(opt) {
+            const name = (opt.dataset.name || opt.textContent || '').toLowerCase();
+            const code = (opt.dataset.code || '').toLowerCase();
+            const id = (opt.value || '').toString();
+            return name.indexOf(term) !== -1 || code.indexOf(term) !== -1 || id === term;
+        });
+        
+        if (matches.length > 0) {
+            const inputRect = productSearch.getBoundingClientRect();
+            productSearchResults.style.position = 'fixed';
+            productSearchResults.style.left = inputRect.left + 'px';
+            productSearchResults.style.top = (inputRect.bottom + 2) + 'px';
+            productSearchResults.style.width = inputRect.width + 'px';
+            productSearchResults.style.maxHeight = '300px';
+            productSearchResults.style.overflowY = 'auto';
+            productSearchResults.style.zIndex = '9999';
+            productSearchResults.classList.add('show');
+            productSearchResults.style.setProperty('display', 'block', 'important');
+            
+            matches.forEach(function(opt) {
+                const item = document.createElement('a');
+                item.href = '#';
+                item.className = 'list-group-item list-group-item-action';
+                const displayName = opt.dataset.name || opt.textContent || '';
+                const displayCode = opt.dataset.code || '';
+                item.innerHTML = '<strong>' + displayName + '</strong>' + 
+                    (displayCode ? ' <span class="badge bg-secondary">' + displayCode + '</span>' : '');
+                item.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    productSearch.value = displayName + (displayCode ? ' (' + displayCode + ')' : '');
+                    productId.value = opt.value;
+                    productSearchResults.classList.remove('show');
+                    productSearchResults.style.setProperty('display', 'none', 'important');
+                });
+                productSearchResults.appendChild(item);
+            });
+        } else {
+            const inputRect = productSearch.getBoundingClientRect();
+            productSearchResults.style.position = 'fixed';
+            productSearchResults.style.left = inputRect.left + 'px';
+            productSearchResults.style.top = (inputRect.bottom + 2) + 'px';
+            productSearchResults.style.width = inputRect.width + 'px';
+            productSearchResults.style.zIndex = '9999';
+            productSearchResults.classList.add('show');
+            productSearchResults.style.setProperty('display', 'block', 'important');
+            productSearchResults.innerHTML = '<div class="list-group-item text-muted">Topilmadi.</div>';
+        }
+    }
+
+    productSearch.addEventListener('focus', function() {
+        const currentValue = this.value.trim();
+        if (currentValue) {
+            showProductResults(currentValue);
+        }
+    });
+    
+    productSearch.addEventListener('input', function() {
+        showProductResults(this.value);
+    });
+    
+    productSearch.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            productSearchResults.classList.remove('show');
+            productSearchResults.style.setProperty('display', 'none', 'important');
+        }
+    });
+    
+    document.addEventListener('click', function(e) {
+        if (!productSearch.contains(e.target) && !productSearchResults.contains(e.target)) {
+            productSearchResults.classList.remove('show');
+            productSearchResults.style.setProperty('display', 'none', 'important');
+        }
+    });
+
+    // Form submit qilganda tekshirish
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            if (!productId.value) {
+                e.preventDefault();
+                alert('Mahsulotni tanlang');
+                productSearch.focus();
+                return false;
+            }
+        });
+    }
+})();
+</script>
 {% endblock %}

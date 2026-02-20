@@ -126,13 +126,17 @@
                             <th style="width:40px">#</th>
                             <th>Mahsulot</th>
                             <th style="width:120px">Miqdor</th>
+                            <th style="width:110px">Tannarx (so'm)</th>
+                            <th style="width:120px">Summa (so'm)</th>
                             <th style="width:50px"></th>
                         </tr>
                     </thead>
                     <tbody id="itemsBody">
                         {% if transfer and transfer.items %}
                         {% for row in transfer.items %}
-                        <tr class="item-row">
+                        {% set row_cost = source_costs.get(row.product_id) or (row.product.purchase_price if row.product else 0) %}
+                        {% set row_sum = (row.quantity or 0) * row_cost %}
+                        <tr class="item-row" data-cost="{{ row_cost }}">
                             <td class="row-num">{{ loop.index }}</td>
                             <td class="combo-wrap">
                                 {% if transfer.status == 'confirmed' %}
@@ -151,6 +155,8 @@
                                 <input type="text" name="quantity_{{ loop.index }}" class="form-control qty-input" value="{{ "%.3f"|format(row.quantity) if row.quantity is not none else "" }}" inputmode="decimal">
                                 {% endif %}
                             </td>
+                            <td class="cost-cell text-end">{{ "{:,.0f}".format(row_cost) }}</td>
+                            <td class="sum-cell text-end text-success">{{ "{:,.0f}".format(row_sum) }}</td>
                             <td>
                                 {% if transfer.status != 'confirmed' %}
                                 <button type="button" class="btn btn-outline-danger btn-sm rm-row">&times;</button>
@@ -167,6 +173,8 @@
                                 <div class="combo-drop" id="comboDrop1" style="display:none;"></div>
                             </td>
                             <td><input type="text" name="quantity_1" class="form-control qty-input" value="" inputmode="decimal"></td>
+                            <td class="cost-cell text-end">—</td>
+                            <td class="sum-cell text-end">—</td>
                             <td><button type="button" class="btn btn-outline-danger btn-sm rm-row">&times;</button></td>
                         </tr>
                         {% endif %}
@@ -203,27 +211,47 @@
 <script>
 (function() {
     var stockByWhProduct = {{ stock_by_warehouse_product | tojson | safe }};
+    var stockCostByWhProduct = {{ (stock_cost_by_warehouse_product or {}) | tojson | safe }};
     var products = {{ products_list | tojson | safe }};
     var fromWh = document.getElementById('fromWh');
     var toWh = document.getElementById('toWh');
     var itemsBody = document.getElementById('itemsBody');
     var rowIndex = itemsBody.querySelectorAll('.item-row').length || 1;
 
-    function addRow(pid, pname, qty) {
+    function fmtNum(n) { return (Number(n) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 }); }
+
+    function addRow(pid, pname, qty, cost, summa) {
         rowIndex++;
+        var costVal = cost != null && cost !== '' ? (parseFloat(cost) || 0) : null;
+        var sumVal = summa != null && summa !== '' ? (parseFloat(summa) || 0) : null;
+        var costDisplay = costVal != null && !isNaN(costVal) ? fmtNum(costVal) : '—';
+        var sumDisplay = sumVal != null && !isNaN(sumVal) ? fmtNum(sumVal) : '—';
         var tr = document.createElement('tr');
         tr.className = 'item-row';
+        if (costVal != null && !isNaN(costVal)) tr.setAttribute('data-cost', costVal);
         tr.innerHTML = '<td class="row-num">' + rowIndex + '</td>' +
             '<td class="combo-wrap"><input type="text" class="form-control combo-input" placeholder="Nom yoki kod (F4)" data-row="' + rowIndex + '" autocomplete="off">' +
             '<input type="hidden" name="product_id_' + rowIndex + '" value="' + (pid || '') + '">' +
             '<div class="combo-drop" id="comboDrop' + rowIndex + '" style="display:none;"></div></td>' +
             '<td><input type="text" name="quantity_' + rowIndex + '" class="form-control qty-input" value="' + (qty || '') + '" inputmode="decimal"></td>' +
+            '<td class="cost-cell text-end">' + costDisplay + '</td>' +
+            '<td class="sum-cell text-end text-success">' + sumDisplay + '</td>' +
             '<td><button type="button" class="btn btn-outline-danger btn-sm rm-row">&times;</button></td>';
         itemsBody.appendChild(tr);
         var comboInput = tr.querySelector('.combo-input');
         if (comboInput && pname) comboInput.value = pname;
         tr.querySelector('.rm-row').onclick = function() { tr.remove(); renum(); };
         bindCombo(comboInput, rowIndex);
+        tr.querySelector('.qty-input').addEventListener('input', function() { updateRowSum(tr); });
+    }
+
+    function updateRowSum(tr) {
+        var qtyInput = tr.querySelector('.qty-input');
+        var costCell = tr.querySelector('.cost-cell');
+        var sumCell = tr.querySelector('.sum-cell');
+        var cost = parseFloat(tr.getAttribute('data-cost')) || 0;
+        var qty = parseFloat(qtyInput.value) || 0;
+        sumCell.textContent = cost > 0 ? fmtNum(cost * qty) : '—';
     }
 
     function renum() {
@@ -258,10 +286,17 @@
                     var fromId = fromWh.value;
                     var qty = (fromId && stockByWhProduct[fromId] && stockByWhProduct[fromId][this.dataset.id] != null)
                         ? stockByWhProduct[fromId][this.dataset.id] : '';
+                    var cost = (fromId && stockCostByWhProduct[fromId] && stockCostByWhProduct[fromId][this.dataset.id] != null)
+                        ? stockCostByWhProduct[fromId][this.dataset.id] : 0;
                     var row = input.closest('tr');
                     if (row) {
                         var qtyInput = row.querySelector('.qty-input');
                         if (qtyInput) qtyInput.value = qty === '' ? '' : String(qty);
+                        row.setAttribute('data-cost', cost);
+                        var costCell = row.querySelector('.cost-cell');
+                        var sumCell = row.querySelector('.sum-cell');
+                        if (costCell) costCell.textContent = cost ? fmtNum(cost) : '—';
+                        if (sumCell) sumCell.textContent = (cost && qty) ? fmtNum(cost * parseFloat(qty)) : '—';
                     }
                     drop.style.display = 'none';
                 };
@@ -275,11 +310,13 @@
         });
     }
 
-    document.getElementById('addRow').onclick = function() { addRow('', '', ''); };
+    document.getElementById('addRow').onclick = function() { addRow('', '', '', null, null); };
     itemsBody.querySelectorAll('.item-row').forEach(function(tr) {
         tr.querySelector('.rm-row').onclick = function() { tr.remove(); renum(); };
         var inp = tr.querySelector('.combo-input');
         if (inp) bindCombo(inp, inp.dataset.row);
+        var qtyInp = tr.querySelector('.qty-input');
+        if (qtyInp) qtyInp.addEventListener('input', function() { updateRowSum(tr); });
     });
 
     fromWh.addEventListener('change', function() {
@@ -298,6 +335,7 @@
             alert('Tanlangan omborda qoldiq yo\'q.');
             return;
         }
+        var costs = stockCostByWhProduct[fromId] || {};
         itemsBody.querySelectorAll('.item-row').forEach(function(r) { r.remove(); });
         rowIndex = 0;
         var entries = [];
@@ -305,11 +343,13 @@
             if (!avail[pid] || avail[pid] <= 0) continue;
             var p = products.find(function(x) { return String(x.id) === String(pid); });
             var pname = p ? (p.name + (p.code ? ' (' + p.code + ')' : '')) : '';
-            entries.push({ id: pid, name: pname, qty: avail[pid] });
+            var cost = costs[pid] != null ? costs[pid] : 0;
+            var qty = parseFloat(avail[pid]) || 0;
+            entries.push({ id: pid, name: pname, qty: avail[pid], cost: cost, summa: cost * qty });
         }
         entries.sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
-        entries.forEach(function(e) { addRow(e.id, e.name, e.qty); });
-        if (entries.length === 0) addRow('', '', '');
+        entries.forEach(function(e) { addRow(e.id, e.name, e.qty, e.cost, e.summa); });
+        if (entries.length === 0) addRow('', '', '', null, null);
         renum();
     };
 

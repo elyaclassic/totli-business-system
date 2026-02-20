@@ -76,6 +76,37 @@
             </div>
         </div>
         
+        <!-- Retseptga biriktirilgan omborlar (ishlab chiqarishda avtomatik to'ldiriladi) -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <i class="bi bi-building"></i> Ishlab chiqarishda ishlatiladigan omborlar
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">Retseptni tanlaganda «Yangi ishlab chiqarish» formasida shu omborlar avtomatik tanlanadi.</p>
+                <form method="POST" action="/production/recipes/{{ recipe.id }}/set-warehouses">
+                    <div class="mb-2">
+                        <label class="form-label small">1-ombor: Xom ashyo ombori</label>
+                        <select name="default_warehouse_id" class="form-select form-select-sm">
+                            <option value="">— Tanlamaslik —</option>
+                            {% for wh in warehouses or [] %}
+                            <option value="{{ wh.id }}" {% if recipe.default_warehouse_id == wh.id %}selected{% endif %}>{{ wh.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small">2-ombor: Yarim tayyor mahsulot ombori</label>
+                        <select name="default_output_warehouse_id" class="form-select form-select-sm">
+                            <option value="">— Tanlamaslik —</option>
+                            {% for wh in warehouses or [] %}
+                            <option value="{{ wh.id }}" {% if recipe.default_output_warehouse_id == wh.id %}selected{% endif %}>{{ wh.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check"></i> Saqlash</button>
+                </form>
+            </div>
+        </div>
+        
         <!-- Tannarx hisoblash -->
         <div class="card mt-3">
             <div class="card-header">
@@ -85,7 +116,8 @@
                 {% set ns = namespace(total_cost=0) %}
                 {% for item in recipe.items %}
                     {% if item.product %}
-                        {% set ns.total_cost = ns.total_cost + (item.quantity * item.product.purchase_price) %}
+                        {% set unit_price = item_recipe_costs.get(item.product_id) if item_recipe_costs and item.product_id in item_recipe_costs else (item.product.purchase_price or 0) %}
+                        {% set ns.total_cost = ns.total_cost + (item.quantity * unit_price) %}
                     {% endif %}
                 {% endfor %}
                 <h4 class="text-center text-primary">{{ "{:,.0f}".format(ns.total_cost) }} so'm</h4>
@@ -117,6 +149,7 @@
                     </thead>
                     <tbody>
                         {% for item in recipe.items %}
+                        {% set unit_price = item_recipe_costs.get(item.product_id) if item_recipe_costs and item.product_id in item_recipe_costs else (item.product.purchase_price if item.product else 0) %}
                         <tr>
                             <td>{{ loop.index }}</td>
                             <td>
@@ -124,8 +157,8 @@
                                 {% if item.product %}<br><small class="text-muted"><code>{{ item.product.barcode or item.product.code or '-' }}</code></small>{% endif %}
                             </td>
                             <td>{{ item.quantity }} kg</td>
-                            <td>{{ "{:,.0f}".format(item.product.purchase_price) if item.product else 0 }} so'm</td>
-                            <td><strong>{{ "{:,.0f}".format(item.quantity * item.product.purchase_price) if item.product else 0 }} so'm</strong></td>
+                            <td>{{ "{:,.0f}".format(unit_price) }} so'm</td>
+                            <td><strong>{{ "{:,.0f}".format(item.quantity * unit_price) }} so'm</strong></td>
                             <td>
                                 <button type="button" class="btn btn-sm btn-outline-primary" title="Tahrirlash"
                                     onclick="editItem({{ item.id }}, {{ item.product_id if item.product_id else 0 }}, {{ item.quantity }})">
@@ -164,7 +197,8 @@
                                     {% set total = namespace(value=0) %}
                                     {% for item in recipe.items %}
                                         {% if item.product %}
-                                            {% set total.value = total.value + (item.quantity * item.product.purchase_price) %}
+                                            {% set up = item_recipe_costs.get(item.product_id) if item_recipe_costs and item.product_id in item_recipe_costs else (item.product.purchase_price or 0) %}
+                                            {% set total.value = total.value + (item.quantity * up) %}
                                         {% endif %}
                                     {% endfor %}
                                     {{ "{:,.0f}".format(total.value) }} so'm

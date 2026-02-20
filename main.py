@@ -39,6 +39,8 @@ from app.utils.auth import (
     generate_csrf_token, verify_csrf_token,
 )
 from app.utils.notifications import check_low_stock_and_notify
+from app.utils.dashboard_export import export_executive_dashboard
+from app.utils.live_data import executive_live_data, warehouse_live_data, delivery_live_data
 from app.deps import get_current_user, require_auth, require_admin
 from app.core import templates
 from app.routes import auth as auth_routes
@@ -463,10 +465,18 @@ async def executive_dashboard_test(request: Request, db: Session = Depends(get_d
         }
     ]
     
+    # Fake current_user object for template compatibility
+    fake_current_user = type('obj', (object,), {
+        'id': 1,
+        'username': fake_user.get('username', 'test'),
+        'full_name': 'Test User',
+        'role': fake_user.get('role', 'admin')
+    })()
+    
     return templates.TemplateResponse("dashboards/executive.html", {
         "request": request,
         "page_title": "Rahbariyat Dashboard",
-        "current_user": None,
+        "current_user": fake_current_user,
         "user": fake_user,
         "stats": stats,
         "sales_trend": sales_trend,
@@ -543,12 +553,12 @@ async def executive_dashboard(request: Request, db: Session = Depends(get_db), c
     sales_trend_labels = []
     sales_trend_data = []
     for i in range(6, -1, -1):
-        date = today - timedelta(days=i)
+        day_date = today - timedelta(days=i)
         sales = db.query(func.sum(Order.total)).filter(
-            func.date(Order.created_at) == date,
+            func.date(Order.created_at) == day_date,
             Order.status == 'completed'
         ).scalar() or 0
-        sales_trend_labels.append(date.strftime('%d.%m'))
+        sales_trend_labels.append(day_date.strftime('%d.%m'))
         sales_trend_data.append(float(sales))
     
     # Top 5 mahsulotlar
@@ -569,17 +579,20 @@ async def executive_dashboard(request: Request, db: Session = Depends(get_db), c
     top_products_labels = [p.name for p in top_products_query] or ['Ma\'lumot yo\'q']
     top_products_data = [float(p.total_qty) for p in top_products_query] or [0]
     
-    # Top 5 agentlar
+    # Top 5 agentlar (Agent → Partner → Order orqali)
+    from app.models.database import Partner
     top_agents_query = db.query(
-        Agent.name,
+        Agent.full_name.label('name'),
         func.sum(Order.total).label('total_sales'),
         func.count(Order.id).label('order_count')
     ).join(
-        Order, Agent.id == Order.partner_id  # Assuming agent is partner
+        Partner, Partner.agent_id == Agent.id
+    ).join(
+        Order, Order.partner_id == Partner.id
     ).filter(
         func.date(Order.created_at) >= week_ago,
         Order.status == 'completed'
-    ).group_by(Agent.id, Agent.name).order_by(
+    ).group_by(Agent.id, Agent.full_name).order_by(
         func.sum(Order.total).desc()
     ).limit(5).all()
     
@@ -649,17 +662,17 @@ async def executive_export(request: Request, db: Session = Depends(get_db), curr
 
 # Live Data Endpoints
 @app.get("/dashboard/executive/live")
-async def executive_live(request: Request, db: Session = Depends(get_db)):
+async def executive_live(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
     """Live data for Executive Dashboard"""
     return await executive_live_data(request, db)
 
 @app.get("/dashboard/warehouse/live")
-async def warehouse_live(request: Request, db: Session = Depends(get_db)):
+async def warehouse_live(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
     """Live data for Warehouse Dashboard"""
     return await warehouse_live_data(request, db)
 
 @app.get("/dashboard/delivery/live")
-async def delivery_live(request: Request, db: Session = Depends(get_db)):
+async def delivery_live(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
     """Live data for Delivery Dashboard"""
     return await delivery_live_data(request, db)
 
@@ -745,12 +758,12 @@ async def sales_dashboard(request: Request, db: Session = Depends(get_db), curre
     weekly_labels = []
     weekly_data = []
     for i in range(6, -1, -1):
-        date = today - timedelta(days=i)
+        day_date = today - timedelta(days=i)
         sales = db.query(func.sum(Order.total)).filter(
-            func.date(Order.created_at) == date,
+            func.date(Order.created_at) == day_date,
             Order.status == 'completed'
         ).scalar() or 0
-        weekly_labels.append(['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'][date.weekday()])
+        weekly_labels.append(['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'][day_date.weekday()])
         weekly_data.append(float(sales))
     
     weekly_sales = {"labels": weekly_labels, "data": weekly_data}
@@ -1046,10 +1059,10 @@ async def agent_dashboard(request: Request, db: Session = Depends(get_db), curre
     cumulative_sales = 0
     
     for i in range(0, 30, 5):
-        date = month_ago + timedelta(days=i)
+        day_date = month_ago + timedelta(days=i)
         sales = db.query(func.sum(Order.total)).filter(
             func.date(Order.created_at) >= month_ago,
-            func.date(Order.created_at) <= date,
+            func.date(Order.created_at) <= day_date,
             Order.status == 'completed'
         ).scalar() or 0
         
@@ -1140,10 +1153,18 @@ async def agent_dashboard_test(request: Request, db: Session = Depends(get_db), 
         'target': [833333, 1666666, 2500000, 3333333, 4166666, 5000000, 5833333]
     }
     
+    # Fake current_user object for template compatibility
+    fake_current_user = type('obj', (object,), {
+        'id': 1,
+        'username': fake_user.get('username', 'test'),
+        'full_name': 'Test User',
+        'role': fake_user.get('role', 'agent')
+    })()
+    
     return templates.TemplateResponse("dashboards/agent.html", {
         "request": request,
         "page_title": "Agent Dashboard",
-        "current_user": None,
+        "current_user": fake_current_user,
         "user": fake_user,
         "agent": agent,
         "kpi": kpi,
@@ -1169,11 +1190,32 @@ async def production_dashboard(request: Request, db: Session = Depends(get_db), 
     today = datetime.now().date()
     week_ago = today - timedelta(days=7)
     
-    # Today's production
-    today_production = db.query(func.sum(Production.quantity)).filter(
-        func.date(Production.date) == today,
-        Production.status == 'completed'
-    ).scalar() or 0
+    # Today's production - faqat yarim tayyor va tayyor omborlarga yozilganlar
+    from app.models.database import Warehouse
+    from sqlalchemy import or_
+    try:
+        today_production = db.query(func.sum(Production.quantity)).join(
+            Warehouse, Production.output_warehouse_id == Warehouse.id
+        ).filter(
+            func.date(Production.date) == today,
+            Production.status == 'completed',
+            Production.output_warehouse_id.isnot(None),
+            or_(
+                func.lower(func.coalesce(Warehouse.name, '')).like('%yarim%'),
+                func.lower(func.coalesce(Warehouse.name, '')).like('%semi%'),
+                func.lower(func.coalesce(Warehouse.name, '')).like('%tayyor%'),
+                func.lower(func.coalesce(Warehouse.name, '')).like('%finished%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%yarim%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%semi%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%tayyor%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%finished%')
+            )
+        ).scalar() or 0
+    except Exception as e:
+        print(f"Today production query error: {e}")
+        import traceback
+        traceback.print_exc()
+        today_production = 0
     
     # Daily plan (placeholder - could be from a Plan table)
     plan = 3000
@@ -1235,13 +1277,30 @@ async def production_dashboard(request: Request, db: Session = Depends(get_db), 
     chart_plan = []
     
     for i in range(6, -1, -1):
-        date = today - timedelta(days=i)
-        production = db.query(func.sum(Production.quantity)).filter(
-            func.date(Production.date) == date,
-            Production.status == 'completed'
-        ).scalar() or 0
+        day_date = today - timedelta(days=i)
+        try:
+            production = db.query(func.sum(Production.quantity)).join(
+                Warehouse, Production.output_warehouse_id == Warehouse.id
+            ).filter(
+                func.date(Production.date) == day_date,
+                Production.status == 'completed',
+                Production.output_warehouse_id.isnot(None),
+                or_(
+                    func.lower(func.coalesce(Warehouse.name, '')).like('%yarim%'),
+                    func.lower(func.coalesce(Warehouse.name, '')).like('%semi%'),
+                    func.lower(func.coalesce(Warehouse.name, '')).like('%tayyor%'),
+                    func.lower(func.coalesce(Warehouse.name, '')).like('%finished%'),
+                    func.lower(func.coalesce(Warehouse.code, '')).like('%yarim%'),
+                    func.lower(func.coalesce(Warehouse.code, '')).like('%semi%'),
+                    func.lower(func.coalesce(Warehouse.code, '')).like('%tayyor%'),
+                    func.lower(func.coalesce(Warehouse.code, '')).like('%finished%')
+                )
+            ).scalar() or 0
+        except Exception as e:
+            print(f"Weekly chart production query error for {day_date}: {e}")
+            production = 0
         
-        chart_labels.append(['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'][date.weekday()])
+        chart_labels.append(['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'][day_date.weekday()])
         chart_data.append(int(production))
         chart_plan.append(plan)
     
@@ -1301,10 +1360,18 @@ async def production_dashboard_test(request: Request, db: Session = Depends(get_
         'plan': [3000, 3000, 3000, 3000, 3000, 2500, 2000]
     }
     
+    # Fake current_user object for template compatibility
+    fake_current_user = type('obj', (object,), {
+        'id': 1,
+        'username': fake_user.get('username', 'test'),
+        'full_name': 'Test User',
+        'role': fake_user.get('role', 'production')
+    })()
+    
     return templates.TemplateResponse("dashboards/production.html", {
         "request": request,
         "page_title": "Ishlab chiqarish Dashboard",
-        "current_user": None,
+        "current_user": fake_current_user,
         "user": fake_user,
         "metrics": metrics,
         "production_orders": production_orders,
@@ -1410,14 +1477,14 @@ async def warehouse_dashboard(request: Request, db: Session = Depends(get_db), c
     chart_outgoing = []
     
     for i in range(6, -1, -1):
-        date = today - timedelta(days=i)
+        day_date = today - timedelta(days=i)
         incoming = db.query(func.sum(PurchaseItem.quantity)).join(
             Purchase, PurchaseItem.purchase_id == Purchase.id
         ).filter(
-            func.date(Purchase.date) == date
+            func.date(Purchase.date) == day_date
         ).scalar() or 0
         
-        chart_labels.append(['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'][date.weekday()])
+        chart_labels.append(['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'][day_date.weekday()])
         chart_incoming.append(int(incoming))
         chart_outgoing.append(0)  # Placeholder
     
@@ -1612,15 +1679,15 @@ async def delivery_dashboard(request: Request, db: Session = Depends(get_db), cu
     chart_delayed = []
     
     for i in range(6, -1, -1):
-        date = today - timedelta(days=i)
+        day_date = today - timedelta(days=i)
         
         completed = db.query(func.count(Delivery.id)).filter(
-            func.date(Delivery.planned_date) == date,
+            func.date(Delivery.planned_date) == day_date,
             Delivery.status == 'delivered'
         ).scalar() or 0
         
         delayed = db.query(func.count(Delivery.id)).filter(
-            func.date(Delivery.planned_date) == date,
+            func.date(Delivery.planned_date) == day_date,
             Delivery.status.in_(['pending', 'in_progress', 'failed'])
         ).scalar() or 0
         
@@ -4729,7 +4796,8 @@ async def warehouse_export(db: Session = Depends(get_db), current_user: User = D
     for s in stocks:
         pr = s.product
         wh = s.warehouse
-        tannarx = (pr.purchase_price or 0) if pr else 0
+        sc = getattr(s, "cost_price", None)
+        tannarx = (sc if sc and sc > 0 else None) or (pr.purchase_price if pr else 0) or 0
         summa = s.quantity * tannarx
         ws.append([
             wh.name if wh else "",
@@ -4996,15 +5064,20 @@ async def warehouse_transfer_new(request: Request, db: Session = Depends(get_db)
     """Yangi o'tkazish hujjati"""
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
+    from sqlalchemy.orm import joinedload
     warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
-    stocks = db.query(Stock).filter(Stock.quantity > 0).all()
+    stocks = db.query(Stock).options(joinedload(Stock.product)).filter(Stock.quantity > 0).all()
     stock_by_warehouse_product = {}
+    stock_cost_by_warehouse_product = {}
     for s in stocks:
         wid, pid = str(s.warehouse_id), str(s.product_id)
         if wid not in stock_by_warehouse_product:
             stock_by_warehouse_product[wid] = {}
+            stock_cost_by_warehouse_product[wid] = {}
         stock_by_warehouse_product[wid][pid] = s.quantity
+        cost = (getattr(s, "cost_price", None) or 0) or (s.product.purchase_price if s.product else 0)
+        stock_cost_by_warehouse_product[wid][pid] = float(cost or 0)
     products_list = [{"id": p.id, "name": (p.name or ""), "code": (p.code or "")} for p in products]
     return templates.TemplateResponse("warehouse/transfer_form.html", {
         "request": request,
@@ -5014,6 +5087,8 @@ async def warehouse_transfer_new(request: Request, db: Session = Depends(get_db)
         "products": products,
         "products_list": products_list,
         "stock_by_warehouse_product": stock_by_warehouse_product,
+        "stock_cost_by_warehouse_product": stock_cost_by_warehouse_product,
+        "source_costs": {},
         "now": datetime.now(),
         "page_title": "Ombordan omborga o'tkazish (yaratish)"
     })
@@ -5024,18 +5099,27 @@ async def warehouse_transfer_edit(request: Request, transfer_id: int, db: Sessio
     """O'tkazish hujjatini tahrirlash"""
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
+    from sqlalchemy.orm import joinedload
     transfer = db.query(WarehouseTransfer).filter(WarehouseTransfer.id == transfer_id).first()
     if not transfer:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
     warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
-    stocks = db.query(Stock).filter(Stock.quantity > 0).all()
+    stocks = db.query(Stock).options(joinedload(Stock.product)).filter(Stock.quantity > 0).all()
     stock_by_warehouse_product = {}
+    stock_cost_by_warehouse_product = {}
     for s in stocks:
         wid, pid = str(s.warehouse_id), str(s.product_id)
         if wid not in stock_by_warehouse_product:
             stock_by_warehouse_product[wid] = {}
+            stock_cost_by_warehouse_product[wid] = {}
         stock_by_warehouse_product[wid][pid] = s.quantity
+        cost = (getattr(s, "cost_price", None) or 0) or (s.product.purchase_price if s.product else 0)
+        stock_cost_by_warehouse_product[wid][pid] = float(cost or 0)
+    source_costs = {}
+    from_wh = str(transfer.from_warehouse_id) if transfer.from_warehouse_id else None
+    if from_wh and from_wh in stock_cost_by_warehouse_product:
+        source_costs = {int(pid): cost for pid, cost in stock_cost_by_warehouse_product[from_wh].items()}
     products_list = [{"id": p.id, "name": (p.name or ""), "code": (p.code or "")} for p in products]
     return templates.TemplateResponse("warehouse/transfer_form.html", {
         "request": request,
@@ -5045,6 +5129,8 @@ async def warehouse_transfer_edit(request: Request, transfer_id: int, db: Sessio
         "products": products,
         "products_list": products_list,
         "stock_by_warehouse_product": stock_by_warehouse_product,
+        "stock_cost_by_warehouse_product": stock_cost_by_warehouse_product,
+        "source_costs": source_costs,
         "now": transfer.date or datetime.now(),
         "page_title": f"O'tkazish {transfer.number}"
     })
@@ -5176,8 +5262,20 @@ async def warehouse_transfer_confirm(
                 url=f"/warehouse/transfers/{transfer_id}?error=" + quote(f"Qayerdan omborda «{name}» yetarli emas (kerak: {item.quantity}, mavjud: {avail_display})"),
                 status_code=303
             )
-    # Qoldiqlarni yangilash - faqat tasdiqlanganda
+    # Qoldiqlarni yangilash - faqat tasdiqlanganda (miqdor + tannarx/summa o'tadi)
     for item in items:
+        # Manba ombor tannarxi (qoldiq bo'yicha yoki mahsulot tannarxi)
+        src_stock = db.query(Stock).filter(
+            Stock.warehouse_id == transfer.from_warehouse_id,
+            Stock.product_id == item.product_id
+        ).first()
+        prod = db.query(Product).filter(Product.id == item.product_id).first()
+        source_cost = 0.0
+        if src_stock and getattr(src_stock, "cost_price", None) and (src_stock.cost_price or 0) > 0:
+            source_cost = float(src_stock.cost_price)
+        elif prod and (prod.purchase_price or 0) > 0:
+            source_cost = float(prod.purchase_price)
+
         # Qayerdan ombordan ayirish - StockMovement yozuvini yaratish
         create_stock_movement(
             db=db,
@@ -5205,6 +5303,19 @@ async def warehouse_transfer_confirm(
             user_id=current_user.id if current_user else None,
             note=f"O'tkazish (kirim): {transfer.number}"
         )
+
+        # Qabul qiluvchi omborda tannarx: yangi qoldiq bo'lsa source_cost, mavjud bo'lsa o'rtacha tannarx
+        dest_stock = db.query(Stock).filter(
+            Stock.warehouse_id == transfer.to_warehouse_id,
+            Stock.product_id == item.product_id
+        ).first()
+        if dest_stock:
+            qty_old = (dest_stock.quantity or 0) - float(item.quantity or 0)
+            cost_old = getattr(dest_stock, "cost_price", None) or 0
+            if qty_old <= 0 or (cost_old or 0) <= 0:
+                dest_stock.cost_price = source_cost
+            else:
+                dest_stock.cost_price = (qty_old * cost_old + float(item.quantity or 0) * source_cost) / (dest_stock.quantity or 1)
     
     # Tasdiqlash ma'lumotlarini saqlash
     transfer.status = "confirmed"
@@ -5331,17 +5442,27 @@ async def purchases_list(request: Request, db: Session = Depends(get_db), curren
     from urllib.parse import unquote
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
-    purchases = db.query(Purchase).order_by(Purchase.date.desc()).limit(100).all()
-    error = request.query_params.get("error")
-    error_detail = unquote(request.query_params.get("detail", "") or "")
-    return templates.TemplateResponse("purchases/list.html", {
-        "request": request,
-        "purchases": purchases,
-        "current_user": current_user,
-        "page_title": "Tovar kirimlari",
-        "error": error,
-        "error_detail": error_detail,
-    })
+    try:
+        purchases = (
+            db.query(Purchase)
+            .options(joinedload(Purchase.partner), joinedload(Purchase.warehouse))
+            .order_by(Purchase.date.desc())
+            .limit(100)
+            .all()
+        )
+        error = request.query_params.get("error")
+        error_detail = unquote(request.query_params.get("detail", "") or "")
+        return templates.TemplateResponse("purchases/list.html", {
+            "request": request,
+            "purchases": purchases,
+            "current_user": current_user,
+            "page_title": "Tovar kirimlari",
+            "error": error,
+            "error_detail": error_detail,
+        })
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Xatolik: {str(e)}")
 
 
 @app.get("/purchases/new", response_class=HTMLResponse)
@@ -8190,23 +8311,67 @@ async def employee_salary_mark_paid(
 @app.get("/production", response_class=HTMLResponse)
 async def production_index_page(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
     """Ishlab chiqarish bosh sahifasi"""
+    from app.models.database import Warehouse
+    from sqlalchemy import or_, func
     # Omborlar birinchi (info/warehouses bilan bir xil so'rov)
     warehouses = db.query(Warehouse).all()
     recipes = db.query(Recipe).filter(Recipe.is_active == True).all()
 
     today = datetime.now().date()
     total_recipes = db.query(Recipe).filter(Recipe.is_active == True).count()
-    today_productions = db.query(Production).filter(
-        Production.date >= today,
-        Production.status == "completed"
-    ).all()
-    today_quantity = sum((p.quantity or 0) for p in today_productions)
+    # Bugungi ishlab chiqarishlar - faqat yarim tayyor va tayyor omborlarga yozilganlar, case
+    try:
+        today_productions = db.query(Production).join(
+            Warehouse, Production.output_warehouse_id == Warehouse.id
+        ).filter(
+            Production.date >= today,
+            Production.status == "completed",
+            Production.output_warehouse_id.isnot(None),
+            or_(
+                func.lower(func.coalesce(Warehouse.name, '')).like('%yarim%'),
+                func.lower(func.coalesce(Warehouse.name, '')).like('%semi%'),
+                func.lower(func.coalesce(Warehouse.name, '')).like('%tayyor%'),
+                func.lower(func.coalesce(Warehouse.name, '')).like('%finished%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%yarim%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%semi%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%tayyor%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%finished%')
+            )
+        ).all()
+        today_quantity = sum((p.quantity or 0) for p in today_productions)
+    except Exception as e:
+        print(f"Today productions query error: {e}")
+        import traceback
+        traceback.print_exc()
+        today_quantity = 0
+        today_productions = []
     pending_productions = db.query(Production).filter(
         Production.status == "draft"
     ).count()
-    recent_productions = db.query(Production).order_by(
-        Production.date.desc()
-    ).limit(10).all()
+    # Oxirgi ishlab chiqarishlar - faqat yarim tayyor va tayyor omborlarga yozilganlar
+    try:
+        recent_productions = db.query(Production).join(
+            Warehouse, Production.output_warehouse_id == Warehouse.id
+        ).filter(
+            Production.output_warehouse_id.isnot(None),
+            or_(
+                func.lower(func.coalesce(Warehouse.name, '')).like('%yarim%'),
+                func.lower(func.coalesce(Warehouse.name, '')).like('%semi%'),
+                func.lower(func.coalesce(Warehouse.name, '')).like('%tayyor%'),
+                func.lower(func.coalesce(Warehouse.name, '')).like('%finished%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%yarim%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%semi%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%tayyor%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%finished%')
+            )
+        ).order_by(
+            Production.date.desc()
+        ).limit(10).all()
+    except Exception as e:
+        print(f"Recent productions query error: {e}")
+        import traceback
+        traceback.print_exc()
+        recent_productions = []
 
     now = datetime.now()
     resp = templates.TemplateResponse("production/index.html", {
@@ -8253,6 +8418,7 @@ async def production_recipes(request: Request, db: Session = Depends(get_db), cu
 @app.get("/production/recipes/{recipe_id}", response_class=HTMLResponse)
 async def production_recipe_detail(request: Request, recipe_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Retsept tafsilotlari"""
+    from app.routes.production import _calculate_recipe_cost_per_kg
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=404, detail="Retsept topilmadi")
@@ -8263,12 +8429,27 @@ async def production_recipe_detail(request: Request, recipe_id: int, db: Session
     except Exception:
         recipe_stages = []
     
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
+    
+    # Yarim tayyor mahsulotlar uchun retsept tannarxini hisoblash (ko'rsatish uchun)
+    item_recipe_costs = {}
+    for item in recipe.items or []:
+        if not item.product_id:
+            continue
+        product = db.query(Product).filter(Product.id == item.product_id).first()
+        if product and getattr(product, "type", None) == "yarim_tayyor":
+            semi_recipe = db.query(Recipe).filter(Recipe.product_id == product.id, Recipe.is_active == True).first()
+            if semi_recipe:
+                item_recipe_costs[item.product_id] = _calculate_recipe_cost_per_kg(db, semi_recipe.id)
+    
     return templates.TemplateResponse("production/recipe_detail.html", {
         "request": request,
         "current_user": current_user,
         "recipe": recipe,
         "materials": materials,
         "recipe_stages": recipe_stages,
+        "warehouses": warehouses,
+        "item_recipe_costs": item_recipe_costs,
         "page_title": f"Retsept: {recipe.name}"
     })
 
@@ -8395,6 +8576,24 @@ async def delete_recipe_item(
     return RedirectResponse(url=f"/production/recipes/{recipe_id}", status_code=303)
 
 
+@app.post("/production/recipes/{recipe_id}/set-warehouses")
+async def set_recipe_warehouses(
+    recipe_id: int,
+    default_warehouse_id: Optional[int] = Form(None),
+    default_output_warehouse_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Retseptga default omborlarni biriktirish"""
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Retsept topilmadi")
+    recipe.default_warehouse_id = default_warehouse_id
+    recipe.default_output_warehouse_id = default_output_warehouse_id
+    db.commit()
+    return RedirectResponse(url=f"/production/recipes/{recipe_id}", status_code=303)
+
+
 @app.post("/production/recipes/{recipe_id}/delete")
 async def delete_recipe(
     recipe_id: int,
@@ -8495,17 +8694,45 @@ async def production_save_materials(
 
 
 @app.get("/production/orders", response_class=HTMLResponse)
-async def production_orders(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def production_orders(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), number: str = None, date_from: str = None, date_to: str = None, recipe: str = None):
     """Ishlab chiqarish buyurtmalari"""
     from sqlalchemy.orm import joinedload
-    productions = (
+    from sqlalchemy import func
+    from datetime import datetime
+    q = (
         db.query(Production)
-        .options(joinedload(Production.recipe).joinedload(Recipe.stages))
+        .options(
+            joinedload(Production.recipe).joinedload(Recipe.stages),
+            joinedload(Production.user),
+        )
         .order_by(Production.date.desc())
-        .all()
     )
+    # Raqam bo'yicha filtr (hujjat raqami)
+    if number and str(number).strip():
+        num_filter = "%" + str(number).strip() + "%"
+        q = q.filter(func.lower(Production.number).like(func.lower(num_filter)))
+    # Retsept nomi bo'yicha filtr
+    if recipe and str(recipe).strip():
+        q = q.join(Recipe, Production.recipe_id == Recipe.id)
+        recipe_filter = "%" + str(recipe).strip() + "%"
+        q = q.filter(func.lower(Recipe.name).like(func.lower(recipe_filter)))
+    # Sana bo'yicha filtr
+    if date_from and str(date_from).strip():
+        try:
+            d_from = datetime.strptime(str(date_from).strip()[:10], "%Y-%m-%d").date()
+            q = q.filter(func.date(Production.date) >= d_from)
+        except (ValueError, TypeError):
+            pass
+    if date_to and str(date_to).strip():
+        try:
+            d_to = datetime.strptime(str(date_to).strip()[:10], "%Y-%m-%d").date()
+            q = q.filter(func.date(Production.date) <= d_to)
+        except (ValueError, TypeError):
+            pass
+    productions = q.all()
     machines = db.query(Machine).filter(Machine.is_active == True).all()
     employees = db.query(Employee).filter(Employee.is_active == True).all()
+    current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first() if current_user else None
     from urllib.parse import unquote
     error = request.query_params.get("error")
     detail = unquote(request.query_params.get("detail", "") or "")
@@ -8515,10 +8742,15 @@ async def production_orders(request: Request, db: Session = Depends(get_db), cur
         "productions": productions,
         "machines": machines,
         "employees": employees,
+        "current_user_employee_id": current_user_employee.id if current_user_employee else None,
         "page_title": "Ishlab chiqarish buyurtmalari",
         "error": error,
         "error_detail": detail,
         "stage_names": PRODUCTION_STAGE_NAMES,
+        "filter_number": (number or "").strip(),
+        "filter_recipe": (recipe or "").strip(),
+        "filter_date_from": (date_from or "").strip()[:10] if date_from else "",
+        "filter_date_to": (date_to or "").strip()[:10] if date_to else "",
     })
 
 
@@ -8529,7 +8761,7 @@ async def production_new(request: Request, db: Session = Depends(get_db), curren
     recipes = db.query(Recipe).filter(Recipe.is_active == True).all()
     machines = db.query(Machine).filter(Machine.is_active == True).all()
     employees = db.query(Employee).filter(Employee.is_active == True).all()
-
+    current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first() if current_user else None
     return templates.TemplateResponse("production/new_order.html", {
         "request": request,
         "current_user": current_user,
@@ -8537,6 +8769,7 @@ async def production_new(request: Request, db: Session = Depends(get_db), curren
         "warehouses": warehouses,
         "machines": machines,
         "employees": employees,
+        "current_user_employee_id": current_user_employee.id if current_user_employee else None,
         "page_title": "Yangi ishlab chiqarish"
     })
 
@@ -8564,6 +8797,11 @@ async def create_production(
     recipe = db.query(Recipe).options(joinedload(Recipe.stages)).filter(Recipe.id == recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=404, detail="Retsept topilmadi")
+    # Operator: forma orqali tanlangan yoki joriy foydalanuvchiga bog'langan xodim
+    effective_operator_id = int(operator_id) if operator_id else None
+    if effective_operator_id is None and current_user:
+        current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first()
+        effective_operator_id = current_user_employee.id if current_user_employee else None
     max_stage = _recipe_max_stage(recipe)
     today = datetime.now()
     count = db.query(Production).filter(
@@ -8583,7 +8821,7 @@ async def create_production(
         max_stage=max_stage,
         user_id=current_user.id if current_user else None,
         machine_id=int(machine_id) if machine_id else None,
-        operator_id=int(operator_id) if operator_id else None,
+        operator_id=effective_operator_id,
     )
     db.add(production)
     db.commit()
@@ -8650,11 +8888,30 @@ def _do_complete_production_stock(db, production, recipe):
                 note=f"Ishlab chiqarish (xom ashyo): {production.number}"
             )
     
+    # Tannarx: yarim tayyor uchun retsept tannarxi, qolganlari uchun purchase_price yoki Stock.cost_price
+    from app.routes.production import _calculate_recipe_cost_per_kg
     total_material_cost = 0.0
     for product_id, actual_use in items_actual:
         product = db.query(Product).filter(Product.id == product_id).first()
-        if product and getattr(product, "purchase_price", None) is not None:
-            total_material_cost += actual_use * (product.purchase_price or 0)
+        if not product:
+            continue
+        if getattr(product, "type", None) == "yarim_tayyor":
+            semi_recipe = db.query(Recipe).filter(Recipe.product_id == product.id, Recipe.is_active == True).first()
+            if semi_recipe:
+                cost_per_kg = _calculate_recipe_cost_per_kg(db, semi_recipe.id)
+                total_material_cost += actual_use * cost_per_kg
+            else:
+                cost = product.purchase_price or 0
+                st = db.query(Stock).filter(Stock.product_id == product_id).first()
+                if st and getattr(st, "cost_price", None) and st.cost_price > 0:
+                    cost = st.cost_price
+                total_material_cost += actual_use * cost
+        else:
+            cost = product.purchase_price or 0
+            st = db.query(Stock).filter(Stock.product_id == product_id).first()
+            if st and getattr(st, "cost_price", None) and st.cost_price > 0:
+                cost = st.cost_price
+            total_material_cost += actual_use * cost
     output_units = production.quantity * (recipe.output_quantity or 1)
     cost_per_unit = (total_material_cost / output_units) if output_units > 0 else 0
     out_wh_id = production.output_warehouse_id if production.output_warehouse_id else production.warehouse_id
@@ -8666,8 +8923,18 @@ def _do_complete_production_stock(db, production, recipe):
     ).first()
     if product_stock:
         product_stock.quantity += output_units
+        # Ombor qoldig'ida tannarxni yangilash (o'rtacha yoki yangi)
+        qty_old = (product_stock.quantity or 0) - output_units
+        cost_old = getattr(product_stock, "cost_price", None) or 0
+        if qty_old <= 0 or cost_old <= 0:
+            product_stock.cost_price = cost_per_unit
+        else:
+            product_stock.cost_price = (qty_old * cost_old + output_units * cost_per_unit) / (product_stock.quantity or 1)
     else:
-        db.add(Stock(warehouse_id=out_wh_id, product_id=recipe.product_id, quantity=output_units))
+        new_stock = Stock(warehouse_id=out_wh_id, product_id=recipe.product_id, quantity=output_units)
+        if hasattr(Stock, "cost_price"):
+            new_stock.cost_price = cost_per_unit
+        db.add(new_stock)
     
     # StockMovement yozuvini yaratish (kirim - tayyor mahsulot)
     create_stock_movement(
@@ -8745,6 +9012,13 @@ async def complete_production_stage(
             url=f"/production/orders?error=stage&detail=Keyingi bosqich {current}",
             status_code=303,
         )
+    # Operator: forma orqali tanlangan yoki joriy foydalanuvchi (xodim) avtomatik
+    effective_operator_id = int(operator_id) if operator_id else None
+    if effective_operator_id is None and current_user:
+        current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first()
+        effective_operator_id = current_user_employee.id if current_user_employee else None
+    if current_user and effective_operator_id is None:
+        production.user_id = current_user.id  # Ustunda foydalanuvchi nomi ko'rinsin
     stage_row = db.query(ProductionStage).filter(
         ProductionStage.production_id == prod_id,
         ProductionStage.stage_number == stage_number,
@@ -8755,7 +9029,8 @@ async def complete_production_stage(
             stage_row.started_at = now
         stage_row.completed_at = now
         stage_row.machine_id = int(machine_id) if machine_id else None
-        stage_row.operator_id = int(operator_id) if operator_id else None
+        stage_row.operator_id = effective_operator_id
+    production.operator_id = effective_operator_id
     if stage_number < max_stage:
         production.current_stage = stage_number + 1
         production.status = "in_progress"
@@ -8935,27 +9210,6 @@ async def agents_list(request: Request, db: Session = Depends(get_db)):
         "agents": agents,
         "page_title": "Agentlar"
     })
-
-
-@app.post("/agents/add")
-async def agent_add(
-    request: Request,
-    full_name: str = Form(...),
-    phone: str = Form(""),
-    region: str = Form(""),
-    telegram_id: str = Form(""),
-    db: Session = Depends(get_db)
-):
-    """Agent qo'shish"""
-    agent = Agent(
-        full_name=full_name,
-        phone=phone,
-        region=region,
-        telegram_id=telegram_id
-    )
-    db.add(agent)
-    db.commit()
-    return RedirectResponse(url="/agents", status_code=303)
 
 
 @app.get("/agents/{agent_id}", response_class=HTMLResponse)
@@ -9336,32 +9590,6 @@ async def add_delivery_order(
 # ==========================================
 
 # OLD API REMOVED - See PWA API section below for new implementation
-
-
-
-
-@app.post("/api/driver/location")
-async def update_driver_location(
-    driver_code: str = Form(...),
-    latitude: float = Form(...),
-    longitude: float = Form(...),
-    speed: float = Form(0),
-    db: Session = Depends(get_db)
-):
-    """Haydovchi lokatsiyasini yangilash"""
-    driver = db.query(Driver).filter(Driver.code == driver_code).first()
-    if not driver:
-        raise HTTPException(status_code=404, detail="Haydovchi topilmadi")
-    
-    location = DriverLocation(
-        driver_id=driver.id,
-        latitude=latitude,
-        longitude=longitude,
-        speed=speed
-    )
-    db.add(location)
-    db.commit()
-    return {"status": "ok", "message": "Lokatsiya saqlandi"}
 
 
 @app.get("/api/agents/locations")
@@ -9944,8 +10172,13 @@ async def startup():
     """Dastur ishga tushganda"""
     init_db()
     try:
-        from app.models.database import ensure_attendance_advance_tables
+        from app.models.database import ensure_attendance_advance_tables, ensure_purchase_expenses, ensure_order_production_columns, ensure_recipe_warehouse_columns, ensure_user_allowed_sections_column, ensure_stock_cost_column
         ensure_attendance_advance_tables()
+        ensure_purchase_expenses()
+        ensure_order_production_columns()
+        ensure_recipe_warehouse_columns()
+        ensure_user_allowed_sections_column()
+        ensure_stock_cost_column()
     except Exception as e:
         print("[Startup] ensure_attendance_advance_tables:", e)
     try:

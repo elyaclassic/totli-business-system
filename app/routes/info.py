@@ -984,10 +984,14 @@ async def info_users_add(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    import json
     form = await request.form()
     department_ids = _parse_id_list(form.getlist("department_ids"))
     warehouse_ids = _parse_id_list(form.getlist("warehouse_ids"))
     cash_register_ids = _parse_id_list(form.getlist("cash_register_ids"))
+    # Ruxsatlar: allowed_sections - JSON array
+    allowed_sections_list = form.getlist("allowed_sections")
+    allowed_sections_json = json.dumps(allowed_sections_list) if allowed_sections_list else None
     existing = db.query(User).filter(User.username == username).first()
     if existing:
         msg = quote(f"'{username}' login bilan foydalanuvchi allaqachon mavjud! Boshqa login tanlang.")
@@ -1001,6 +1005,7 @@ async def info_users_add(
         department_id=department_ids[0] if department_ids else None,
         warehouse_id=warehouse_ids[0] if warehouse_ids else None,
         cash_register_id=cash_register_ids[0] if cash_register_ids else None,
+        allowed_sections=allowed_sections_json,
     )
     db.add(user)
     db.flush()
@@ -1031,10 +1036,14 @@ async def info_users_edit(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    import json
     form = await request.form()
     department_ids = _parse_id_list(form.getlist("department_ids"))
     warehouse_ids = _parse_id_list(form.getlist("warehouse_ids"))
     cash_register_ids = _parse_id_list(form.getlist("cash_register_ids"))
+    # Ruxsatlar: allowed_sections - JSON array
+    allowed_sections_list = form.getlist("allowed_sections")
+    allowed_sections_json = json.dumps(allowed_sections_list) if allowed_sections_list else None
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
@@ -1049,6 +1058,7 @@ async def info_users_edit(
     user.department_id = department_ids[0] if department_ids else None
     user.warehouse_id = warehouse_ids[0] if warehouse_ids else None
     user.cash_register_id = cash_register_ids[0] if cash_register_ids else None
+    user.allowed_sections = allowed_sections_json
     user.departments_list.clear()
     user.warehouses_list.clear()
     user.cash_registers_list.clear()

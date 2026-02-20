@@ -287,15 +287,18 @@
     });
 
     const productList = document.getElementById('product_list') || document.getElementById('add_row_product_list');
+    const addRowProductList = document.getElementById('add_row_product_list');
 
-    function filterProducts(term) {
-        if (!productList || !productList.options) return [];
+    function filterProducts(term, productSelectElement) {
+        var list = productSelectElement || productList;
+        if (!list || !list.options) return [];
         term = (term || '').trim().toLowerCase();
         if (!term) return [];
-        return Array.from(productList.options).filter(function(opt) {
-            var name = (opt.dataset.name || '').toLowerCase();
+        return Array.from(list.options).filter(function(opt) {
+            var name = (opt.dataset.name || opt.textContent || '').toLowerCase();
             var code = (opt.dataset.code || '').toLowerCase();
-            return name.indexOf(term) !== -1 || code.indexOf(term) !== -1;
+            var fullText = name + ' ' + code;
+            return name.indexOf(term) !== -1 || code.indexOf(term) !== -1 || fullText.indexOf(term) !== -1;
         });
     }
 
@@ -334,24 +337,28 @@
             const resultsDiv = row.querySelector('.product-results');
             if (!resultsDiv) return;
             term = (term || '').trim().toLowerCase();
-            const matches = term ? filterProducts(term) : Array.from(productList.options);
+            const matches = term ? filterProducts(term, productList) : Array.from(productList.options);
             resultsDiv.innerHTML = '';
             if (matches.length > 0) {
                 matches.forEach(function(opt) {
                     const a = document.createElement('a');
                     a.href = '#'; a.className = 'list-group-item list-group-item-action';
-                    a.textContent = (opt.dataset.name || '') + (opt.dataset.code ? ' (' + opt.dataset.code + ')' : '');
+                    var displayName = opt.dataset.name || opt.textContent || '';
+                    var displayCode = opt.dataset.code || '';
+                    a.textContent = displayName + (displayCode ? ' (' + displayCode + ')' : '');
                     a.addEventListener('click', function(e) {
                         e.preventDefault();
                         const inp = row.querySelector('.product-search');
                         const hid = row.querySelector('.row-product-id');
-                        if (inp) inp.value = opt.dataset.name + (opt.dataset.code ? ' (' + opt.dataset.code + ')' : '');
+                        if (inp) inp.value = displayName + (displayCode ? ' (' + displayCode + ')' : '');
                         if (hid) hid.value = opt.value;
                         resultsDiv.style.display = 'none';
                     });
                     resultsDiv.appendChild(a);
                 });
                 resultsDiv.style.display = 'block';
+            } else {
+                resultsDiv.style.display = 'none';
             }
         }
         function bindProductSearch(row) {
@@ -395,31 +402,51 @@
     const addProductSearch = document.querySelector('.add-product-search');
     const addProductResults = document.querySelector('.add-product-results');
     const addRowProductId = document.getElementById('add_row_product_id');
-    if (addProductSearch && addProductResults && addRowProductId) {
+    if (addProductSearch && addProductResults && addRowProductId && addRowProductList) {
+        addProductSearch.addEventListener('focus', function() {
+            if (!addRowProductId.value) {
+                const term = this.value.trim();
+                if (term) {
+                    showAddProductResults(term);
+                } else {
+                    showAddProductResults('');
+                }
+            }
+        });
         addProductSearch.addEventListener('input', function() {
             const term = this.value.trim();
-            addProductResults.style.display = 'none';
-            addProductResults.innerHTML = '';
             addRowProductId.value = '';
-            const matches = filterProducts(term);
+            showAddProductResults(term);
+        });
+        function showAddProductResults(term) {
+            addProductResults.innerHTML = '';
+            const matches = term ? filterProducts(term, addRowProductList) : Array.from(addRowProductList.options);
             if (matches.length > 0) {
                 matches.forEach(function(opt) {
                     const a = document.createElement('a');
                     a.href = '#'; a.className = 'list-group-item list-group-item-action';
-                    a.textContent = (opt.dataset.name || '') + (opt.dataset.code ? ' (' + opt.dataset.code + ')' : '');
+                    var displayName = opt.dataset.name || opt.textContent || '';
+                    var displayCode = opt.dataset.code || '';
+                    a.textContent = displayName + (displayCode ? ' (' + displayCode + ')' : '');
                     a.addEventListener('click', function(e) {
                         e.preventDefault();
-                        addProductSearch.value = opt.dataset.name + (opt.dataset.code ? ' (' + opt.dataset.code + ')' : '');
+                        addProductSearch.value = displayName + (displayCode ? ' (' + displayCode + ')' : '');
                         addRowProductId.value = opt.value;
                         addProductResults.style.display = 'none';
                     });
                     addProductResults.appendChild(a);
                 });
                 addProductResults.style.display = 'block';
+            } else {
+                addProductResults.style.display = 'none';
             }
-        });
+        }
         document.addEventListener('click', function(ev) {
-            if (!addProductSearch.contains(ev.target) && !addProductResults.contains(ev.target)) addProductResults.style.display = 'none';
+            if (addProductSearch && addProductResults && 
+                !addProductSearch.contains(ev.target) && 
+                !addProductResults.contains(ev.target)) {
+                addProductResults.style.display = 'none';
+            }
         });
     }
 

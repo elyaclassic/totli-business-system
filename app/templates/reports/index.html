@@ -1,103 +1,94 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row g-4 mb-4">
-    <div class="col-md-4">
-        <a href="/reports/sales" class="text-decoration-none">
-            <div class="stat-card">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h5>Savdo hisoboti</h5>
-                        <p class="text-muted mb-0">Sotuvlar va daromad</p>
-                    </div>
-                    <div class="icon green">
-                        <i class="bi bi-cart-check"></i>
-                    </div>
-                </div>
-            </div>
-        </a>
-    </div>
-    
-    <div class="col-md-4">
-        <a href="/reports/stock" class="text-decoration-none">
-            <div class="stat-card">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h5>Qoldiq hisoboti</h5>
-                        <p class="text-muted mb-0">Ombor qoldiqlari</p>
-                    </div>
-                    <div class="icon blue">
-                        <i class="bi bi-boxes"></i>
-                    </div>
-                </div>
-            </div>
-        </a>
-    </div>
-    
-    <div class="col-md-4">
-        <a href="/reports/debts" class="text-decoration-none">
-            <div class="stat-card">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h5>Qarzdorlik</h5>
-                        <p class="text-muted mb-0">Qarzlar va avanslar</p>
-                    </div>
-                    <div class="icon red">
-                        <i class="bi bi-exclamation-triangle"></i>
-                    </div>
-                </div>
-            </div>
-        </a>
-    </div>
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="mb-0"><i class="bi bi-bar-chart-line"></i> Hisobotlar</h4>
+    {% if current_user.role == 'admin' or allowed_report_types %}
+    <a href="/reports/form" class="btn btn-primary"><i class="bi bi-funnel"></i> Hisobotlar formasi</a>
+    {% endif %}
 </div>
 
-<div class="row g-4">
-    <div class="col-md-4">
-        <a href="/reports/production" class="text-decoration-none">
-            <div class="stat-card">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h5>Ishlab chiqarish</h5>
-                        <p class="text-muted mb-0">Mahsulot ishlab chiqarish</p>
-                    </div>
-                    <div class="icon orange">
-                        <i class="bi bi-gear"></i>
-                    </div>
-                </div>
-            </div>
-        </a>
-    </div>
-    
-    <div class="col-md-4">
-        <a href="/reports/employees" class="text-decoration-none">
-            <div class="stat-card">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h5>Xodimlar</h5>
-                        <p class="text-muted mb-0">Oylik va avans</p>
-                    </div>
-                    <div class="icon purple">
-                        <i class="bi bi-people"></i>
+{% set report_cards = [
+    {'type': 'sales', 'title': 'Savdo hisoboti', 'desc': 'Sotuvlar va daromad', 'icon': 'bi-cart-check', 'color': 'green', 'url': '/reports/sales'},
+    {'type': 'stock', 'title': 'Qoldiq hisoboti', 'desc': 'Ombor qoldiqlari', 'icon': 'bi-boxes', 'color': 'blue', 'url': '/reports/stock'},
+    {'type': 'debts', 'title': 'Qarzdorlik', 'desc': 'Qarzlar va avanslar', 'icon': 'bi-exclamation-triangle', 'color': 'red', 'url': '/reports/debts'},
+    {'type': 'production', 'title': 'Ishlab chiqarish', 'desc': 'Mahsulot ishlab chiqarish', 'icon': 'bi-gear', 'color': 'orange', 'url': '/reports/production'},
+    {'type': 'employees', 'title': 'Xodimlar', 'desc': 'Oylik va avans', 'icon': 'bi-people', 'color': 'purple', 'url': '/reports/employees'},
+    {'type': 'profit', 'title': 'Foyda hisoboti', 'desc': 'Daromad va xarajat', 'icon': 'bi-graph-up-arrow', 'color': 'green', 'url': '/reports/profit'}
+] %}
+
+{% if current_user.role == 'admin' %}
+    {# Admin uchun barcha hisobotlar ko'rsatiladi #}
+    <div class="row g-4 mb-4">
+        {% for card in report_cards[:3] %}
+        <div class="col-md-4">
+            <a href="{{ card.url }}" class="text-decoration-none">
+                <div class="stat-card">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h5>{{ card.title }}</h5>
+                            <p class="text-muted mb-0">{{ card.desc }}</p>
+                        </div>
+                        <div class="icon {{ card.color }}">
+                            <i class="bi {{ card.icon }}"></i>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </a>
+            </a>
+        </div>
+        {% endfor %}
     </div>
-    
-    <div class="col-md-4">
-        <a href="/reports/profit" class="text-decoration-none">
-            <div class="stat-card">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h5>Foyda hisoboti</h5>
-                        <p class="text-muted mb-0">Daromad va xarajat</p>
-                    </div>
-                    <div class="icon green">
-                        <i class="bi bi-graph-up-arrow"></i>
+    <div class="row g-4">
+        {% for card in report_cards[3:] %}
+        <div class="col-md-4">
+            <a href="{{ card.url }}" class="text-decoration-none">
+                <div class="stat-card">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h5>{{ card.title }}</h5>
+                            <p class="text-muted mb-0">{{ card.desc }}</p>
+                        </div>
+                        <div class="icon {{ card.color }}">
+                            <i class="bi {{ card.icon }}"></i>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </a>
+            </a>
+        </div>
+        {% endfor %}
     </div>
-</div>
+{% elif allowed_report_types %}
+    {# Ruxsat berilgan hisobotlar ko'rsatiladi #}
+    <div class="row g-4">
+        {% for card in report_cards %}
+            {% if card.type in allowed_report_types %}
+            <div class="col-md-4">
+                <a href="{{ card.url }}" class="text-decoration-none">
+                    <div class="stat-card">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h5>{{ card.title }}</h5>
+                                <p class="text-muted mb-0">{{ card.desc }}</p>
+                            </div>
+                            <div class="icon {{ card.color }}">
+                                <i class="bi {{ card.icon }}"></i>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+    {% if not allowed_report_types %}
+    <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i> Sizga hech qanday hisobotga ruxsat berilmagan. Administrator bilan bog'laning.
+    </div>
+    {% endif %}
+{% else %}
+    {# Ruxsatlar yo'q #}
+    <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i> Sizga hech qanday hisobotga ruxsat berilmagan. Administrator bilan bog'laning.
+    </div>
+{% endif %}
 {% endblock %}

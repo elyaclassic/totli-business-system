@@ -799,11 +799,32 @@ async def production_dashboard(request: Request, db: Session = Depends(get_db), 
     today = datetime.now().date()
     week_ago = today - timedelta(days=7)
     
-    # Today's production
-    today_production = db.query(func.sum(Production.quantity)).filter(
-        func.date(Production.date) == today,
-        Production.status == 'completed'
-    ).scalar() or 0
+    # Today's production - faqat yarim tayyor va tayyor omborlarga yozilganlar
+    from app.models.database import Warehouse
+    from sqlalchemy import or_
+    try:
+        today_production = db.query(func.sum(Production.quantity)).join(
+            Warehouse, Production.output_warehouse_id == Warehouse.id
+        ).filter(
+            func.date(Production.date) == today,
+            Production.status == 'completed',
+            Production.output_warehouse_id.isnot(None),
+            or_(
+                func.lower(func.coalesce(Warehouse.name, '')).like('%yarim%'),
+                func.lower(func.coalesce(Warehouse.name, '')).like('%semi%'),
+                func.lower(func.coalesce(Warehouse.name, '')).like('%tayyor%'),
+                func.lower(func.coalesce(Warehouse.name, '')).like('%finished%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%yarim%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%semi%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%tayyor%'),
+                func.lower(func.coalesce(Warehouse.code, '')).like('%finished%')
+            )
+        ).scalar() or 0
+    except Exception as e:
+        print(f"Today production query error: {e}")
+        import traceback
+        traceback.print_exc()
+        today_production = 0
     
     # Daily plan (placeholder - could be from a Plan table)
     plan = 3000
@@ -866,10 +887,27 @@ async def production_dashboard(request: Request, db: Session = Depends(get_db), 
     
     for i in range(6, -1, -1):
         date = today - timedelta(days=i)
-        production = db.query(func.sum(Production.quantity)).filter(
-            func.date(Production.date) == date,
-            Production.status == 'completed'
-        ).scalar() or 0
+        try:
+            production = db.query(func.sum(Production.quantity)).join(
+                Warehouse, Production.output_warehouse_id == Warehouse.id
+            ).filter(
+                func.date(Production.date) == date,
+                Production.status == 'completed',
+                Production.output_warehouse_id.isnot(None),
+                or_(
+                    func.lower(func.coalesce(Warehouse.name, '')).like('%yarim%'),
+                    func.lower(func.coalesce(Warehouse.name, '')).like('%semi%'),
+                    func.lower(func.coalesce(Warehouse.name, '')).like('%tayyor%'),
+                    func.lower(func.coalesce(Warehouse.name, '')).like('%finished%'),
+                    func.lower(func.coalesce(Warehouse.code, '')).like('%yarim%'),
+                    func.lower(func.coalesce(Warehouse.code, '')).like('%semi%'),
+                    func.lower(func.coalesce(Warehouse.code, '')).like('%tayyor%'),
+                    func.lower(func.coalesce(Warehouse.code, '')).like('%finished%')
+                )
+            ).scalar() or 0
+        except Exception as e:
+            print(f"Weekly chart production query error for {date}: {e}")
+            production = 0
         
         chart_labels.append(['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'][date.weekday()])
         chart_data.append(int(production))

@@ -40,6 +40,45 @@ def _recipe_max_stage(recipe) -> int:
     return max(s.stage_number for s in recipe.stages)
 
 
+def _calculate_recipe_cost_per_kg(db, recipe_id):
+    """Retsept bo'yicha 1 kg uchun tannarxni hisoblash (rekursiv - yarim tayyor mahsulotlar uchun ham)."""
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe or not recipe.items:
+        return 0.0
+    
+    total_cost = 0.0
+    for item in recipe.items:
+        product = db.query(Product).filter(Product.id == item.product_id).first()
+        if not product:
+            continue
+        
+        # Agar yarim tayyor mahsulot bo'lsa, uning retsept tannarxini olamiz
+        if getattr(product, 'type', None) == 'yarim_tayyor':
+            # Yarim tayyor mahsulotning retseptini topamiz
+            semi_recipe = db.query(Recipe).filter(Recipe.product_id == product.id, Recipe.is_active == True).first()
+            if semi_recipe:
+                semi_cost_per_kg = _calculate_recipe_cost_per_kg(db, semi_recipe.id)
+                total_cost += (item.quantity or 0) * semi_cost_per_kg
+            else:
+                # Retsept topilmasa, purchase_price yoki Stock.cost_price ishlatamiz
+                cost = product.purchase_price or 0
+                stock = db.query(Stock).filter(Stock.product_id == product.id).first()
+                if stock and getattr(stock, 'cost_price', None) and stock.cost_price > 0:
+                    cost = stock.cost_price
+                total_cost += (item.quantity or 0) * cost
+        else:
+            # Oddiy xom ashyo uchun purchase_price yoki Stock.cost_price
+            cost = product.purchase_price or 0
+            stock = db.query(Stock).filter(Stock.product_id == product.id).first()
+            if stock and getattr(stock, 'cost_price', None) and stock.cost_price > 0:
+                cost = stock.cost_price
+            total_cost += (item.quantity or 0) * cost
+    
+    # 1 kg uchun tannarx
+    output_qty = recipe.output_quantity or 1.0
+    return total_cost / output_qty if output_qty > 0 else 0.0
+
+
 def _do_complete_production_stock(db, production, recipe):
     """Kerak=0 bo'lsa o'tkazib yuboriladi; yetmasa borini tortadi (min(kerak, mavjud))."""
     if production.production_items:
@@ -70,8 +109,29 @@ def _do_complete_production_stock(db, production, recipe):
     total_material_cost = 0.0
     for product_id, actual_use in items_actual:
         product = db.query(Product).filter(Product.id == product_id).first()
-        if product and getattr(product, "purchase_price", None) is not None:
-            total_material_cost += actual_use * (product.purchase_price or 0)
+        if not product:
+            continue
+        
+        # Yarim tayyor mahsulot uchun retsept tannarxini olamiz
+        if getattr(product, 'type', None) == 'yarim_tayyor':
+            semi_recipe = db.query(Recipe).filter(Recipe.product_id == product.id, Recipe.is_active == True).first()
+            if semi_recipe:
+                cost_per_kg = _calculate_recipe_cost_per_kg(db, semi_recipe.id)
+                total_material_cost += actual_use * cost_per_kg
+            else:
+                # Retsept topilmasa, purchase_price yoki Stock.cost_price
+                cost = product.purchase_price or 0
+                stock = db.query(Stock).filter(Stock.product_id == product_id).first()
+                if stock and getattr(stock, 'cost_price', None) and stock.cost_price > 0:
+                    cost = stock.cost_price
+                total_material_cost += actual_use * cost
+        else:
+            # Oddiy xom ashyo uchun purchase_price yoki Stock.cost_price
+            cost = product.purchase_price or 0
+            stock = db.query(Stock).filter(Stock.product_id == product_id).first()
+            if stock and getattr(stock, 'cost_price', None) and stock.cost_price > 0:
+                cost = stock.cost_price
+            total_material_cost += actual_use * cost
     output_units = production.quantity * (recipe.output_quantity or 1)
     cost_per_unit = (total_material_cost / output_units) if output_units > 0 else 0
     out_wh_id = production.output_warehouse_id if production.output_warehouse_id else production.warehouse_id
@@ -81,8 +141,17 @@ def _do_complete_production_stock(db, production, recipe):
     ).first()
     if product_stock:
         product_stock.quantity += output_units
+        qty_old = (product_stock.quantity or 0) - output_units
+        cost_old = getattr(product_stock, "cost_price", None) or 0
+        if qty_old <= 0 or cost_old <= 0:
+            product_stock.cost_price = cost_per_unit
+        else:
+            product_stock.cost_price = (qty_old * cost_old + output_units * cost_per_unit) / (product_stock.quantity or 1)
     else:
-        db.add(Stock(warehouse_id=out_wh_id, product_id=recipe.product_id, quantity=output_units))
+        new_stock = Stock(warehouse_id=out_wh_id, product_id=recipe.product_id, quantity=output_units)
+        if hasattr(Stock, "cost_price"):
+            new_stock.cost_price = cost_per_unit
+        db.add(new_stock)
     output_product = db.query(Product).filter(Product.id == recipe.product_id).first()
     if output_product:
         product_stock = db.query(Stock).filter(
@@ -151,15 +220,23 @@ async def production_index_page(
         
         today = datetime.now().date()
         
-        # Bugungi ishlab chiqarishlar - raw SQL bilan (machine_id va operator_id muammosini oldini olish)
+        # Bugungi ishlab chiqarishlar - faqat yarim tayyor va tayyor omborlarga yozilganlar
         try:
             from sqlalchemy import text
             today_productions_result = db.execute(
                 text("""
-                    SELECT id, number, date, recipe_id, warehouse_id, output_warehouse_id, 
-                           quantity, status, current_stage, max_stage, user_id, note, created_at
-                    FROM productions
-                    WHERE date >= :today_date AND status = :status
+                    SELECT p.id, p.number, p.date, p.recipe_id, p.warehouse_id, p.output_warehouse_id, 
+                           p.quantity, p.status, p.current_stage, p.max_stage, p.user_id, p.note, p.created_at
+                    FROM productions p
+                    LEFT JOIN warehouses w ON p.output_warehouse_id = w.id
+                    WHERE DATE(p.date) = :today_date 
+                      AND p.status = :status
+                      AND p.output_warehouse_id IS NOT NULL
+                      AND w.id IS NOT NULL
+                      AND (
+                          (w.name IS NOT NULL AND (LOWER(w.name) LIKE '%yarim%' OR LOWER(w.name) LIKE '%semi%' OR LOWER(w.name) LIKE '%tayyor%' OR LOWER(w.name) LIKE '%finished%'))
+                          OR (w.code IS NOT NULL AND (LOWER(w.code) LIKE '%yarim%' OR LOWER(w.code) LIKE '%semi%' OR LOWER(w.code) LIKE '%tayyor%' OR LOWER(w.code) LIKE '%finished%'))
+                      )
                 """),
                 {"today_date": today, "status": "completed"}
             ).fetchall()
@@ -180,15 +257,22 @@ async def production_index_page(
             pending_productions = 0
             print(f"Pending productions query error: {e}")
         
-        # Oxirgi ishlab chiqarishlar - raw SQL bilan (machine_id va operator_id muammosini oldini olish)
+        # Oxirgi ishlab chiqarishlar - faqat yarim tayyor va tayyor omborlarga yozilganlar
         try:
             from sqlalchemy import text
             recent_productions_result = db.execute(
                 text("""
-                    SELECT id, number, date, recipe_id, warehouse_id, output_warehouse_id, 
-                           quantity, status, current_stage, max_stage, user_id, note, created_at
-                    FROM productions
-                    ORDER BY date DESC
+                    SELECT p.id, p.number, p.date, p.recipe_id, p.warehouse_id, p.output_warehouse_id, 
+                           p.quantity, p.status, p.current_stage, p.max_stage, p.user_id, p.note, p.created_at
+                    FROM productions p
+                    LEFT JOIN warehouses w ON p.output_warehouse_id = w.id
+                    WHERE p.output_warehouse_id IS NOT NULL
+                      AND w.id IS NOT NULL
+                      AND (
+                          (w.name IS NOT NULL AND (LOWER(w.name) LIKE '%yarim%' OR LOWER(w.name) LIKE '%semi%' OR LOWER(w.name) LIKE '%tayyor%' OR LOWER(w.name) LIKE '%finished%'))
+                          OR (w.code IS NOT NULL AND (LOWER(w.code) LIKE '%yarim%' OR LOWER(w.code) LIKE '%semi%' OR LOWER(w.code) LIKE '%tayyor%' OR LOWER(w.code) LIKE '%finished%'))
+                      )
+                    ORDER BY p.date DESC
                     LIMIT :limit
                 """),
                 {"limit": 10}
@@ -326,12 +410,25 @@ async def production_recipe_detail(
         raise HTTPException(status_code=404, detail="Retsept topilmadi")
     materials = db.query(Product).filter(Product.type.in_(["hom_ashyo", "yarim_tayyor", "tayyor"])).all()
     recipe_stages = sorted(recipe.stages, key=lambda s: s.stage_number) if recipe.stages else []
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
+    # Yarim tayyor mahsulotlar uchun retsept tannarxini hisoblash (ko'rsatish uchun)
+    item_recipe_costs = {}
+    for item in recipe.items or []:
+        if not item.product_id:
+            continue
+        product = db.query(Product).filter(Product.id == item.product_id).first()
+        if product and getattr(product, "type", None) == "yarim_tayyor":
+            semi_recipe = db.query(Recipe).filter(Recipe.product_id == product.id, Recipe.is_active == True).first()
+            if semi_recipe:
+                item_recipe_costs[item.product_id] = _calculate_recipe_cost_per_kg(db, semi_recipe.id)
     return templates.TemplateResponse("production/recipe_detail.html", {
         "request": request,
         "current_user": current_user,
         "recipe": recipe,
         "materials": materials,
         "recipe_stages": recipe_stages,
+        "warehouses": warehouses,
+        "item_recipe_costs": item_recipe_costs,
         "page_title": f"Retsept: {recipe.name}",
     })
 
@@ -369,6 +466,23 @@ async def add_recipe_item(
     if not recipe:
         raise HTTPException(status_code=404, detail="Retsept topilmadi")
     db.add(RecipeItem(recipe_id=recipe_id, product_id=product_id, quantity=quantity))
+    db.commit()
+    return RedirectResponse(url=f"/production/recipes/{recipe_id}", status_code=303)
+
+
+@router.post("/recipes/{recipe_id}/set-warehouses")
+async def set_recipe_warehouses(
+    recipe_id: int,
+    default_warehouse_id: Optional[int] = Form(None),
+    default_output_warehouse_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Retsept topilmadi")
+    recipe.default_warehouse_id = default_warehouse_id
+    recipe.default_output_warehouse_id = default_output_warehouse_id
     db.commit()
     return RedirectResponse(url=f"/production/recipes/{recipe_id}", status_code=303)
 
@@ -518,16 +632,45 @@ async def production_orders(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    number: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    recipe: Optional[str] = None,
 ):
     from urllib.parse import unquote
-    productions = (
+    from sqlalchemy import func
+    from datetime import datetime
+    q = (
         db.query(Production)
-        .options(joinedload(Production.recipe).joinedload(Recipe.stages))
+        .options(
+            joinedload(Production.recipe).joinedload(Recipe.stages),
+            joinedload(Production.user),
+        )
         .order_by(Production.date.desc())
-        .all()
     )
+    if number and str(number).strip():
+        num_filter = "%" + str(number).strip() + "%"
+        q = q.filter(func.lower(Production.number).like(func.lower(num_filter)))
+    if recipe and str(recipe).strip():
+        q = q.join(Recipe, Production.recipe_id == Recipe.id)
+        recipe_filter = "%" + str(recipe).strip() + "%"
+        q = q.filter(func.lower(Recipe.name).like(func.lower(recipe_filter)))
+    if date_from and str(date_from).strip():
+        try:
+            d_from = datetime.strptime(str(date_from).strip()[:10], "%Y-%m-%d").date()
+            q = q.filter(func.date(Production.date) >= d_from)
+        except (ValueError, TypeError):
+            pass
+    if date_to and str(date_to).strip():
+        try:
+            d_to = datetime.strptime(str(date_to).strip()[:10], "%Y-%m-%d").date()
+            q = q.filter(func.date(Production.date) <= d_to)
+        except (ValueError, TypeError):
+            pass
+    productions = q.all()
     machines = db.query(Machine).filter(Machine.is_active == True).all()
     employees = db.query(Employee).filter(Employee.is_active == True).all()
+    current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first() if current_user else None
     error = request.query_params.get("error")
     detail = unquote(request.query_params.get("detail", "") or "")
     return templates.TemplateResponse("production/orders.html", {
@@ -536,10 +679,15 @@ async def production_orders(
         "productions": productions,
         "machines": machines,
         "employees": employees,
+        "current_user_employee_id": current_user_employee.id if current_user_employee else None,
         "page_title": "Ishlab chiqarish buyurtmalari",
         "error": error,
         "error_detail": detail,
         "stage_names": PRODUCTION_STAGE_NAMES,
+        "filter_number": (number or "").strip(),
+        "filter_recipe": (recipe or "").strip(),
+        "filter_date_from": (date_from or "").strip()[:10] if date_from else "",
+        "filter_date_to": (date_to or "").strip()[:10] if date_to else "",
     })
 
 
@@ -553,6 +701,7 @@ async def production_new(
     recipes = db.query(Recipe).filter(Recipe.is_active == True).all()
     machines = db.query(Machine).filter(Machine.is_active == True).all()
     employees = db.query(Employee).filter(Employee.is_active == True).all()
+    current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first() if current_user else None
     return templates.TemplateResponse("production/new_order.html", {
         "request": request,
         "current_user": current_user,
@@ -560,6 +709,7 @@ async def production_new(
         "warehouses": warehouses,
         "machines": machines,
         "employees": employees,
+        "current_user_employee_id": current_user_employee.id if current_user_employee else None,
         "page_title": "Yangi ishlab chiqarish",
     })
 
@@ -582,6 +732,11 @@ async def create_production(
     recipe = db.query(Recipe).options(joinedload(Recipe.stages)).filter(Recipe.id == recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=404, detail="Retsept topilmadi")
+    # Operator: forma orqali tanlangan yoki joriy foydalanuvchiga bog'langan xodim
+    effective_operator_id = int(operator_id) if operator_id else None
+    if effective_operator_id is None and current_user:
+        current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first()
+        effective_operator_id = current_user_employee.id if current_user_employee else None
     max_stage = _recipe_max_stage(recipe)
     today = datetime.now()
     count = db.query(Production).filter(
@@ -600,7 +755,7 @@ async def create_production(
         max_stage=max_stage,
         user_id=current_user.id if current_user else None,
         machine_id=int(machine_id) if machine_id else None,
-        operator_id=int(operator_id) if operator_id else None,
+        operator_id=effective_operator_id,
     )
     db.add(production)
     db.commit()
@@ -660,6 +815,13 @@ async def complete_production_stage(
             url=f"/production/orders?error=stage&detail=Keyingi bosqich {current}",
             status_code=303,
         )
+    # Operator: forma orqali tanlangan yoki joriy foydalanuvchi (xodim) avtomatik
+    effective_operator_id = int(operator_id) if operator_id else None
+    if effective_operator_id is None and current_user:
+        current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first()
+        effective_operator_id = current_user_employee.id if current_user_employee else None
+    if current_user and effective_operator_id is None:
+        production.user_id = current_user.id  # Ustunda foydalanuvchi nomi ko'rinsin
     stage_row = db.query(ProductionStage).filter(
         ProductionStage.production_id == prod_id,
         ProductionStage.stage_number == stage_number,
@@ -670,7 +832,8 @@ async def complete_production_stage(
             stage_row.started_at = now
         stage_row.completed_at = now
         stage_row.machine_id = int(machine_id) if machine_id else None
-        stage_row.operator_id = int(operator_id) if operator_id else None
+        stage_row.operator_id = effective_operator_id
+    production.operator_id = effective_operator_id
     if stage_number < max_stage:
         production.current_stage = stage_number + 1
         production.status = "in_progress"

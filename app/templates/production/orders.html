@@ -30,6 +30,20 @@
 <!-- Filtrlar -->
 <div class="card mb-3">
     <div class="card-body py-2">
+        <form method="get" action="/production/orders" class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <label class="form-label mb-0 small text-muted">Raqam:</label>
+            <input type="text" name="number" class="form-control form-control-sm" style="width: 140px;" placeholder="PR-20260219..." value="{{ filter_number or '' }}" autocomplete="off">
+            <label class="form-label mb-0 small text-muted ms-2">Retsept nomi:</label>
+            <input type="text" name="recipe" class="form-control form-control-sm" style="width: 180px;" placeholder="HOLVA, ZEBRA..." value="{{ filter_recipe or '' }}" autocomplete="off">
+            <label class="form-label mb-0 small text-muted ms-2">Sana dan:</label>
+            <input type="date" name="date_from" class="form-control form-control-sm" style="width: 130px;" value="{{ filter_date_from or '' }}">
+            <label class="form-label mb-0 small text-muted">gacha:</label>
+            <input type="date" name="date_to" class="form-control form-control-sm" style="width: 130px;" value="{{ filter_date_to or '' }}">
+            <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-search"></i> Qidirish</button>
+            {% if filter_number or filter_recipe or filter_date_from or filter_date_to %}
+            <a href="/production/orders" class="btn btn-sm btn-outline-secondary">Tozalash</a>
+            {% endif %}
+        </form>
         <div class="d-flex gap-2">
             <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('all')">
                 Barchasi ({{ productions|length }})
@@ -125,7 +139,7 @@
                         {% endif %}
                     </td>
                     <td>{{ prod.machine.name if prod.machine else '-' }}</td>
-                    <td>{{ prod.operator.full_name if prod.operator else '-' }}</td>
+                    <td>{{ prod.operator.full_name if prod.operator else (prod.user.full_name if prod.user else '-') }}</td>
                     <td>
                         {% if prod.warehouse %}
                         {{ prod.warehouse.name }}
@@ -163,8 +177,8 @@
                                 {% for m in machines %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}
                             </select>
                             <select name="operator_id" class="form-select form-select-sm d-inline-block w-auto" title="Operator">
-                                <option value="">— Operator —</option>
-                                {% for e in employees %}<option value="{{ e.id }}">{{ e.full_name }}</option>{% endfor %}
+                                <option value="" {% if not current_user_employee_id %}selected{% endif %}>{{ current_user.full_name if (current_user and not current_user_employee_id) else '— Operator —' }}</option>
+                                {% for e in employees %}<option value="{{ e.id }}" {% if current_user_employee_id and e.id == current_user_employee_id %}selected{% endif %}>{{ e.full_name }}</option>{% endfor %}
                             </select>
                             <button type="submit" class="btn btn-sm btn-success" title="Bosqichni yakunlash">
                                 <i class="bi bi-check-lg"></i> Bosqich

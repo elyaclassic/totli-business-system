@@ -24,6 +24,7 @@ from app.models.database import (
 )
 from app.deps import require_auth, require_admin
 from app.utils.notifications import check_low_stock_and_notify
+from app.utils.production_order import create_production_from_order
 
 router = APIRouter(prefix="/sales", tags=["sales"])
 
@@ -265,17 +266,54 @@ async def sales_confirm(
         raise HTTPException(status_code=404, detail="Sotuv topilmadi")
     if order.status != "draft":
         return RedirectResponse(url=f"/sales/edit/{order_id}", status_code=303)
+    
+    # Qoldiq tekshiruvi va yetarli bo'lmagan mahsulotlarni yig'ish
+    insufficient_items = []
     for item in order.items:
         stock = db.query(Stock).filter(
             Stock.warehouse_id == order.warehouse_id,
             Stock.product_id == item.product_id,
         ).first()
-        if not stock or stock.quantity < item.quantity:
-            name = item.product.name if item.product else f"#{item.product_id}"
+        available = stock.quantity if stock else 0.0
+        if available < item.quantity:
+            insufficient_items.append({
+                "product": item.product,
+                "required": item.quantity,
+                "available": available
+            })
+    
+    # Agar yetarli bo'lmagan mahsulotlar bo'lsa, ishlab chiqarishga yo'naltirish
+    if insufficient_items:
+        try:
+            productions = create_production_from_order(
+                db=db,
+                order=order,
+                insufficient_items=insufficient_items,
+                current_user=current_user
+            )
+            # Buyurtma statusini "waiting_production" ga o'zgartirish (yoki "draft" da qoldirish)
+            # order.status = "waiting_production"  # Agar bunday status bo'lsa
+            db.commit()
+            
+            # Xabar bilan qaytish
+            production_numbers = ", ".join([p.number for p in productions])
             return RedirectResponse(
-                url=f"/sales/edit/{order_id}?error=stock&detail=" + quote(f"Yetarli yo'q: {name}"),
+                url=f"/sales/edit/{order_id}?info=production&detail=" + quote(
+                    f"Ishlab chiqarish buyurtmalari yaratildi: {production_numbers}. "
+                    f"Mahsulotlar tayyor bo'lgach, buyurtma tasdiqlanadi."
+                ),
                 status_code=303,
             )
+        except Exception as e:
+            db.rollback()
+            import traceback
+            traceback.print_exc()
+            return RedirectResponse(
+                url=f"/sales/edit/{order_id}?error=production&detail=" + quote(f"Ishlab chiqarish yaratishda xatolik: {str(e)}"),
+                status_code=303,
+            )
+    
+    # Barcha mahsulotlar yetarli bo'lsa, oddiy sotuv sifatida tasdiqlash
     for item in order.items:
         stock = db.query(Stock).filter(
             Stock.warehouse_id == order.warehouse_id,

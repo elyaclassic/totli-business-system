@@ -130,8 +130,8 @@
                                                 {% endif %}
                                             </td>
                                             <td class="fw-bold">{{ "{:,.3f}".format(stock.quantity) }}</td>
-                                            <td>{{ "{:,.0f}".format(stock.product.purchase_price if stock.product else 0) }} so'm</td>
-                                            <td class="text-success">{{ "{:,.0f}".format(stock.quantity * (stock.product.purchase_price if stock.product else 0)) }} so'm</td>
+                                            <td>{{ "{:,.0f}".format((stock.cost_price if stock.cost_price else (stock.product.purchase_price if stock.product else 0))) }} so'm</td>
+                                            <td class="text-success">{{ "{:,.0f}".format(stock.quantity * (stock.cost_price if stock.cost_price else (stock.product.purchase_price if stock.product else 0))) }} so'm</td>
                                             <td>
                                                 {% if stock_sources and stock.id in stock_sources and stock_sources[stock.id] %}
                                                     {% for num, url, d in stock_sources[stock.id] %}
@@ -209,8 +209,8 @@
                             </td>
                             <td>{{ stock.warehouse.name if stock.warehouse else '-' }}</td>
                             <td class="fw-bold">{{ "{:,.3f}".format(stock.quantity) }}</td>
-                            <td>{{ "{:,.0f}".format(stock.product.purchase_price if stock.product else 0) }} so'm</td>
-                            <td class="text-success">{{ "{:,.0f}".format(stock.quantity * (stock.product.purchase_price if stock.product else 0)) }} so'm</td>
+                            <td>{{ "{:,.0f}".format((stock.cost_price if stock.cost_price else (stock.product.purchase_price if stock.product else 0))) }} so'm</td>
+                            <td class="text-success">{{ "{:,.0f}".format(stock.quantity * (stock.cost_price if stock.cost_price else (stock.product.purchase_price if stock.product else 0))) }} so'm</td>
                             <td>
                                 {% if stock_sources and stock.id in stock_sources and stock_sources[stock.id] %}
                                     {% for num, url, d in stock_sources[stock.id] %}
