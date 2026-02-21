@@ -12,7 +12,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 
 from app.core import templates
-from app.models.database import get_db, Order, Stock, StockMovement, Product, Partner, Warehouse, User, Production, Recipe, StockAdjustmentDoc, StockAdjustmentDocItem
+from app.models.database import get_db, Order, Stock, StockMovement, Product, Partner, Warehouse, User, Production, Recipe, StockAdjustmentDoc, StockAdjustmentDocItem, Employee
 from app.deps import get_current_user, require_auth, require_admin
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -622,6 +622,22 @@ async def report_production(
         "start_date": start_date,
         "end_date": end_date,
         "page_title": "Ishlab chiqarish hisoboti",
+        "current_user": current_user,
+    })
+
+
+@router.get("/employees", response_class=HTMLResponse)
+async def report_employees(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    allowed = get_allowed_report_types(current_user)
+    if "employees" not in allowed and current_user.role != "admin":
+        return RedirectResponse(url="/reports", status_code=303)
+    employees = db.query(Employee).order_by(Employee.full_name).all()
+    return templates.TemplateResponse("reports/employees.html", {
+        "request": request,
+        "employees": employees,
+        "page_title": "Xodimlar hisoboti",
         "current_user": current_user,
     })
 

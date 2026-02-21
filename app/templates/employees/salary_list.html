@@ -57,10 +57,27 @@
                     </thead>
                     <tbody>
                         {% for row in rows %}
-                        <tr>
-                            <td>{{ row.employee.full_name }} <small class="text-muted">({{ row.employee.code }})</small></td>
+                        <tr id="salary-row-{{ row.employee.id }}">
+                            <td>
+                                {{ row.employee.full_name }} <small class="text-muted">({{ row.employee.code }})</small>
+                                {% if row.piecework_info %}
+                                <br><small class="text-info">Bo'lak: {{ row.piecework_info.name }}, 1 {{ row.piecework_info.unit_name }} = {{ "{:,.0f}".format(row.piecework_info.price_per_unit) }} so'm</small>
+                                {% if row.piecework_info.produced_units > 0 %}
+                                <br><small class="text-success">Ishlab chiqarilgan: {{ row.piecework_info.produced_label }} → {{ "{:,.0f}".format(row.piecework_info.auto_base) }} so'm</small>
+                                {% endif %}
+                                {% endif %}
+                            </td>
                             <td class="text-end">
+                                {% if row.piecework_info %}
+                                <div class="d-flex align-items-center gap-1 justify-content-end flex-wrap">
+                                    <input type="number" id="units_{{ row.employee.id }}" class="form-control form-control-sm text-end piecework-units" style="width:70px" step="0.01" min="0" placeholder="birlik" title="Bajarilgan birliklar (avtomatik: ishlab chiqarish)" data-price="{{ row.piecework_info.price_per_unit }}" data-base-id="base_{{ row.employee.id }}" value="{{ row.piecework_info.produced_units }}">
+                                    <span class="small text-muted">× {{ row.piecework_info.unit_name }}</span>
+                                    <input type="number" name="base_{{ row.employee.id }}" form="salaryForm" id="base_{{ row.employee.id }}" class="form-control form-control-sm text-end" style="width:100px" step="1000" value="{{ row.base_salary }}">
+                                </div>
+                                <small class="text-muted">Ishlab chiqarishdan avtomatik yig'ilgan; o'zgartirish mumkin</small>
+                                {% else %}
                                 <input type="number" name="base_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:100px" step="1000" value="{{ row.base_salary }}">
+                                {% endif %}
                             </td>
                             <td class="text-end">
                                 <input type="number" name="bonus_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:90px" step="1000" value="{{ row.bonus }}">
@@ -71,7 +88,7 @@
                             <td class="text-end">
                                 <input type="number" name="advance_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:90px" step="1000" value="{{ row.advance_deduction }}">
                             </td>
-                            <td class="text-end fw-bold">{{ "{:,.0f}".format(row.total) }}</td>
+                            <td class="text-end fw-bold row-total" id="total_display_{{ row.employee.id }}">{{ "{:,.0f}".format(row.total) }}</td>
                             <td class="text-end">{{ "{:,.0f}".format(row.paid) }}</td>
                             <td>
                                 {% if row.status == 'paid' %}
@@ -103,4 +120,39 @@
         </div>
     </div>
 </div>
+<script>
+(function() {
+    function updateRowTotal(empId) {
+        var tr = document.getElementById('salary-row-' + empId);
+        if (!tr) return;
+        var base = parseFloat(document.querySelector('input[name="base_' + empId + '"]')?.value) || 0;
+        var bonus = parseFloat(document.querySelector('input[name="bonus_' + empId + '"]')?.value) || 0;
+        var deduction = parseFloat(document.querySelector('input[name="deduction_' + empId + '"]')?.value) || 0;
+        var advance = parseFloat(document.querySelector('input[name="advance_' + empId + '"]')?.value) || 0;
+        var total = Math.max(0, base + bonus - deduction - advance);
+        var totalTd = document.getElementById('total_display_' + empId);
+        if (totalTd) totalTd.textContent = total.toLocaleString('uz-UZ', { maximumFractionDigits: 0 });
+    }
+    document.querySelectorAll('.piecework-units').forEach(function(inp) {
+        inp.addEventListener('input', function() {
+            var price = parseFloat(this.getAttribute('data-price')) || 0;
+            var units = parseFloat(this.value) || 0;
+            var baseId = this.getAttribute('data-base-id');
+            var baseInp = document.getElementById(baseId);
+            if (baseInp) {
+                baseInp.value = Math.round(units * price);
+                var empId = baseId.replace('base_', '');
+                updateRowTotal(empId);
+            }
+        });
+    });
+    document.querySelectorAll('tr[id^="salary-row-"]').forEach(function(tr) {
+        var empId = tr.id.replace('salary-row-', '');
+        ['base', 'bonus', 'deduction', 'advance'].forEach(function(name) {
+            var inp = document.querySelector('input[name="' + name + '_' + empId + '"]');
+            if (inp) inp.addEventListener('input', function() { updateRowTotal(empId); });
+        });
+    });
+})();
+</script>
 {% endblock %}

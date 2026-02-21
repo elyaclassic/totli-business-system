@@ -51,10 +51,12 @@
                             <select id="recipeSelectHidden" style="display: none;" onchange="updateRecipeInfo()">
                                 <option value="">Tanlang...</option>
                                 {% for recipe in recipes %}
+                                {% set _rname = (recipe.name or '')|lower %}
+                                {% set _kg_per_unit = 0.4 if ('400gr' in _rname or '400 gr' in _rname) else (1.0 if '1kg' in _rname else (recipe.output_quantity or 1)) %}
                                 <option value="{{ recipe.id }}" 
                                         data-name="{{ recipe.name|e }}"
                                         data-items="{{ recipe.items|length }}"
-                                        data-output="{{ recipe.output_quantity }}"
+                                        data-output="{{ _kg_per_unit }}"
                                         data-default-warehouse="{{ recipe.default_warehouse_id or '' }}"
                                         data-default-output-warehouse="{{ recipe.default_output_warehouse_id or '' }}">
                                     {{ recipe.name }}
@@ -409,7 +411,7 @@ var recipes = {
     {% for recipe in recipes %}
     {{ recipe.id }}: {
         name: "{{ recipe.name }}",
-        output: {{ recipe.output_quantity }},
+        output: {{ _kg_per_unit }},
         items: [
             {% for item in recipe.items %}
             {

@@ -53,6 +53,25 @@
                         <small class="text-muted">Ro'yxatda yo'q bo'lsa: <a href="/info/departments" target="_blank">Ma'lumotnomalar → Bo'limlar</a> da qo'shing</small>
                     </div>
                     <div class="col-md-4">
+                        <label class="form-label">Oylik turi</label>
+                        <select class="form-select" name="salary_type" id="salaryTypeSelect">
+                            <option value="">— Tanlang —</option>
+                            <option value="oylik" {% if emp and emp.salary_type == 'oylik' %}selected{% endif %}>Oylik</option>
+                            <option value="soatlik" {% if emp and emp.salary_type == 'soatlik' %}selected{% endif %}>Soatlik</option>
+                            <option value="bo'lak" {% if emp and emp.salary_type == "bo'lak" %}selected{% endif %}>Bo'lak</option>
+                        </select>
+                        <small class="text-muted">Ro'yxatda yo'q bo'lsa: <a href="/info/piecework-tasks" target="_blank">Ma'lumotnomalar → Bajariladigan ishlar</a></small>
+                    </div>
+                    <div class="col-md-4" id="pieceworkTaskBlock" style="display: none;">
+                        <label class="form-label">Bajariladigan ish (bo'lak narxi)</label>
+                        <select class="form-select" name="piecework_task_id" id="pieceworkTaskSelect">
+                            <option value="">— Tanlang —</option>
+                            {% for t in piecework_tasks or [] %}
+                            <option value="{{ t.id }}" {% if emp and emp.piecework_task_id == t.id %}selected{% endif %}>{{ t.name or t.code }} ({{ "{:,.0f}".format(t.price_per_unit or 0) }} so'm)</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4">
                         <label class="form-label">Oylik (so'm)</label>
                         <input type="number" class="form-control" name="salary" value="{{ emp.salary if emp else 0 }}" step="100000">
                     </div>
@@ -74,6 +93,17 @@
     var today = new Date().toISOString().slice(0, 10);
     var docDate = document.querySelector('input[name="doc_date"]');
     if (docDate && !docDate.value) docDate.value = today;
+
+    var salaryTypeSelect = document.getElementById('salaryTypeSelect');
+    var pieceworkTaskBlock = document.getElementById('pieceworkTaskBlock');
+    function togglePiecework() {
+        var v = salaryTypeSelect ? salaryTypeSelect.value : '';
+        pieceworkTaskBlock.style.display = (v === "bo'lak" || v === 'bo\'lak') ? 'block' : 'none';
+    }
+    if (salaryTypeSelect) {
+        salaryTypeSelect.addEventListener('change', togglePiecework);
+        togglePiecework();
+    }
 })();
 </script>
 {% endblock %}

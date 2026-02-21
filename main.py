@@ -25,7 +25,7 @@ from app.models.database import (
     WarehouseTransfer, WarehouseTransferItem,
     Partner, Order, OrderItem, Payment, CashRegister, CashTransfer, PosDraft,
     Recipe, RecipeItem, RecipeStage, Production, ProductionItem, ProductionStage, PRODUCTION_STAGE_NAMES, Machine, Employee, Salary,
-    Attendance, AttendanceDoc, EmployeeAdvance, EmploymentDoc,
+    Attendance, AttendanceDoc, EmployeeAdvance, EmploymentDoc, PieceworkTask,
     Agent, AgentLocation, Route, RoutePoint, Visit,
     Driver, DriverLocation, Delivery, PartnerLocation,
     Purchase, PurchaseItem, PurchaseExpense, Department, Direction, Region, Position,
@@ -39,6 +39,7 @@ from app.utils.auth import (
     generate_csrf_token, verify_csrf_token,
 )
 from app.utils.notifications import check_low_stock_and_notify
+from app.utils.production_order import recipe_kg_per_unit
 from app.utils.dashboard_export import export_executive_dashboard
 from app.utils.live_data import executive_live_data, warehouse_live_data, delivery_live_data
 from app.deps import get_current_user, require_auth, require_admin
@@ -51,6 +52,21 @@ from app.routes import info as info_routes
 
 app = FastAPI(title="TOTLI HOLVA", description="Biznes boshqaruv tizimi", version="1.0")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+
+@app.get("/reports/employees", response_class=HTMLResponse)
+async def reports_employees_page(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
+    """Xodimlar hisoboti (reports/employees 404 bo'lmasligi uchun main da ham)."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    employees = db.query(Employee).order_by(Employee.full_name).all()
+    return templates.TemplateResponse("reports/employees.html", {
+        "request": request,
+        "employees": employees,
+        "page_title": "Xodimlar hisoboti",
+        "current_user": current_user,
+    })
+
 
 # Routerlar (auth, dashboard, home, reports, info)
 app.include_router(auth_routes.router)
@@ -7569,6 +7585,7 @@ async def employment_doc_create_page(
     today_str = date.today().isoformat()
     departments = db.query(Department).filter(Department.is_active == True).order_by(Department.name).all()
     positions = db.query(Position).filter(Position.is_active == True).order_by(Position.name).all()
+    piecework_tasks = db.query(PieceworkTask).filter(PieceworkTask.is_active == True).order_by(PieceworkTask.name).all()
     return templates.TemplateResponse("employees/hiring_doc_form.html", {
         "request": request,
         "employees": employees,
@@ -7576,6 +7593,7 @@ async def employment_doc_create_page(
         "today_str": today_str,
         "departments": departments,
         "positions": positions,
+        "piecework_tasks": piecework_tasks,
         "current_user": current_user,
         "page_title": "Ishga qabul hujjati yaratish"
     })
@@ -7589,6 +7607,8 @@ async def employment_doc_create(
     position: str = Form(""),
     department: str = Form(""),
     salary: float = Form(0),
+    salary_type: str = Form(""),
+    piecework_task_id: Optional[int] = Form(None),
     note: str = Form(""),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
@@ -7608,6 +7628,13 @@ async def employment_doc_create(
             hire_d = datetime.strptime(hire_date.strip(), "%Y-%m-%d").date()
         except (ValueError, TypeError):
             pass
+    # Xodimga oylik turi va (bo'lak bo'lsa) vazifa
+    if salary_type and salary_type.strip():
+        emp.salary_type = salary_type.strip().lower()
+    if piecework_task_id:
+        emp.piecework_task_id = int(piecework_task_id)
+    elif salary_type and salary_type.strip().lower() != "bo'lak":
+        emp.piecework_task_id = None
     count = db.query(EmploymentDoc).filter(EmploymentDoc.doc_date >= doc_d.replace(day=1)).count()
     number = f"IQ-{doc_d.strftime('%Y%m%d')}-{count + 1:04d}"
     doc = EmploymentDoc(
@@ -7890,7 +7917,7 @@ async def attendance_form(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Tabel formasi — sana tanlash, shu kundagi yozuvlar, Hikvision yuklash"""
+    """Tabel formasi — sana tanlash, barcha xodimlar (davomat bor/yo'q), Hikvision yuklash"""
     today = date.today()
     form_date_str = date_param or today.strftime("%Y-%m-%d")
     try:
@@ -7898,18 +7925,26 @@ async def attendance_form(
     except ValueError:
         form_date = today
         form_date_str = form_date.strftime("%Y-%m-%d")
-    attendances = (
-        db.query(Attendance)
+    # Shu kundagi davomat yozuvlari (employee_id -> Attendance)
+    attendance_by_emp = {
+        a.employee_id: a
+        for a in db.query(Attendance)
         .filter(Attendance.date == form_date)
-        .order_by(Attendance.employee_id)
         .all()
-    )
+    }
+    # Barcha faol xodimlar — har biri uchun bir qator (davomat bo'lsa to'ldirilgan, bo'lmasa —)
+    all_employees = db.query(Employee).filter(Employee.is_active == True).order_by(Employee.full_name).all()
+    rows = []
+    for emp in all_employees:
+        att = attendance_by_emp.get(emp.id)
+        rows.append({"employee": emp, "attendance": att})
     doc = db.query(AttendanceDoc).filter(AttendanceDoc.date == form_date).first()
     return templates.TemplateResponse("employees/attendance_form.html", {
         "request": request,
         "form_date": form_date,
         "form_date_str": form_date_str,
-        "attendances": attendances,
+        "attendance_rows": rows,
+        "attendances": [r["attendance"] for r in rows if r["attendance"]],  # tasdiqlash uchun bor yozuvlar
         "doc": doc,
         "current_user": current_user,
         "page_title": "Tabel formasi",
@@ -8198,7 +8233,8 @@ async def employee_salary_page(
     today = date.today()
     year = year or today.year
     month = month or today.month
-    employees = db.query(Employee).filter(Employee.is_active == True).order_by(Employee.full_name).all()
+    from sqlalchemy.orm import joinedload
+    employees = db.query(Employee).options(joinedload(Employee.piecework_task)).filter(Employee.is_active == True).order_by(Employee.full_name).all()
     salaries = {s.employee_id: s for s in db.query(Salary).filter(Salary.year == year, Salary.month == month).all()}
     # Avanslar (shu oy berilgan) — hisoblash uchun
     advance_sums = {}
@@ -8211,10 +8247,34 @@ async def employee_salary_page(
         EmployeeAdvance.advance_date <= end_d,
     ).all():
         advance_sums[a.employee_id] = advance_sums.get(a.employee_id, 0) + a.amount
+    # Bo'lak xodimlar uchun: shu oyda operator sifatida ishlab chiqarilgan kg/dona (Production)
+    from app.utils.production_order import recipe_kg_per_unit
+    operator_produced = {}  # employee_id -> {"kg": float, "dona": float}
+    prods = db.query(Production).options(
+        joinedload(Production.recipe),
+        joinedload(Production.stages),
+    ).filter(
+        Production.status == "completed",
+        func.date(Production.date) >= start_d,
+        func.date(Production.date) <= end_d,
+    ).all()
+    for prod in prods:
+        eid = prod.operator_id
+        if eid is None and getattr(prod, "stages", None):
+            last_stage = max(prod.stages, key=lambda st: st.stage_number or 0)
+            eid = getattr(last_stage, "operator_id", None)
+        if eid is None:
+            continue
+        if eid not in operator_produced:
+            operator_produced[eid] = {"kg": 0.0, "dona": 0.0}
+        kg_per = recipe_kg_per_unit(prod.recipe)
+        qty = prod.quantity or 0
+        operator_produced[eid]["kg"] += qty * kg_per
+        operator_produced[eid]["dona"] += qty
     rows = []
     for emp in employees:
         s = salaries.get(emp.id)
-        base = (s.base_salary if s else 0) or emp.salary
+        base = (s.base_salary if s else 0) or (0 if (getattr(emp, "salary_type", None) or "").strip() == "bo'lak" else emp.salary)
         bonus = (s.bonus if s else 0) or 0
         deduction = (s.deduction if s else 0) or 0
         adv_ded = (s.advance_deduction if s and getattr(s, "advance_deduction", None) is not None else None)
@@ -8223,6 +8283,30 @@ async def employee_salary_page(
         total = base + bonus - deduction - adv_ded
         if total < 0:
             total = 0
+        piecework_task = getattr(emp, "piecework_task", None)
+        emp_salary_type = (getattr(emp, "salary_type", None) or "").strip().lower()
+        if piecework_task and (emp_salary_type == "bo'lak" or emp_salary_type == "bolak"):
+            unit_name = (piecework_task.unit_name or "kg").strip().lower()
+            use_kg = "kg" in unit_name
+            produced = operator_produced.get(emp.id, {"kg": 0.0, "dona": 0.0})
+            produced_units = produced["kg"] if use_kg else produced["dona"]
+            price = float(piecework_task.price_per_unit or 0)
+            auto_base = round(produced_units * price, 0)
+            if not (s and (s.base_salary or 0) > 0):
+                base = auto_base
+                total = base + bonus - deduction - adv_ded
+                if total < 0:
+                    total = 0
+            piecework_info = {
+                "name": piecework_task.name or piecework_task.code,
+                "price_per_unit": price,
+                "unit_name": piecework_task.unit_name or "kg",
+                "produced_units": produced_units,
+                "produced_label": f'{produced_units:,.2f} kg' if use_kg else f'{produced_units:,.0f} dona',
+                "auto_base": auto_base,
+            }
+        else:
+            piecework_info = None
         rows.append({
             "employee": emp,
             "salary_row": s,
@@ -8233,6 +8317,7 @@ async def employee_salary_page(
             "total": total,
             "paid": (s.paid if s else 0) or 0,
             "status": (s.status if s else "pending") or "pending",
+            "piecework_info": piecework_info,
         })
     return templates.TemplateResponse("employees/salary_list.html", {
         "request": request,
@@ -8912,7 +8997,7 @@ def _do_complete_production_stock(db, production, recipe):
             if st and getattr(st, "cost_price", None) and st.cost_price > 0:
                 cost = st.cost_price
             total_material_cost += actual_use * cost
-    output_units = production.quantity * (recipe.output_quantity or 1)
+    output_units = production.quantity * recipe_kg_per_unit(recipe)
     cost_per_unit = (total_material_cost / output_units) if output_units > 0 else 0
     out_wh_id = production.output_warehouse_id if production.output_warehouse_id else production.warehouse_id
     
@@ -9088,7 +9173,7 @@ async def production_revert(
             status_code=303
         )
     items_to_use = [(pi.product_id, pi.quantity) for pi in production.production_items] if production.production_items else [(item.product_id, item.quantity * production.quantity) for item in recipe.items]
-    output_units = production.quantity * (recipe.output_quantity or 1)
+    output_units = production.quantity * recipe_kg_per_unit(recipe)
     out_wh_id = production.output_warehouse_id if production.output_warehouse_id else production.warehouse_id
     # Tayyor mahsulotni 2-ombordan ayirish
     product_stock = db.query(Stock).filter(
@@ -10172,13 +10257,14 @@ async def startup():
     """Dastur ishga tushganda"""
     init_db()
     try:
-        from app.models.database import ensure_attendance_advance_tables, ensure_purchase_expenses, ensure_order_production_columns, ensure_recipe_warehouse_columns, ensure_user_allowed_sections_column, ensure_stock_cost_column
+        from app.models.database import ensure_attendance_advance_tables, ensure_purchase_expenses, ensure_order_production_columns, ensure_recipe_warehouse_columns, ensure_user_allowed_sections_column, ensure_stock_cost_column, ensure_employee_salary_columns
         ensure_attendance_advance_tables()
         ensure_purchase_expenses()
         ensure_order_production_columns()
         ensure_recipe_warehouse_columns()
         ensure_user_allowed_sections_column()
         ensure_stock_cost_column()
+        ensure_employee_salary_columns()
     except Exception as e:
         print("[Startup] ensure_attendance_advance_tables:", e)
     try:

@@ -23,6 +23,18 @@ from app.models.database import (
 from app.utils.notifications import create_notification
 
 
+def recipe_kg_per_unit(recipe: Optional[Recipe]) -> float:
+    """Retsept uchun 1 dona (birlik) ning og'irligi kg da. Nomidan 400gr/1kg aniqlanadi."""
+    if not recipe:
+        return 1.0
+    name = (recipe.name or "").lower()
+    if "400gr" in name or "400 gr" in name:
+        return 0.4
+    if "1kg" in name:
+        return 1.0
+    return float(recipe.output_quantity or 1.0)
+
+
 def check_semi_finished_stock(
     db: Session,
     recipe: Recipe,

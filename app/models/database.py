@@ -785,6 +785,19 @@ class Payment(Base):
 # XODIMLAR
 # ==========================================
 
+class PieceworkTask(Base):
+    """Bajariladigan ishlar (bo'lak narxi) — ishga qabulda 'Bo'lak' turida tanlash uchun"""
+    __tablename__ = "piecework_tasks"
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(50), unique=True, index=True, nullable=True)
+    name = Column(String(200), nullable=True)
+    price_per_unit = Column(Float, default=0)
+    unit_name = Column(String(50), nullable=True)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+
 class Employee(Base):
     """Xodimlar"""
     __tablename__ = "employees"
@@ -800,12 +813,15 @@ class Employee(Base):
     hire_date = Column(Date)
     birth_date = Column(Date, nullable=True)  # Tug'ilgan kun (bosh sahifa bildirishnomalari uchun)
     salary = Column(Float, default=0)
+    salary_type = Column(String(50), nullable=True)  # oylik, soatlik, bo'lak (migratsiya orqali qo'shilgan)
+    piecework_task_id = Column(Integer, ForeignKey("piecework_tasks.id"), nullable=True)  # Bo'lak turida qaysi ish
     is_active = Column(Boolean, default=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     hikvision_id = Column(String(50))  # Hikvision tizimidagi ID
     created_at = Column(DateTime, default=datetime.now)
 
     salaries = relationship("Salary", back_populates="employee")
+    piecework_task = relationship("PieceworkTask", foreign_keys=[piecework_task_id])
 
 
 class Salary(Base):
@@ -1339,6 +1355,39 @@ def ensure_stock_cost_column():
                 conn.execute(text("ALTER TABLE stocks ADD COLUMN cost_price REAL DEFAULT 0"))
     except Exception as e:
         print(f"[ensure_stock_cost_column] Xatolik: {e}")
+
+
+def ensure_employee_salary_columns():
+    """Employees jadvaliga salary_type, piecework_task_id va piecework_tasks jadvalini qo'shadi (SQLite)."""
+    if not _is_sqlite:
+        return
+    from sqlalchemy import text
+    try:
+        with engine.begin() as conn:
+            # piecework_tasks jadvali (piecework_task_id FK uchun)
+            r = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='piecework_tasks'"))
+            if r.fetchone() is None:
+                conn.execute(text("""
+                    CREATE TABLE piecework_tasks (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        code VARCHAR(50),
+                        name VARCHAR(200),
+                        price_per_unit FLOAT DEFAULT 0,
+                        unit_name VARCHAR(50),
+                        description TEXT,
+                        is_active INTEGER DEFAULT 1,
+                        created_at DATETIME
+                    )
+                """))
+            # employees ustunlari
+            r = conn.execute(text("PRAGMA table_info(employees)"))
+            cols = [row[1] for row in r]
+            if "salary_type" not in cols:
+                conn.execute(text("ALTER TABLE employees ADD COLUMN salary_type VARCHAR(50)"))
+            if "piecework_task_id" not in cols:
+                conn.execute(text("ALTER TABLE employees ADD COLUMN piecework_task_id INTEGER REFERENCES piecework_tasks(id)"))
+    except Exception as e:
+        print(f"[ensure_employee_salary_columns] Xatolik: {e}")
 
 
 if __name__ == "__main__":

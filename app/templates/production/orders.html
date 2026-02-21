@@ -97,9 +97,11 @@
                     </td>
                     <td>
                         {% set unit_name = (prod.recipe.product.unit.name if prod.recipe and prod.recipe.product and prod.recipe.product.unit else 'kg') %}
-                        {% set qty_kg = (prod.quantity * (prod.recipe.output_quantity or 1)) if (prod.recipe and prod.recipe.output_quantity) else prod.quantity %}
+                        {% set _rname = (prod.recipe.name or '')|lower if prod.recipe else '' %}
+                        {% set _kg_per_unit = 0.4 if ('400gr' in _rname or '400 gr' in _rname) else (1.0 if '1kg' in _rname else (prod.recipe.output_quantity if prod.recipe and prod.recipe.output_quantity else 1)) %}
+                        {% set qty_kg = prod.quantity * _kg_per_unit %}
                         <strong>{{ "%.2f"|format(prod.quantity) }} {{ unit_name }}</strong>
-                        {% if unit_name|lower != 'kg' and prod.recipe and prod.recipe.output_quantity %}
+                        {% if unit_name|lower != 'kg' %}
                         <span class="text-muted small">({{ "%.2f"|format(qty_kg) }} kg)</span>
                         {% endif %}
                     </td>

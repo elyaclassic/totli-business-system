@@ -30,6 +30,7 @@ from app.models.database import (
 )
 from app.deps import require_auth, require_admin, get_current_user
 from app.utils.notifications import check_low_stock_and_notify
+from app.utils.production_order import recipe_kg_per_unit
 
 router = APIRouter(prefix="/production", tags=["production"])
 
@@ -74,8 +75,8 @@ def _calculate_recipe_cost_per_kg(db, recipe_id):
                 cost = stock.cost_price
             total_cost += (item.quantity or 0) * cost
     
-    # 1 kg uchun tannarx
-    output_qty = recipe.output_quantity or 1.0
+    # 1 kg uchun tannarx (birlik og'irligi: 400gr -> 0.4, 1kg -> 1)
+    output_qty = recipe_kg_per_unit(recipe)
     return total_cost / output_qty if output_qty > 0 else 0.0
 
 
@@ -132,7 +133,7 @@ def _do_complete_production_stock(db, production, recipe):
             if stock and getattr(stock, 'cost_price', None) and stock.cost_price > 0:
                 cost = stock.cost_price
             total_material_cost += actual_use * cost
-    output_units = production.quantity * (recipe.output_quantity or 1)
+    output_units = production.quantity * recipe_kg_per_unit(recipe)
     cost_per_unit = (total_material_cost / output_units) if output_units > 0 else 0
     out_wh_id = production.output_warehouse_id if production.output_warehouse_id else production.warehouse_id
     product_stock = db.query(Stock).filter(
@@ -896,7 +897,7 @@ async def production_revert(
         if production.production_items
         else [(item.product_id, item.quantity * production.quantity) for item in recipe.items]
     )
-    output_units = production.quantity * (recipe.output_quantity or 1)
+    output_units = production.quantity * recipe_kg_per_unit(recipe)
     out_wh_id = production.output_warehouse_id if production.output_warehouse_id else production.warehouse_id
     product_stock = db.query(Stock).filter(
         Stock.warehouse_id == out_wh_id,

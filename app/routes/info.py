@@ -27,6 +27,7 @@ from app.models.database import (
     Region,
     Machine,
     Employee,
+    PieceworkTask,
 )
 from app.deps import require_auth, require_admin
 from app.utils.auth import hash_password
@@ -1172,6 +1173,75 @@ async def info_positions_delete(
     position.is_active = False
     db.commit()
     return RedirectResponse(url="/info/positions", status_code=303)
+
+
+# ---------- Bajariladigan ishlar (bo'lak narxi) ----------
+@router.get("/piecework-tasks", response_class=HTMLResponse)
+async def info_piecework_tasks(
+    request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)
+):
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    piecework_tasks = db.query(PieceworkTask).order_by(PieceworkTask.name).all()
+    return templates.TemplateResponse("info/piecework_tasks.html", {
+        "request": request,
+        "current_user": current_user,
+        "page_title": "Bajariladigan ishlar (bo'lak narxi)",
+        "piecework_tasks": piecework_tasks,
+    })
+
+
+@router.post("/piecework-tasks/add")
+async def info_piecework_tasks_add(
+    code: str = Form(...),
+    name: str = Form(...),
+    price_per_unit: float = Form(0),
+    unit_name: str = Form("dona"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    task = PieceworkTask(
+        code=code.strip(),
+        name=name.strip(),
+        price_per_unit=float(price_per_unit),
+        unit_name=(unit_name or "dona").strip(),
+    )
+    db.add(task)
+    db.commit()
+    return RedirectResponse(url="/info/piecework-tasks", status_code=303)
+
+
+@router.post("/piecework-tasks/edit/{task_id}")
+async def info_piecework_tasks_edit(
+    task_id: int,
+    code: str = Form(...),
+    name: str = Form(...),
+    price_per_unit: float = Form(0),
+    unit_name: str = Form("dona"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    task = db.query(PieceworkTask).filter(PieceworkTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Ish topilmadi")
+    task.code = code.strip()
+    task.name = name.strip()
+    task.price_per_unit = float(price_per_unit)
+    task.unit_name = (unit_name or "dona").strip()
+    db.commit()
+    return RedirectResponse(url="/info/piecework-tasks", status_code=303)
+
+
+@router.post("/piecework-tasks/delete/{task_id}")
+async def info_piecework_tasks_delete(
+    task_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_auth)
+):
+    task = db.query(PieceworkTask).filter(PieceworkTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Ish topilmadi")
+    db.delete(task)
+    db.commit()
+    return RedirectResponse(url="/info/piecework-tasks", status_code=303)
 
 
 # ---------- Regions ----------

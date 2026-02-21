@@ -50,7 +50,7 @@
 
     <div class="card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center">
-            <span>Shu kundagi yozuvlar ({{ attendances|length }} ta)</span>
+            <span>Barcha xodimlar ({{ attendance_rows|length }} ta) — keldi: {{ attendances|length }} ta</span>
             {% if current_user and current_user.role == 'admin' %}
             <form method="POST" action="/employees/attendance/form/confirm" class="d-inline">
                 <input type="hidden" name="date" value="{{ form_date_str }}">
@@ -67,6 +67,9 @@
                         <tr>
                             <th width="45">№</th>
                             <th>Xodim</th>
+                            <th>Lavozim</th>
+                            <th>Bo'lim</th>
+                            <th>Oylik turi</th>
                             <th>Keldi</th>
                             <th>Ketdi</th>
                             <th>Soat</th>
@@ -76,24 +79,29 @@
                         </tr>
                     </thead>
                     <tbody>
-                        {% for att in attendances %}
-                        <tr>
+                        {% for row in attendance_rows %}
+                        <tr class="{% if not row.attendance %}table-secondary{% endif %}">
                             <td>{{ loop.index }}</td>
-                            <td>{{ att.employee.full_name }}</td>
-                            <td>{{ att.check_in.strftime('%H:%M') if att.check_in else '-' }}</td>
-                            <td>{{ att.check_out.strftime('%H:%M') if att.check_out else '-' }}</td>
-                            <td>{{ att.hours_worked }}</td>
+                            <td>{{ row.employee.full_name }}{% if row.employee.code %} <small class="text-muted">({{ row.employee.code }})</small>{% endif %}</td>
+                            <td><small>{{ row.employee.position or '-' }}</small></td>
+                            <td><small>{{ row.employee.department or '-' }}</small></td>
+                            <td><small>{% if row.employee.salary_type %}{% if row.employee.salary_type == 'oylik' %}Oylik{% elif row.employee.salary_type == 'soatlik' %}Soatlik{% elif row.employee.salary_type == "bo'lak" %}Bo'lak{% else %}{{ row.employee.salary_type }}{% endif %}{% else %}-{% endif %}</small></td>
+                            <td>{% if row.attendance and row.attendance.check_in %}{{ row.attendance.check_in.strftime('%H:%M') }}{% else %}-{% endif %}</td>
+                            <td>{% if row.attendance and row.attendance.check_out %}{{ row.attendance.check_out.strftime('%H:%M') }}{% else %}-{% endif %}</td>
+                            <td>{% if row.attendance %}{{ row.attendance.hours_worked or '-' }}{% else %}-{% endif %}</td>
                             <td>
-                                {% if att.status == 'present' %}<span class="badge bg-success">Keldi</span>
-                                {% elif att.status == 'absent' %}<span class="badge bg-danger">Kelmadi</span>
-                                {% else %}{{ att.status }}{% endif %}
+                                {% if row.attendance %}
+                                    {% if row.attendance.status == 'present' %}<span class="badge bg-success">Keldi</span>
+                                    {% elif row.attendance.status == 'absent' %}<span class="badge bg-danger">Kelmadi</span>
+                                    {% else %}{{ row.attendance.status }}{% endif %}
+                                {% else %}<span class="text-muted">—</span>{% endif %}
                             </td>
-                            <td>{% if att.event_snapshot_path %}<a href="/static/{{ att.event_snapshot_path }}" target="_blank" title="Hodisa rasmi"><img src="/static/{{ att.event_snapshot_path }}" alt="" class="rounded" style="max-width:48px;max-height:48px;object-fit:cover;"></a>{% else %}-{% endif %}</td>
-                            <td><small>{{ att.note or '-' }}</small></td>
+                            <td>{% if row.attendance and row.attendance.event_snapshot_path %}<a href="/static/{{ row.attendance.event_snapshot_path }}" target="_blank" title="Hodisa rasmi"><img src="/static/{{ row.attendance.event_snapshot_path }}" alt="" class="rounded" style="max-width:48px;max-height:48px;object-fit:cover;"></a>{% else %}-{% endif %}</td>
+                            <td><small>{% if row.attendance %}{{ row.attendance.note or '-' }}{% else %}-{% endif %}</small></td>
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="8" class="text-center text-muted py-4">Shu kun uchun yozuv yo'q. «Hikvision'dan yuklash» yoki <a href="/employees/attendance/records?start_date={{ form_date_str }}&end_date={{ form_date_str }}">barcha yozuvlar</a> sahifasida qo'lda qo'shing.</td>
+                            <td colspan="11" class="text-center text-muted py-4">Xodimlar ro'yxati bo'sh. <a href="/info/employees">Ma'lumotnomalar → Xodimlar</a> da qo'shing.</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -105,19 +113,25 @@
 </div>
 
 {% if not doc %}
-<!-- Hikvision modal (faqat shu kun) -->
+<!-- Hikvision modal (yuklashdan oldin sanani tanlash mumkin) -->
 <div class="modal fade" id="hikvisionModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
-            <form method="POST" action="/employees/attendance/sync-hikvision">
-                <input type="hidden" name="redirect_url" value="/employees/attendance/form?date={{ form_date_str }}">
-                <input type="hidden" name="start_date" value="{{ form_date_str }}">
-                <input type="hidden" name="end_date" value="{{ form_date_str }}">
+            <form method="POST" action="/employees/attendance/sync-hikvision" id="hikvisionSyncForm">
+                <input type="hidden" name="redirect_url" id="hikvisionRedirectUrl" value="/employees/attendance/form?date={{ form_date_str }}">
+                <input type="hidden" name="start_date" id="hikvisionStartDate" value="{{ form_date_str }}">
+                <input type="hidden" name="end_date" id="hikvisionEndDate" value="{{ form_date_str }}">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-cloud-download"></i> Hikvision'dan yuklash ({{ form_date.strftime('%d.%m.%Y') }})</h5>
+                    <h5 class="modal-title"><i class="bi bi-cloud-download"></i> Hikvision'dan yuklash</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Yuklash sanasi *</label>
+                        <input type="date" class="form-control" id="hikvisionUploadDate" value="{{ form_date_str }}" required
+                               title="Qaysi kun uchun davomat yuklanadi">
+                        <small class="text-muted">Yuklashdan oldin sanani o'zgartirishingiz mumkin.</small>
+                    </div>
                     <div class="mb-3">
                         <label class="form-label">Hikvision IP *</label>
                         <input type="text" class="form-control" name="hikvision_host" value="192.168.1.199" required>
@@ -157,23 +171,43 @@
 <script>
 (function() {
     var btn = document.getElementById('toggleHikvisionPassword');
-    if (!btn) return;
-    var inp = document.getElementById('hikvisionPassword');
-    var icon = document.getElementById('hikvisionPasswordIcon');
-    if (!inp || !icon) return;
-    btn.addEventListener('click', function() {
-        if (inp.type === 'password') {
-            inp.type = 'text';
-            icon.classList.remove('bi-eye');
-            icon.classList.add('bi-eye-slash');
-            btn.title = 'Parolni yashirish';
-        } else {
-            inp.type = 'password';
-            icon.classList.remove('bi-eye-slash');
-            icon.classList.add('bi-eye');
-            btn.title = 'Parolni ko\'rsatish';
+    if (btn) {
+        var inp = document.getElementById('hikvisionPassword');
+        var icon = document.getElementById('hikvisionPasswordIcon');
+        if (inp && icon) {
+            btn.addEventListener('click', function() {
+                if (inp.type === 'password') {
+                    inp.type = 'text';
+                    icon.classList.remove('bi-eye');
+                    icon.classList.add('bi-eye-slash');
+                    btn.title = 'Parolni yashirish';
+                } else {
+                    inp.type = 'password';
+                    icon.classList.remove('bi-eye-slash');
+                    icon.classList.add('bi-eye');
+                    btn.title = 'Parolni ko\'rsatish';
+                }
+            });
         }
-    });
+    }
+    // Yuklashdan oldin: modaldagi sana hidden start_date, end_date va redirect ga yoziladi
+    var form = document.getElementById('hikvisionSyncForm');
+    var uploadDate = document.getElementById('hikvisionUploadDate');
+    var startInput = document.getElementById('hikvisionStartDate');
+    var endInput = document.getElementById('hikvisionEndDate');
+    var redirectInput = document.getElementById('hikvisionRedirectUrl');
+    if (form && uploadDate && startInput && endInput && redirectInput) {
+        function syncHikvisionDate() {
+            var d = uploadDate.value;
+            if (d) {
+                startInput.value = d;
+                endInput.value = d;
+                redirectInput.value = '/employees/attendance/form?date=' + d;
+            }
+        }
+        uploadDate.addEventListener('change', syncHikvisionDate);
+        form.addEventListener('submit', function() { syncHikvisionDate(); });
+    }
 })();
 </script>
 {% endblock %}

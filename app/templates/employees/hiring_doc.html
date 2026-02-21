@@ -55,8 +55,24 @@
                     <td>{{ doc.department or doc.employee.department or '-' }}</td>
                 </tr>
                 <tr>
+                    <th class="table-light">Ish haqi turi</th>
+                    <td>
+                        {% if doc.employee.salary_type == 'oylik' %}Oylik (belgilangan summa)
+                        {% elif doc.employee.salary_type == 'soatlik' %}Soatlik
+                        {% elif doc.employee.salary_type == "bo'lak" %}Bo'lak (bajarilgan ishga haq)
+                        {% else %}{{ doc.employee.salary_type or 'Belgilanmagan' }}{% endif %}
+                    </td>
+                </tr>
+                <tr>
                     <th class="table-light">Oylik (so'm)</th>
-                    <td>{{ "{:,.0f}".format(doc.salary or 0) }}</td>
+                    <td>
+                        {% if doc.employee.salary_type == "bo'lak" and doc.employee.piecework_task %}
+                            <span class="text-muted">0 — bo'lak ish.</span>
+                            <br><small class="text-muted">«{{ doc.employee.piecework_task.name or doc.employee.piecework_task.code }}» — 1 {{ doc.employee.piecework_task.unit_name or 'birlik' }} = {{ "{:,.0f}".format(doc.employee.piecework_task.price_per_unit or 0) }} so'm. Oy oxirida bajarilgan birliklar bo'yicha hisoblanadi (Oylik hisoblash sahifasida).</small>
+                        {% else %}
+                            {{ "{:,.0f}".format(doc.salary or 0) }}
+                        {% endif %}
+                    </td>
                 </tr>
                 <tr>
                     <th class="table-light">Telefon</th>
