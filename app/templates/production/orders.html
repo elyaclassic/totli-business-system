@@ -21,6 +21,12 @@
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 {% endif %}
+{% if request.query_params.get('operator_set') %}
+<div class="alert alert-success alert-dismissible fade show py-2 small">
+    <i class="bi bi-check-circle"></i> Operator belgilandi. Oylik hisoblash sahifasida shu oy uchun kg avtomatik chiqadi.
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
 <div class="container-fluid">
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="mb-0"><i class="bi bi-clipboard-check"></i> Ishlab chiqarish buyurtmalari</h4>
@@ -31,18 +37,14 @@
 <div class="card mb-3">
     <div class="card-body py-2">
         <form method="get" action="/production/orders" class="d-flex flex-wrap align-items-center gap-2 mb-2">
-            <label class="form-label mb-0 small text-muted">Raqam:</label>
-            <input type="text" name="number" class="form-control form-control-sm" style="width: 140px;" placeholder="PR-20260219..." value="{{ filter_number or '' }}" autocomplete="off">
-            <label class="form-label mb-0 small text-muted ms-2">Retsept nomi:</label>
-            <input type="text" name="recipe" class="form-control form-control-sm" style="width: 180px;" placeholder="HOLVA, ZEBRA..." value="{{ filter_recipe or '' }}" autocomplete="off">
-            <label class="form-label mb-0 small text-muted ms-2">Sana dan:</label>
-            <input type="date" name="date_from" class="form-control form-control-sm" style="width: 130px;" value="{{ filter_date_from or '' }}">
-            <label class="form-label mb-0 small text-muted">gacha:</label>
-            <input type="date" name="date_to" class="form-control form-control-sm" style="width: 130px;" value="{{ filter_date_to or '' }}">
+            <label class="form-label mb-0 small text-muted">Sana:</label>
+            <input type="date" name="date_from" class="form-control form-control-sm" style="width: auto;" value="{{ filter_date_from or '' }}" title="Dan">
+            <span class="small text-muted">—</span>
+            <input type="date" name="date_to" class="form-control form-control-sm" style="width: auto;" value="{{ filter_date_to or '' }}" title="Gacha">
+            <span class="small text-muted ms-2">Qidiruv:</span>
+            <input type="text" name="q" class="form-control form-control-sm" style="width: 140px;" value="{{ filter_q or '' }}" autocomplete="off" placeholder="Raqam, retsept...">
             <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-search"></i> Qidirish</button>
-            {% if filter_number or filter_recipe or filter_date_from or filter_date_to %}
             <a href="/production/orders" class="btn btn-sm btn-outline-secondary">Tozalash</a>
-            {% endif %}
         </form>
         <div class="d-flex gap-2">
             <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('all')">
@@ -61,6 +63,7 @@
                 Bekor qilingan ({{ productions|selectattr('status', 'eq', 'cancelled')|list|length }})
             </button>
         </div>
+        <p class="small text-muted mb-0 mt-1"><i class="bi bi-info-circle"></i> Operator: agar tizimga kirdingiz va <strong>Xodimlar</strong> da siz qaysidir xodimga bog'langan bo'lsangiz (xodim kartasida «Foydalanuvchi» tanlangan), Bosqich yoki Yakunlash bosilganda operator avtomatik shu xodim bo'ladi.</p>
     </div>
 </div>
 
@@ -178,15 +181,18 @@
                                 <option value="">— Uskuna —</option>
                                 {% for m in machines %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}
                             </select>
-                            <select name="operator_id" class="form-select form-select-sm d-inline-block w-auto" title="Operator">
-                                <option value="" {% if not current_user_employee_id %}selected{% endif %}>{{ current_user.full_name if (current_user and not current_user_employee_id) else '— Operator —' }}</option>
-                                {% for e in employees %}<option value="{{ e.id }}" {% if current_user_employee_id and e.id == current_user_employee_id %}selected{% endif %}>{{ e.full_name }}</option>{% endfor %}
+                            <select name="operator_id" class="form-select form-select-sm d-inline-block w-auto" title="Xodimga bog'langan foydalanuvchi avtomatik tanlanadi">
+                                <option value="">— Operator —</option>
+                                {% for e in employees %}
+                                <option value="{{ e.id }}" {% if current_user_employee_id and e.id == current_user_employee_id %}selected{% endif %}>{{ e.full_name }}{% if current_user_employee_id and e.id == current_user_employee_id %} (avtomatik){% endif %}</option>
+                                {% endfor %}
                             </select>
                             <button type="submit" class="btn btn-sm btn-success" title="Bosqichni yakunlash">
                                 <i class="bi bi-check-lg"></i> Bosqich
                             </button>
                         </form>
-                        <form method="POST" action="/production/{{ prod.id }}/complete" style="display: inline;" class="d-inline" title="Bir martada yakunlash (4 bosqichsiz)">
+                        <form method="POST" action="/production/{{ prod.id }}/complete" style="display: inline;" class="d-inline complete-form" title="Bir martada yakunlash (4 bosqichsiz)" data-prod-id="{{ prod.id }}">
+                            <input type="hidden" name="operator_id" class="complete-operator-id">
                             <button type="submit" class="btn btn-sm btn-outline-success">Yakunlash</button>
                         </form>
                         <form method="POST" action="/production/{{ prod.id }}/cancel" style="display: inline;">
@@ -194,7 +200,8 @@
                                 <i class="bi bi-x-lg"></i>
                             </button>
                         </form>
-                        {% elif prod.status == 'completed' and current_user and current_user.role == 'admin' %}
+                        {% elif prod.status == 'completed' %}
+                        {% if current_user and current_user.role == 'admin' %}
                         <a href="/production/{{ prod.id }}/materials" class="btn btn-sm btn-outline-primary" title="Tahrirlash (ko'rish)">
                             <i class="bi bi-pencil"></i>
                         </a>
@@ -204,6 +211,9 @@
                                 <i class="bi bi-arrow-counterclockwise"></i>
                             </button>
                         </form>
+                        {% else %}
+                        <span class="text-muted">—</span>
+                        {% endif %}
                         {% else %}
                         <span class="text-muted">-</span>
                         {% endif %}
@@ -248,6 +258,15 @@ function filterStatus(status) {
     });
     event.target.classList.add('active');
 }
+// Yakunlash bosilganda shu qatordagi operator tanlovidan qiymatni yuborish (oylik hisobda kg chiqishi uchun)
+document.querySelectorAll('.complete-form').forEach(function(form) {
+    form.addEventListener('submit', function() {
+        var row = form.closest('tr');
+        var sel = row ? row.querySelector('select[name=operator_id]') : null;
+        var hid = form.querySelector('.complete-operator-id');
+        if (sel && hid) hid.value = sel.value || '';
+    });
+});
 </script>
 </div>
 {% endblock %}

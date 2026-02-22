@@ -75,6 +75,16 @@
                         <label class="form-label">Oylik (so'm)</label>
                         <input type="number" class="form-control" name="salary" value="{{ emp.salary if emp else 0 }}" step="100000">
                     </div>
+                    <div class="col-md-4" id="daysOffBlock">
+                        <label class="form-label">Dam olish kuni (oyda)</label>
+                        <input type="number" class="form-control" name="days_off_per_month" value="{{ (emp.days_off_per_month or 0) if emp else 0 }}" min="0" max="31" title="Oyda necha kun dam olish (ish kuni = 30 − bu)">
+                        <small class="text-muted">Oylik: ish kuni = 30 − dam olish.</small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Kunlik ish soati</label>
+                        <input type="number" class="form-control" name="work_hours_per_day" value="{{ (emp.work_hours_per_day or 10) if emp else 10 }}" min="0.5" max="24" step="0.5" title="1 ish kuni necha soat (masalan 8:00–18:00 = 10)">
+                        <small class="text-muted">Oylik: me'yor = (30 − dam olish) × bu soat; tabelda kelgan/ketgan vaqtdan ishlagan soat hisoblanadi.</small>
+                    </div>
                     <div class="col-md-12">
                         <label class="form-label">Izoh</label>
                         <input type="text" class="form-control" name="note" placeholder="Ixtiyoriy">

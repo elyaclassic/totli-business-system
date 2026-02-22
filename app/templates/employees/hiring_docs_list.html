@@ -32,6 +32,12 @@
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% endif %}
+    {% if request.query_params.get('synced') == '1' %}
+    <div class="alert alert-success alert-dismissible fade show py-2 small">
+        <i class="bi bi-person-check"></i> Hujjat ma'lumotlari xodim kartasiga yozildi. Endi bu xodim oylik hisoblash ro'yxatida chiqadi.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h5 class="mb-0"><i class="bi bi-file-earmark-person"></i> Ishga qabul qilish hujjatlari</h5>
         <a href="/employees/hiring-doc/create" class="btn btn-success btn-sm"><i class="bi bi-plus-lg"></i> Hujjat yaratish</a>
@@ -76,7 +82,10 @@
                                 <form method="POST" action="/employees/hiring-doc/{{ doc.id }}/cancel-confirm" class="d-inline" onsubmit="return confirm('Tasdiqlashni bekor qilishni xohlaysizmi?');">
                                     <button type="submit" class="btn btn-sm btn-warning" title="Tasdiqlashni bekor qilish"><i class="bi bi-x-circle"></i> Bekor qilish</button>
                                 </form>
-                                <small class="text-muted" title="Tasdiqlashni bekor qilgandan keyin o'chirish mumkin">O'chirish: avval bekor qiling</small>
+                                <form method="POST" action="/employees/hiring-doc/{{ doc.id }}/sync-to-employee" class="d-inline" title="Ishga kirgan sana va boshqalarni xodim kartasiga yozadi — oylik ro'yxatida chiqishi uchun">
+                                    <button type="submit" class="btn btn-sm btn-outline-info"><i class="bi bi-person-lines-fill"></i> Xodimga yozish</button>
+                                </form>
+                                <small class="text-muted d-block" title="Tasdiqlashni bekor qilgandan keyin o'chirish mumkin">O'chirish: avval bekor qiling</small>
                                 {% endif %}
                                 {% endif %}
                             </td>

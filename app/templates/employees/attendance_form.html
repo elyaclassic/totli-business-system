@@ -22,10 +22,10 @@
 
     <div class="card mb-3">
         <div class="card-body">
-            <form method="get" action="/employees/attendance/form" class="d-flex align-items-end gap-3 flex-wrap">
+            <form method="get" action="/employees/attendance/form" class="d-flex align-items-end gap-3 flex-wrap" id="attendanceDateForm">
                 <div>
                     <label class="form-label small mb-1">Sana</label>
-                    <input type="date" name="date" class="form-control" value="{{ form_date_str }}" onchange="this.form.submit()" style="width: auto;">
+                    <input type="date" name="date" id="attendanceFormDate" class="form-control" value="{{ form_date_str }}" onchange="this.form.submit()" style="width: auto;">
                 </div>
                 <button type="submit" class="btn btn-sm btn-outline-primary">Ko'rsatish</button>
             </form>
@@ -41,10 +41,25 @@
     {% else %}
     <div class="card mb-3">
         <div class="card-body py-2">
-            <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#hikvisionModal">
-                <i class="bi bi-cloud-download"></i> Hikvision'dan yuklash
-            </button>
-            <span class="text-muted small ms-2">Tanlangan sana: {{ form_date.strftime('%d.%m.%Y') }} bo'yicha yuklanadi.</span>
+            <div class="d-flex flex-wrap align-items-center gap-3">
+                <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#hikvisionModal">
+                    <i class="bi bi-cloud-download"></i> Hikvision'dan yuklash
+                </button>
+                <span class="text-muted small">Tanlangan sana: {{ form_date.strftime('%d.%m.%Y') }} bo'yicha yuklanadi.</span>
+                <div class="d-flex align-items-center gap-2 ms-auto" id="autoSyncBlock">
+                    <label class="form-check-label small mb-0">
+                        <input type="checkbox" class="form-check-input" id="autoSyncCheck" title="Hikvision bilan doimiy aloqa — har N daqiqada avtomatik yuklash">
+                        Doimiy aloqa (avtomatik yuklash)
+                    </label>
+                    <select class="form-select form-select-sm" id="autoSyncInterval" style="width: auto;">
+                        <option value="5">Har 5 daqiqa</option>
+                        <option value="10">Har 10 daqiqa</option>
+                        <option value="15">Har 15 daqiqa</option>
+                    </select>
+                    <span class="text-muted small" id="autoSyncStatus"></span>
+                </div>
+            </div>
+            <p class="small text-muted mb-0 mt-2" id="autoSyncHint">Avval bir marta «Hikvision'dan yuklash» tugmasini bosing va kirish ma'lumotlarini kiriting — keyin doimiy aloqa ishlaydi.</p>
         </div>
     </div>
 
@@ -88,7 +103,7 @@
                             <td><small>{% if row.employee.salary_type %}{% if row.employee.salary_type == 'oylik' %}Oylik{% elif row.employee.salary_type == 'soatlik' %}Soatlik{% elif row.employee.salary_type == "bo'lak" %}Bo'lak{% else %}{{ row.employee.salary_type }}{% endif %}{% else %}-{% endif %}</small></td>
                             <td>{% if row.attendance and row.attendance.check_in %}{{ row.attendance.check_in.strftime('%H:%M') }}{% else %}-{% endif %}</td>
                             <td>{% if row.attendance and row.attendance.check_out %}{{ row.attendance.check_out.strftime('%H:%M') }}{% else %}-{% endif %}</td>
-                            <td>{% if row.attendance %}{{ row.attendance.hours_worked or '-' }}{% else %}-{% endif %}</td>
+                            <td>{% if row.attendance %}{{ row.attendance.hours_worked if row.attendance.hours_worked is not none else '-' }}{% else %}-{% endif %}</td>
                             <td>
                                 {% if row.attendance %}
                                     {% if row.attendance.status == 'present' %}<span class="badge bg-success">Keldi</span>
@@ -206,7 +221,88 @@
             }
         }
         uploadDate.addEventListener('change', syncHikvisionDate);
-        form.addEventListener('submit', function() { syncHikvisionDate(); });
+        form.addEventListener('submit', function() {
+            syncHikvisionDate();
+            var host = form.querySelector('input[name="hikvision_host"]');
+            var port = form.querySelector('input[name="hikvision_port"]');
+            var user = form.querySelector('input[name="hikvision_username"]');
+            var pass = form.querySelector('input[name="hikvision_password"]');
+            if (host && host.value) {
+                try {
+                    localStorage.setItem('hikvision_creds', JSON.stringify({
+                        host: host.value,
+                        port: (port && port.value) ? port.value : '443',
+                        username: (user && user.value) ? user.value : 'admin',
+                        password: (pass && pass.value) ? pass.value : ''
+                    }));
+                } catch (e) {}
+            }
+        });
+    }
+
+    // Doimiy aloqa: avtomatik yuklash har N daqiqa
+    var autoSyncCheck = document.getElementById('autoSyncCheck');
+    var autoSyncInterval = document.getElementById('autoSyncInterval');
+    var autoSyncStatus = document.getElementById('autoSyncStatus');
+    var autoSyncHint = document.getElementById('autoSyncHint');
+    var autoSyncTimer = null;
+    function runAutoSync() {
+        var dateInp = document.getElementById('attendanceFormDate');
+        var dateVal = dateInp ? dateInp.value : '';
+        if (!dateVal) return;
+        var credsStr = localStorage.getItem('hikvision_creds');
+        if (!credsStr) {
+            if (autoSyncStatus) autoSyncStatus.textContent = 'Kirish ma\'lumotlari yo\'q';
+            return;
+        }
+        try {
+            var creds = JSON.parse(credsStr);
+            if (autoSyncStatus) autoSyncStatus.textContent = 'Yuklanmoqda…';
+            fetch('/employees/attendance/auto-sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    date: dateVal,
+                    hikvision_host: creds.host,
+                    hikvision_port: creds.port || '443',
+                    hikvision_username: creds.username || 'admin',
+                    hikvision_password: creds.password || ''
+                })
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (data.success && autoSyncStatus) {
+                    autoSyncStatus.textContent = 'Yangilandi: ' + (data.imported || 0) + ' ta';
+                    window.location.reload();
+                } else if (autoSyncStatus) {
+                    autoSyncStatus.textContent = data.error || (data.errors && data.errors[0]) || 'Xato';
+                }
+            }).catch(function() {
+                if (autoSyncStatus) autoSyncStatus.textContent = 'Tarmoq xatosi';
+            });
+        } catch (e) {
+            if (autoSyncStatus) autoSyncStatus.textContent = 'Xato';
+        }
+    }
+    if (autoSyncCheck && autoSyncInterval) {
+        autoSyncCheck.addEventListener('change', function() {
+            if (autoSyncTimer) {
+                clearInterval(autoSyncTimer);
+                autoSyncTimer = null;
+            }
+            if (this.checked) {
+                var mins = parseInt(autoSyncInterval.value, 10) || 5;
+                runAutoSync();
+                autoSyncTimer = setInterval(runAutoSync, mins * 60 * 1000);
+            } else {
+                if (autoSyncStatus) autoSyncStatus.textContent = '';
+            }
+        });
+        autoSyncInterval.addEventListener('change', function() {
+            if (!autoSyncCheck.checked) return;
+            if (autoSyncTimer) clearInterval(autoSyncTimer);
+            var mins = parseInt(this.value, 10) || 5;
+            autoSyncTimer = setInterval(runAutoSync, mins * 60 * 1000);
+        });
     }
 })();
 </script>

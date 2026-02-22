@@ -949,6 +949,8 @@ async def info_users(
     departments = db.query(Department).filter(Department.is_active == True).order_by(Department.name).all()
     warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
     cash_registers = db.query(CashRegister).filter(CashRegister.is_active == True).order_by(CashRegister.name).all()
+    employees = db.query(Employee).order_by(Employee.full_name).all()
+    user_to_employee = {e.user_id: e for e in employees if getattr(e, "user_id", None)}
     error = request.query_params.get("error", "").strip()
     return templates.TemplateResponse("info/users.html", {
         "request": request,
@@ -956,6 +958,8 @@ async def info_users(
         "departments": departments,
         "warehouses": warehouses,
         "cash_registers": cash_registers,
+        "employees": employees,
+        "user_to_employee": user_to_employee,
         "current_user": current_user,
         "page_title": "Foydalanuvchilar",
         "error": error,
@@ -982,6 +986,7 @@ async def info_users_add(
     full_name: str = Form(...),
     role: str = Form("user"),
     is_active: bool = Form(True),
+    employee_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
@@ -1010,6 +1015,10 @@ async def info_users_add(
     )
     db.add(user)
     db.flush()
+    if employee_id:
+        emp = db.query(Employee).filter(Employee.id == employee_id).first()
+        if emp:
+            emp.user_id = user.id
     for did in department_ids:
         dept = db.query(Department).filter(Department.id == did).first()
         if dept:
@@ -1034,6 +1043,7 @@ async def info_users_edit(
     full_name: str = Form(...),
     role: str = Form("user"),
     is_active: bool = Form(True),
+    employee_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
@@ -1075,6 +1085,12 @@ async def info_users_edit(
         cash = db.query(CashRegister).filter(CashRegister.id == cid).first()
         if cash:
             user.cash_registers_list.append(cash)
+    for emp in db.query(Employee).filter(Employee.user_id == user_id).all():
+        emp.user_id = None
+    if employee_id:
+        emp = db.query(Employee).filter(Employee.id == employee_id).first()
+        if emp:
+            emp.user_id = user_id
     db.commit()
     return RedirectResponse(url="/info/users", status_code=303)
 

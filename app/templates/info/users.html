@@ -65,6 +65,7 @@
                             data-user-id="{{ user.id }}"
                             data-username="{{ user.username }}"
                             data-full-name="{{ user.full_name }}"
+                            data-employee-id="{{ user_to_employee[user.id].id if user_to_employee and user.id in user_to_employee else '' }}"
                             data-role="{{ user.role }}"
                             data-active="{{ 'true' if user.is_active else 'false' }}"
                             data-allowed-sections="{{ user.allowed_sections or '' }}"
@@ -102,6 +103,12 @@
 </div>
 {% endblock %}
 
+{% block extra_css %}
+<style>
+    #add_employee_select, #edit_employee_select { cursor: pointer; }
+</style>
+{% endblock %}
+
 {% block modals %}
 <!-- Yangi foydalanuvchi qo'shish modali -->
 <div class="modal fade" id="addUserModal" tabindex="-1" aria-hidden="true">
@@ -127,13 +134,26 @@
                         </div>
                     </div>
                     <div class="row g-2 mb-2">
+                        <div class="col-12">
+                            <label class="form-label small mb-0">Xodim (hodimlar ro'yxatidan tanlang)</label>
+                            <select class="form-select form-select-sm" id="add_employee_select" aria-label="Xodimni tanlang">
+                                <option value="">— Xodimni tanlang yoki qo'lda ism yozing —</option>
+                                {% for e in (employees or []) %}
+                                <option value="{{ e.id }}" data-full-name="{{ e.full_name or '' }}">{{ e.full_name }}{% if e.code %} ({{ e.code }}){% endif %}</option>
+                                {% endfor %}
+                                {% if not (employees or []) %}
+                                <option value="" disabled>— Hodimlar ro'yxati bo'sh —</option>
+                                {% endif %}
+                            </select>
+                            <input type="hidden" name="employee_id" id="add_employee_id" value="">
+                        </div>
                         <div class="col-md-6">
                             <label class="form-label small mb-0">To'liq ism *</label>
-                            <input type="text" class="form-control form-control-sm" name="full_name" required>
+                            <input type="text" class="form-control form-control-sm" name="full_name" id="add_full_name" required autocomplete="name" placeholder="Xodim tanlanganida avtomatik to'ldiriladi">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label small mb-0">Telefon</label>
-                            <input type="text" class="form-control form-control-sm" name="phone" placeholder="+998901234567">
+                            <input type="text" class="form-control form-control-sm" name="phone" id="add_phone" placeholder="+998901234567" autocomplete="tel">
                         </div>
                     </div>
                     <div class="d-flex align-items-end gap-2 mb-2">
@@ -341,13 +361,26 @@
             <form method="POST" id="editUserForm">
                 <div class="modal-body py-2">
                     <div class="row g-2 mb-2">
+                        <div class="col-12">
+                            <label class="form-label small mb-0">Xodim (hodimlar ro'yxatidan tanlang)</label>
+                            <select class="form-select form-select-sm" id="edit_employee_select" aria-label="Xodimni tanlang">
+                                <option value="">— Xodimni tanlang yoki qo'lda ism yozing —</option>
+                                {% for e in (employees or []) %}
+                                <option value="{{ e.id }}" data-full-name="{{ e.full_name or '' }}">{{ e.full_name }}{% if e.code %} ({{ e.code }}){% endif %}</option>
+                                {% endfor %}
+                                {% if not (employees or []) %}
+                                <option value="" disabled>— Hodimlar ro'yxati bo'sh —</option>
+                                {% endif %}
+                            </select>
+                            <input type="hidden" name="employee_id" id="edit_employee_id" value="">
+                        </div>
                         <div class="col-md-6">
                             <label class="form-label small mb-0">Login *</label>
                             <input type="text" class="form-control form-control-sm" name="username" id="edit_username" required autocomplete="username">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label small mb-0">To'liq ism *</label>
-                            <input type="text" class="form-control form-control-sm" name="full_name" id="edit_full_name" required>
+                            <input type="text" class="form-control form-control-sm" name="full_name" id="edit_full_name" required autocomplete="name">
                         </div>
                     </div>
                     <div class="d-flex align-items-end gap-2 mb-2">
@@ -493,6 +526,10 @@
         document.getElementById('editUserForm').action = '/info/users/edit/' + id;
         document.getElementById('edit_username').value = btn.getAttribute('data-username') || '';
         document.getElementById('edit_full_name').value = btn.getAttribute('data-full-name') || '';
+        var empId = btn.getAttribute('data-employee-id') || '';
+        document.getElementById('edit_employee_id').value = empId;
+        var sel = document.getElementById('edit_employee_select');
+        if (sel) { sel.value = empId || ''; }
         document.getElementById('edit_role').value = btn.getAttribute('data-role') || 'user';
         document.getElementById('edit_is_active').checked = btn.getAttribute('data-active') === 'true';
         // Ruxsatlarni to'ldirish
@@ -627,6 +664,47 @@
             console.error('togglePass xatosi:', error);
         }
     }
+
+    (function() {
+        var addSel = document.getElementById('add_employee_select');
+        var addFullName = document.getElementById('add_full_name');
+        var addEmpId = document.getElementById('add_employee_id');
+        if (addSel && addFullName && addEmpId) {
+            addSel.addEventListener('change', function() {
+                var opt = this.options[this.selectedIndex];
+                if (opt && opt.value) {
+                    addFullName.value = opt.getAttribute('data-full-name') || opt.text.trim();
+                    addEmpId.value = opt.value;
+                } else {
+                    addFullName.value = '';
+                    addEmpId.value = '';
+                }
+            });
+        }
+        var editSel = document.getElementById('edit_employee_select');
+        var editFullName = document.getElementById('edit_full_name');
+        var editEmpId = document.getElementById('edit_employee_id');
+        if (editSel && editFullName && editEmpId) {
+            editSel.addEventListener('change', function() {
+                var opt = this.options[this.selectedIndex];
+                if (opt && opt.value) {
+                    editFullName.value = opt.getAttribute('data-full-name') || opt.text.trim();
+                    editEmpId.value = opt.value;
+                } else {
+                    editEmpId.value = '';
+                }
+            });
+        }
+        // Yangi foydalanuvchi modali ochilganda xodim/ism maydonlarini tozalash (autocomplete va eski qiymatlardan xoli)
+        var addModal = document.getElementById('addUserModal');
+        if (addModal) {
+            addModal.addEventListener('show.bs.modal', function() {
+                if (addSel) { addSel.selectedIndex = 0; addSel.value = ''; }
+                if (addFullName) { addFullName.value = ''; }
+                if (addEmpId) { addEmpId.value = ''; }
+            });
+        }
+    })();
 
     function deleteUser(id, username) {
         if (confirm(`"${username}" foydalanuvchisini o'chirishni xohlaysizmi?`)) {

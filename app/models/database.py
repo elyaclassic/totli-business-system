@@ -814,6 +814,8 @@ class Employee(Base):
     birth_date = Column(Date, nullable=True)  # Tug'ilgan kun (bosh sahifa bildirishnomalari uchun)
     salary = Column(Float, default=0)
     salary_type = Column(String(50), nullable=True)  # oylik, soatlik, bo'lak (migratsiya orqali qo'shilgan)
+    days_off_per_month = Column(Integer, default=0)  # Oy ichida dam olish kuni (oylik + tabel: ish kuni = 30 - bu)
+    work_hours_per_day = Column(Float, default=10)   # Kunlik ish soati (masalan 8:00–18:00 = 10)
     piecework_task_id = Column(Integer, ForeignKey("piecework_tasks.id"), nullable=True)  # Bo'lak turida qaysi ish
     is_active = Column(Boolean, default=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -822,6 +824,17 @@ class Employee(Base):
 
     salaries = relationship("Salary", back_populates="employee")
     piecework_task = relationship("PieceworkTask", foreign_keys=[piecework_task_id])
+
+
+class SalaryDoc(Base):
+    """Oylik hujjati (yil, oy bo'yicha bitta hujjat)"""
+    __tablename__ = "salary_docs"
+    id = Column(Integer, primary_key=True, index=True)
+    number = Column(String(30), unique=True, index=True)  # OY-2026-02
+    year = Column(Integer, nullable=False)
+    month = Column(Integer, nullable=False)
+    status = Column(String(20), default="draft")  # draft, confirmed, cancelled
+    created_at = Column(DateTime, default=datetime.now)
 
 
 class Salary(Base):
@@ -902,6 +915,9 @@ class EmploymentDoc(Base):
     position = Column(String(100), nullable=True)
     department = Column(String(100), nullable=True)
     salary = Column(Float, default=0)
+    salary_type = Column(String(50), nullable=True)   # oylik, soatlik, bo'lak
+    days_off_per_month = Column(Integer, default=0)   # Oy ichida dam olish kuni (oylik hisobda: ish kuni = 30 - bu)
+    work_hours_per_day = Column(Float, default=10)    # Kunlik ish soati (masalan 8:00–18:00 = 10)
     note = Column(String(500), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     confirmed_at = Column(DateTime, nullable=True)   # Tasdiqlangan vaqti
@@ -1247,6 +1263,12 @@ def ensure_attendance_advance_tables():
             ed_cols = [row[0] for row in r]
         if "confirmed_at" not in ed_cols:
             conn.execute(text("ALTER TABLE employment_docs ADD COLUMN confirmed_at DATETIME"))
+        if "salary_type" not in ed_cols:
+            conn.execute(text("ALTER TABLE employment_docs ADD COLUMN salary_type VARCHAR(50)"))
+        if "days_off_per_month" not in ed_cols:
+            conn.execute(text("ALTER TABLE employment_docs ADD COLUMN days_off_per_month INTEGER DEFAULT 0"))
+        if "work_hours_per_day" not in ed_cols:
+            conn.execute(text("ALTER TABLE employment_docs ADD COLUMN work_hours_per_day FLOAT DEFAULT 10"))
 
 
 def ensure_purchase_expenses():
@@ -1386,8 +1408,33 @@ def ensure_employee_salary_columns():
                 conn.execute(text("ALTER TABLE employees ADD COLUMN salary_type VARCHAR(50)"))
             if "piecework_task_id" not in cols:
                 conn.execute(text("ALTER TABLE employees ADD COLUMN piecework_task_id INTEGER REFERENCES piecework_tasks(id)"))
+            if "days_off_per_month" not in cols:
+                conn.execute(text("ALTER TABLE employees ADD COLUMN days_off_per_month INTEGER DEFAULT 0"))
+            if "work_hours_per_day" not in cols:
+                conn.execute(text("ALTER TABLE employees ADD COLUMN work_hours_per_day FLOAT DEFAULT 10"))
     except Exception as e:
         print(f"[ensure_employee_salary_columns] Xatolik: {e}")
+
+
+def ensure_salary_docs_table():
+    """salary_docs jadvalini yaratadi (SQLite)."""
+    if not _is_sqlite:
+        return
+    from sqlalchemy import text
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS salary_docs (
+                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    number VARCHAR(30) UNIQUE,
+                    year INTEGER NOT NULL,
+                    month INTEGER NOT NULL,
+                    status VARCHAR(20) DEFAULT 'draft',
+                    created_at DATETIME
+                )
+            """))
+    except Exception as e:
+        print(f"[ensure_salary_docs_table] Xatolik: {e}")
 
 
 if __name__ == "__main__":
