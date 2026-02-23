@@ -6073,7 +6073,7 @@ async def sales_new(
     current_user: User = Depends(require_auth)
 ):
     """Yangi sotuv — narx turini tanlang, shu bo'yicha mahsulot narxlari ko'rsatiladi. Barcha turlar (tayyor, yarim_tayyor, xom ashyo) ombor qoldig'ida ko'rinadi."""
-    products = db.query(Product).filter(
+    products = db.query(Product).options(joinedload(Product.unit)).filter(
         Product.type.in_(["tayyor", "yarim_tayyor", "hom_ashyo", "material"]),
         Product.is_active == True
     ).order_by(Product.name).all()
@@ -6156,7 +6156,7 @@ async def sales_create(
                     price = pp.sale_price or 0
                 else:
                     prod = db.query(Product).filter(Product.id == pid).first()
-                    price = (prod.sale_price or prod.purchase_price or 0) if prod else 0
+                    price = (prod.sale_price or 0) if prod else 0
             total_row = qty * price
             item = OrderItem(order_id=order.id, product_id=pid, quantity=qty, price=price, total=total_row)
             db.add(item)
@@ -6175,7 +6175,7 @@ async def sales_edit(
 ):
     """Sotuv tafsiloti — ko'rish va qoralama holatida tahrirlash"""
     from urllib.parse import unquote
-    order = db.query(Order).filter(Order.id == order_id, Order.type == "sale").first()
+    order = db.query(Order).options(joinedload(Order.items).joinedload(OrderItem.product)).filter(Order.id == order_id, Order.type == "sale").first()
     if not order:
         raise HTTPException(status_code=404, detail="Sotuv topilmadi")
     products = db.query(Product).filter(Product.type.in_(["tayyor", "yarim_tayyor"]), Product.is_active == True).order_by(Product.name).all()
@@ -6185,6 +6185,10 @@ async def sales_edit(
         product_prices_by_type = {pp.product_id: pp.sale_price for pp in pps}
     error = request.query_params.get("error")
     error_detail = unquote(request.query_params.get("detail", "") or "")
+    foyda_zarar = 0
+    for item in order.items:
+        cost = (item.product.purchase_price or 0) if item.product else 0
+        foyda_zarar += (item.quantity or 0) * ((item.price or 0) - cost)
     return templates.TemplateResponse("sales/edit.html", {
         "request": request,
         "order": order,
@@ -6194,6 +6198,7 @@ async def sales_edit(
         "page_title": f"Sotuv: {order.number}",
         "error": error,
         "error_detail": error_detail,
+        "foyda_zarar": foyda_zarar,
     })
 
 
@@ -9882,6 +9887,49 @@ async def api_partners(db: Session = Depends(get_db)):
     """Kontragentlar API"""
     partners = db.query(Partner).filter(Partner.is_active == True).all()
     return [{"id": p.id, "name": p.name, "balance": p.balance} for p in partners]
+
+
+@app.get("/api/sales/warehouse-products")
+async def api_sales_warehouse_products(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Yangi sotuv sahifasida ombor bo'yicha qoldiqlar — warehouse_id -> [product_id, ...]"""
+    warehouses = db.query(Warehouse).all()
+    result = {}
+    for wh in warehouses:
+        rows = db.query(Stock.product_id).filter(
+            Stock.warehouse_id == wh.id,
+            Stock.quantity > 0
+        ).distinct().all()
+        result[str(wh.id)] = [r[0] for r in rows]
+    return result
+
+
+@app.get("/api/partners/search")
+async def api_partners_search(
+    q: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Mijoz qidiruv — Yangi sotuv sahifasida autocomplete uchun. Nomi, telefon, kod bo'yicha qidiradi."""
+    term = (q or "").strip()
+    query = db.query(Partner).filter(Partner.is_active == True)
+    if term:
+        term_like = "%" + term + "%"
+        conds = [
+            func.coalesce(Partner.name, "").ilike(term_like),
+            func.coalesce(Partner.phone, "").ilike(term_like),
+            func.coalesce(Partner.code, "").ilike(term_like),
+        ]
+        if term.isdigit():
+            conds.append(Partner.id == int(term))
+        query = query.filter(or_(*conds))
+    partners = query.order_by(Partner.name).limit(50).all()
+    return [
+        {"id": p.id, "name": p.name or "", "phone": p.phone or "", "code": p.code or ""}
+        for p in partners
+    ]
 
 
 # ==========================================

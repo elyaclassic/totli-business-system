@@ -105,6 +105,16 @@
                                     <th colspan="4" class="text-end">Jami:</th>
                                     <th colspan="2"><strong>{{ "{:,.0f}".format(order.total or 0) }} so'm</strong></th>
                                 </tr>
+                                <tr>
+                                    <th colspan="4" class="text-end">Foyda / Zarar:</th>
+                                    <th colspan="2">
+                                        {% if (foyda_zarar or 0) >= 0 %}
+                                        <strong class="text-success">{{ "{:,.0f}".format(foyda_zarar or 0) }} so'm</strong>
+                                        {% else %}
+                                        <strong class="text-danger">{{ "{:,.0f}".format(foyda_zarar or 0) }} so'm</strong>
+                                        {% endif %}
+                                    </th>
+                                </tr>
                             </tfoot>
                         </table>
                     </div>

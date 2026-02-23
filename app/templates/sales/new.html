@@ -2,8 +2,9 @@
 
 {% block content %}
 <style>
-    #sales_partner_results { box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #dee2e6; border-radius: 0.25rem; margin-top: 2px; background: white; }
+    #sales_partner_results { box-shadow: 0 4px 6px rgba(0,0,0,0.15); border: 1px solid #dee2e6; border-radius: 0.25rem; background: white; max-height: 260px; overflow-y: auto; }
     #sales_partner_results .list-group-item:hover { background-color: #f8f9fa; cursor: pointer; }
+    .card-body { overflow: visible !important; }
 </style>
 <form id="salesCreateForm" action="/sales/create" method="POST">
 <div id="cartHiddenInputs"></div>
@@ -20,13 +21,11 @@
                         <input type="text" class="form-control" id="sales_partner_input"
                             placeholder="Nomi, telefon yoki kod bo'yicha qidiring..." autocomplete="off" required>
                         <input type="hidden" name="partner_id" id="sales_partner_id_hidden" required>
-                        <div id="sales_partner_results" class="list-group position-absolute"
-                            style="z-index: 1000; max-height: 260px; overflow-y: auto; display: none; left: 0; right: 0;"></div>
+                        <div id="sales_partner_results" class="list-group" style="display: none; position: fixed; z-index: 1060; min-width: 280px;"></div>
                         <select id="sales_partner_select" style="display: none;">
                             <option value="">Tanlang...</option>
                             {% for partner in partners %}
-                            <option value="{{ partner.id }}" data-name="{{ partner.name }}"
-                                data-phone="{{ partner.phone or '' }}" data-code="{{ partner.code or '' }}">
+                            <option value="{{ partner.id }}" data-name="{{ (partner.name or '')|e }}" data-phone="{{ (partner.phone or '')|e }}" data-code="{{ (partner.code or '')|e }}">
                                 {{ partner.name }} (#{{ partner.id }}{% if partner.code %} — {{ partner.code }}{% endif %})
                             </option>
                             {% endfor %}
@@ -53,7 +52,7 @@
                         </button>
                     </div>
                 </div>
-                <p class="text-muted small mb-0">Mijoz va narx turini tanlang. Pastda omborni tanlang, tovarlarni bosib savatga qo'shing, miqdorni savatda tahrirlang va &laquo;Yaratish&raquo; bosing.</p>
+                <p class="text-muted small mb-0">Mijoz va narx turini tanlang. Pastda omborni tanlang, tovarlarni bosib savatga qo'shing, miqdorni savatda tahrirlang va «Yaratish» bosing.</p>
             </div>
         </div>
     </div>
@@ -79,9 +78,10 @@
                 <div class="row g-3" id="sales_product_cards" style="display: none;">
                     {% for product in products %}
                     {% set _pt = product_prices_by_type.get(product.id) if product_prices_by_type is defined else none %}
-                    {% set display_price = (_pt if (_pt is not none and _pt > 0) else (product.sale_price or product.purchase_price or 0)) %}
+                    {% set display_price = (_pt if (_pt is not none and _pt > 0) else (product.sale_price or 0)) %}
                     <div class="col-md-4 sales-product-card" data-product-id="{{ product.id }}">
-                        <div class="card h-100 product-card" style="cursor: pointer;" data-product-id="{{ product.id }}" data-name="{{ product.name|e }}" data-price="{{ display_price }}">
+                        {% set _unit_str = ((product.unit.name or '') ~ ' ' ~ (product.unit.code or ''))|lower if product.unit else '' %}
+                        <div class="card h-100 product-card" style="cursor: pointer;" data-product-id="{{ product.id }}" data-name="{{ product.name|e }}" data-price="{{ display_price }}" data-is-dona="{{ '1' if product.unit and 'dona' in _unit_str else '0' }}">
                             <div class="card-body text-center">
                                 {% if product.image %}
                                 <img src="/static/images/products/{{ product.image }}" alt="{{ product.name }}" class="rounded mb-2" style="max-height: 48px; max-width: 100%; object-fit: contain;">
@@ -142,60 +142,131 @@
 </div>
 </form>
 
+<script type="application/json" id="sales_warehouse_products_json">{{ warehouse_products | tojson }}</script>
 <script>
 (function() {
-    var warehouseProducts = {{ warehouse_products | tojson }};
+    var warehouseProductsEl = document.getElementById('sales_warehouse_products_json');
+    var jsonText = warehouseProductsEl && warehouseProductsEl.textContent ? warehouseProductsEl.textContent.replace(/^\uFEFF/, '').trim() : '{}';
+    var warehouseProducts = {};
+    try {
+        warehouseProducts = jsonText ? JSON.parse(jsonText) : {};
+    } catch (e) {
+        console.warn('warehouse_products JSON parse error:', e);
+    }
     var form = document.getElementById('salesCreateForm');
     var cartHidden = document.getElementById('cartHiddenInputs');
     var cartBody = document.getElementById('cartTableBody');
     var cartEmptyMsg = document.getElementById('cartEmptyMsg');
     var cart = [];
 
-    // ——— Mijoz qidiruv ———
+    // Agar inline JSON bo'sh yoki xato bo'lsa, API orqali ombor qoldiqlarini yuklash
+    function ensureWarehouseProducts(callback) {
+        var keys = Object.keys(warehouseProducts || {});
+        var hasData = keys.length > 0 && keys.some(function(k) { var a = warehouseProducts[k]; return Array.isArray(a) && a.length > 0; });
+        if (hasData) {
+            if (callback) callback();
+            return;
+        }
+        fetch('/api/sales/warehouse-products', { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(function(r) { return r.ok ? r.json() : {}; })
+            .then(function(data) {
+                if (data && typeof data === 'object') {
+                    warehouseProducts = data;
+                    if (callback) callback();
+                }
+            })
+            .catch(function() { if (callback) callback(); });
+    }
+
+    // ——— Mijoz qidiruv (API orqali) ———
     var partnerInput = document.getElementById('sales_partner_input');
     var partnerResults = document.getElementById('sales_partner_results');
     var partnerIdHidden = document.getElementById('sales_partner_id_hidden');
-    var partnerSelect = document.getElementById('sales_partner_select');
-    if (partnerInput && partnerSelect) {
-        partnerInput.addEventListener('input', function() {
-            var searchTerm = (this.value || '').trim().toLowerCase();
-            partnerResults.style.display = 'none';
+    var partnerSearchTimer = null;
+    if (partnerResults && document.body) document.body.appendChild(partnerResults);
+    function positionPartnerResults() {
+        if (!partnerResults || !partnerInput) return;
+        var rect = partnerInput.getBoundingClientRect();
+        partnerResults.style.position = 'fixed';
+        partnerResults.style.top = rect.bottom + 'px';
+        partnerResults.style.left = rect.left + 'px';
+        partnerResults.style.width = Math.max(rect.width, 280) + 'px';
+        partnerResults.style.zIndex = '1060';
+    }
+    function showPartnerResultsFromApi(searchTerm) {
+        if (!partnerResults) return;
+        partnerResults.style.display = 'none';
+        partnerResults.innerHTML = '';
+        if (partnerIdHidden) partnerIdHidden.value = '';
+        searchTerm = (searchTerm || '').trim();
+        function render(list) {
             partnerResults.innerHTML = '';
-            partnerIdHidden.value = '';
-            if (!searchTerm) return;
-            var options = Array.from(partnerSelect.options).slice(1);
-            var matches = options.filter(function(opt) {
-                var name = (opt.dataset.name || '').toLowerCase();
-                var phone = (opt.dataset.phone || '').toLowerCase();
-                var code = (opt.dataset.code || '').toLowerCase();
-                var id = (opt.value || '').toString();
-                return name.indexOf(searchTerm) !== -1 || phone.indexOf(searchTerm) !== -1 ||
-                    code.indexOf(searchTerm) !== -1 || id === searchTerm;
-            });
-            if (matches.length > 0) {
-                matches.forEach(function(opt) {
+            if (list.length > 0) {
+                list.forEach(function(p) {
                     var item = document.createElement('a');
                     item.href = '#';
                     item.className = 'list-group-item list-group-item-action';
-                    item.innerHTML = '<strong>' + (opt.dataset.name || '') + '</strong> <span class="badge bg-secondary">#' + opt.value + '</span>';
+                    item.setAttribute('data-value', p.id);
+                    item.setAttribute('data-name', p.name || '');
+                    item.innerHTML = '<strong>' + (p.name || '') + '</strong> <span class="badge bg-secondary">#' + p.id + '</span>';
                     item.addEventListener('click', function(e) {
                         e.preventDefault();
-                        partnerInput.value = opt.dataset.name || '';
-                        partnerIdHidden.value = opt.value;
+                        if (partnerInput) partnerInput.value = this.getAttribute('data-name') || '';
+                        if (partnerIdHidden) partnerIdHidden.value = this.getAttribute('data-value') || '';
                         partnerResults.style.display = 'none';
+                        partnerResults.innerHTML = '';
                     });
                     partnerResults.appendChild(item);
                 });
+                positionPartnerResults();
                 partnerResults.style.display = 'block';
             } else {
-                partnerResults.innerHTML = '<div class="list-group-item text-muted">Topilmadi.</div>';
+                partnerResults.innerHTML = '<div class="list-group-item text-muted">' + (searchTerm ? 'Topilmadi.' : 'Nomi, telefon yoki kod bo\'yicha yozing.') + '</div>';
+                positionPartnerResults();
                 partnerResults.style.display = 'block';
+            }
+        }
+        partnerResults.innerHTML = '<div class="list-group-item text-muted">Qidirilmoqda...</div>';
+        positionPartnerResults();
+        partnerResults.style.display = 'block';
+        var url = '/api/partners/search?q=' + encodeURIComponent(searchTerm);
+        fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(function(r) {
+                if (!r.ok) throw new Error('Server ' + r.status);
+                return r.json();
+            })
+            .then(function(list) { render(Array.isArray(list) ? list : []); })
+            .catch(function(err) {
+                partnerResults.innerHTML = '<div class="list-group-item text-danger">Xato (' + (err.message || 'tarmoq') + '). Sahifani yangilab qayta urinib ko\'ring.</div>';
+                positionPartnerResults();
+                partnerResults.style.display = 'block';
+            });
+    }
+    if (partnerInput && partnerResults) {
+        partnerInput.addEventListener('input', function() {
+            if (partnerSearchTimer) clearTimeout(partnerSearchTimer);
+            partnerSearchTimer = setTimeout(function() { showPartnerResultsFromApi(partnerInput.value); }, 150);
+        });
+        partnerInput.addEventListener('focus', function() {
+            if (partnerSearchTimer) clearTimeout(partnerSearchTimer);
+            showPartnerResultsFromApi(partnerInput.value);
+        });
+        partnerInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                var first = partnerResults.querySelector('.list-group-item-action');
+                if (first && !partnerResults.querySelector('.text-muted') && !partnerResults.querySelector('.text-danger')) {
+                    e.preventDefault();
+                    first.click();
+                }
             }
         });
         document.addEventListener('click', function(e) {
-            if (partnerResults && !partnerInput.contains(e.target) && !partnerResults.contains(e.target))
+            if (partnerResults && partnerInput && !partnerInput.contains(e.target) && !partnerResults.contains(e.target))
                 partnerResults.style.display = 'none';
         });
+        window.addEventListener('scroll', function() {
+            if (partnerResults.style.display === 'block') positionPartnerResults();
+        }, true);
     }
     form.addEventListener('submit', function(e) {
         if (!(partnerIdHidden && partnerIdHidden.value)) {
@@ -248,21 +319,29 @@
         if (noProductsMsg) noProductsMsg.style.display = (cards.length === 0) ? 'block' : 'none';
     }
     if (whSelect) {
-        whSelect.addEventListener('change', filterProductsByWarehouse);
-        filterProductsByWarehouse();
+        whSelect.addEventListener('change', function() {
+            ensureWarehouseProducts(filterProductsByWarehouse);
+        });
+        ensureWarehouseProducts(function() {
+            filterProductsByWarehouse();
+        });
     }
 
-    function addToCart(productId, productName, price, quantity) {
+    function addToCart(productId, productName, price, quantity, isDona) {
         if (!productId || quantity <= 0) return;
         productId = parseInt(productId, 10);
         price = parseFloat(price) || 0;
         quantity = parseFloat(quantity) || 0;
+        if (isDona) quantity = Math.round(quantity) || 1;
         var existing = cart.filter(function(x) { return x.productId === productId; })[0];
         if (existing) {
-            existing.quantity += quantity;
+            var addQ = isDona ? Math.round(quantity) || 1 : quantity;
+            existing.quantity += addQ;
+            if (existing.isDona) existing.quantity = Math.round(existing.quantity) || 1;
+            existing.isDona = existing.isDona || !!isDona;
             existing.sum = existing.quantity * existing.price;
         } else {
-            cart.push({ productId: productId, productName: productName, price: price, quantity: quantity, sum: price * quantity });
+            cart.push({ productId: productId, productName: productName, price: price, quantity: quantity, sum: price * quantity, isDona: !!isDona });
         }
         renderCart();
     }
@@ -276,9 +355,17 @@
         cartBody.innerHTML = '';
         cartHidden.innerHTML = '';
         cart.forEach(function(item, i) {
+            var isDona = item.isDona;
+            var qtyVal = isDona ? Math.round(item.quantity) || 1 : item.quantity;
+            if (isDona && item.quantity !== qtyVal) {
+                item.quantity = qtyVal;
+                item.sum = item.price * qtyVal;
+            }
+            var stepAttr = isDona ? '1' : '0.01';
+            var minAttr = isDona ? '1' : '0.01';
             var tr = document.createElement('tr');
             tr.innerHTML = '<td>' + (item.productName || '') + '</td>' +
-                '<td><input type="number" class="form-control form-control-sm cart-qty" data-index="' + i + '" value="' + item.quantity + '" step="0.01" min="0.01" style="width: 80px;"></td>' +
+                '<td><input type="number" class="form-control form-control-sm cart-qty" data-index="' + i + '" data-is-dona="' + (isDona ? '1' : '0') + '" value="' + qtyVal + '" step="' + stepAttr + '" min="' + minAttr + '" style="width: 80px;"></td>' +
                 '<td><input type="number" class="form-control form-control-sm cart-price" data-index="' + i + '" value="' + (item.price || 0) + '" step="0.01" min="0" style="width: 100px;"></td>' +
                 '<td class="cart-sum text-nowrap">' + (item.sum || 0).toLocaleString('ru-RU') + ' so\'m</td>' +
                 '<td><button type="button" class="btn btn-sm btn-outline-danger cart-remove" data-index="' + i + '"><i class="bi bi-trash"></i></button></td>';
@@ -305,9 +392,15 @@
         cartBody.querySelectorAll('.cart-qty').forEach(function(inp) {
             inp.addEventListener('change', function() {
                 var idx = parseInt(this.getAttribute('data-index'), 10);
+                var isDona = this.getAttribute('data-is-dona') === '1';
                 var q = parseFloat(this.value) || 0;
-                if (q <= 0) q = 1;
-                this.value = q;
+                if (isDona) {
+                    q = Math.round(q) || 1;
+                    this.value = q;
+                } else {
+                    if (q <= 0) q = 1;
+                    this.value = q;
+                }
                 if (cart[idx]) {
                     cart[idx].quantity = q;
                     cart[idx].sum = cart[idx].price * q;
@@ -336,7 +429,8 @@
             var id = this.getAttribute('data-product-id');
             var name = this.getAttribute('data-name');
             var price = this.getAttribute('data-price');
-            addToCart(id, name, price, 1);
+            var isDona = this.getAttribute('data-is-dona') === '1';
+            addToCart(id, name, price, 1, isDona);
         });
     });
 })();
