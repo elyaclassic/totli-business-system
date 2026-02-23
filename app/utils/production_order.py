@@ -24,13 +24,23 @@ from app.utils.notifications import create_notification
 
 
 def recipe_kg_per_unit(recipe: Optional[Recipe]) -> float:
-    """Retsept uchun 1 dona (birlik) ning og'irligi kg da. Nomidan 400gr/1kg aniqlanadi."""
+    """Retsept uchun 1 dona (birlik) ning og'irligi kg da. Nomidan 250gr/400gr/2kg/3kg/4kg/5kg/1kg aniqlanadi, aks holda retseptdagi output_quantity."""
     if not recipe:
         return 1.0
     name = (recipe.name or "").lower()
+    if "250gr" in name or "250 gr" in name:
+        return 0.25
     if "400gr" in name or "400 gr" in name:
         return 0.4
-    if "1kg" in name:
+    if "5kg" in name or "5 kg" in name:
+        return 5.0
+    if "4kg" in name or "4 kg" in name:
+        return 4.0
+    if "3kg" in name or "3 kg" in name:
+        return 3.0
+    if "2kg" in name or "2 kg" in name:
+        return 2.0
+    if "1kg" in name or "1 kg" in name:
         return 1.0
     return float(recipe.output_quantity or 1.0)
 

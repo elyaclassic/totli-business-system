@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 
 {% block content %}
+<style>
+    /* Ishlab chiqarish buyurtmalari: filtr va jadval orasidagi bo'shliqni olib tashlash */
+    .production-orders-wrap .card.mb-0 + .card { margin-top: 0 !important; }
+    .production-orders-wrap .card .card-body.p-0 { padding: 0 !important; }
+</style>
 {% if error == "insufficient_stock" %}
 <div class="alert alert-danger alert-dismissible fade show" role="alert">
     <strong>Omborda yetarli xom ashyo yo'q.</strong>
@@ -27,16 +32,19 @@
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 {% endif %}
-<div class="container-fluid">
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="container-fluid production-orders-wrap">
+<div class="d-flex justify-content-between align-items-center mb-2">
     <h4 class="mb-0"><i class="bi bi-clipboard-check"></i> Ishlab chiqarish buyurtmalari</h4>
-    <a href="/production/new" class="btn btn-success"><i class="bi bi-plus-circle"></i> Yaratish</a>
+    <div class="d-flex gap-2">
+        <a href="/production/by-operator" class="btn btn-outline-primary btn-sm"><i class="bi bi-person-badge"></i> Operator bo'yicha</a>
+        <a href="/production/new" class="btn btn-success"><i class="bi bi-plus-circle"></i> Yaratish</a>
+    </div>
 </div>
 
 <!-- Filtrlar -->
-<div class="card mb-3">
-    <div class="card-body py-2">
-        <form method="get" action="/production/orders" class="d-flex flex-wrap align-items-center gap-2 mb-2">
+<div class="card mb-0">
+    <div class="card-body py-2 px-3 pb-2">
+        <form method="get" action="/production/orders" class="d-flex flex-wrap align-items-center gap-2 mb-1">
             <label class="form-label mb-0 small text-muted">Sana:</label>
             <input type="date" name="date_from" class="form-control form-control-sm" style="width: auto;" value="{{ filter_date_from or '' }}" title="Dan">
             <span class="small text-muted">—</span>
@@ -46,7 +54,7 @@
             <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-search"></i> Qidirish</button>
             <a href="/production/orders" class="btn btn-sm btn-outline-secondary">Tozalash</a>
         </form>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 mb-0">
             <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('all')">
                 Barchasi ({{ productions|length }})
             </button>
@@ -63,12 +71,12 @@
                 Bekor qilingan ({{ productions|selectattr('status', 'eq', 'cancelled')|list|length }})
             </button>
         </div>
-        <p class="small text-muted mb-0 mt-1"><i class="bi bi-info-circle"></i> Operator: agar tizimga kirdingiz va <strong>Xodimlar</strong> da siz qaysidir xodimga bog'langan bo'lsangiz (xodim kartasida «Foydalanuvchi» tanlangan), Bosqich yoki Yakunlash bosilganda operator avtomatik shu xodim bo'ladi.</p>
+        <p class="small text-muted mb-0 mt-1 pt-0"><i class="bi bi-info-circle"></i> Operator: agar tizimga kirdingiz va <strong>Xodimlar</strong> da siz qaysidir xodimga bog'langan bo'lsangiz (xodim kartasida «Foydalanuvchi» tanlangan), Bosqich yoki Yakunlash bosilganda operator avtomatik shu xodim bo'ladi.</p>
     </div>
 </div>
 
 <!-- Jadval -->
-<div class="card">
+<div class="card mt-0">
     <div class="card-body p-0">
         <table class="table table-hover mb-0">
             <thead class="table-light">
@@ -101,7 +109,7 @@
                     <td>
                         {% set unit_name = (prod.recipe.product.unit.name if prod.recipe and prod.recipe.product and prod.recipe.product.unit else 'kg') %}
                         {% set _rname = (prod.recipe.name or '')|lower if prod.recipe else '' %}
-                        {% set _kg_per_unit = 0.4 if ('400gr' in _rname or '400 gr' in _rname) else (1.0 if '1kg' in _rname else (prod.recipe.output_quantity if prod.recipe and prod.recipe.output_quantity else 1)) %}
+                        {% set _kg_per_unit = 0.25 if ('250gr' in _rname or '250 gr' in _rname) else (0.4 if ('400gr' in _rname or '400 gr' in _rname) else (5.0 if ('5kg' in _rname or '5 kg' in _rname) else (4.0 if ('4kg' in _rname or '4 kg' in _rname) else (3.0 if ('3kg' in _rname or '3 kg' in _rname) else (2.0 if ('2kg' in _rname or '2 kg' in _rname) else (1.0 if ('1kg' in _rname or '1 kg' in _rname) else (prod.recipe.output_quantity if prod.recipe and prod.recipe.output_quantity else 1))))))) %}
                         {% set qty_kg = prod.quantity * _kg_per_unit %}
                         <strong>{{ "%.2f"|format(prod.quantity) }} {{ unit_name }}</strong>
                         {% if unit_name|lower != 'kg' %}

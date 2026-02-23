@@ -51,6 +51,10 @@
                 <div>
                     <p>Bugun ishlab chiqarildi</p>
                     <h3>{{ "%.1f"|format(today_quantity or 0) }} kg</h3>
+                    <div class="small mt-1 text-muted">
+                        <span class="d-block">Yarim tayyor: {{ "%.1f"|format(today_quantity_yarim or 0) }} kg</span>
+                        <span class="d-block">Tayyor: {{ "%.1f"|format(today_quantity_tayyor or 0) }} kg</span>
+                    </div>
                 </div>
                 <div class="icon green">
                     <i class="bi bi-box-seam"></i>
@@ -83,6 +87,7 @@
                 </div>
             </div>
             <a href="/production/orders" class="text-primary small">Barchasi (bosqichlar) →</a>
+            <a href="/production/by-operator" class="text-primary small d-block mt-1">Operator bo'yicha →</a>
         </div>
     </div>
 </div>
@@ -199,7 +204,7 @@
                             <td>
                                 {% set _unit = (prod.recipe.product.unit.name if prod.recipe and prod.recipe.product and prod.recipe.product.unit else 'kg') %}
                                 {% set _rname = (prod.recipe.name or '')|lower if prod.recipe else '' %}
-                                {% set _kg_per_unit = 0.4 if ('400gr' in _rname or '400 gr' in _rname) else (1.0 if '1kg' in _rname else (prod.recipe.output_quantity if prod.recipe and prod.recipe.output_quantity else 1)) %}
+                                {% set _kg_per_unit = 0.25 if ('250gr' in _rname or '250 gr' in _rname) else (0.4 if ('400gr' in _rname or '400 gr' in _rname) else (5.0 if ('5kg' in _rname or '5 kg' in _rname) else (4.0 if ('4kg' in _rname or '4 kg' in _rname) else (3.0 if ('3kg' in _rname or '3 kg' in _rname) else (2.0 if ('2kg' in _rname or '2 kg' in _rname) else (1.0 if ('1kg' in _rname or '1 kg' in _rname) else (prod.recipe.output_quantity if prod.recipe and prod.recipe.output_quantity else 1))))))) %}
                                 {{ "%.2f"|format(prod.quantity or 0) }} {{ _unit }}{% if _unit|lower != 'kg' %} <span class="text-muted small">({{ "%.2f"|format((prod.quantity or 0) * _kg_per_unit) }} kg)</span>{% endif %}
                             </td>
                             <td>{{ prod.date.strftime('%d.%m.%Y %H:%M') if prod.date else '-' }}</td>

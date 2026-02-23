@@ -34,16 +34,18 @@
                 {% endif %}
             </div>
             <div class="card-body">
+                {% set _out_unit = (recipe.product.unit.name or recipe.product.unit.code if recipe.product and recipe.product.unit else 'kg') %}
                 <p class="text-muted mb-2">
-                    <i class="bi bi-box"></i> Chiqish: {{ recipe.output_quantity }} kg
+                    <i class="bi bi-box"></i> Chiqish: {{ recipe.output_quantity }} {{ _out_unit }}
                 </p>
 
                 <h6>Tarkibi:</h6>
                 <ul class="list-unstyled mb-3">
                     {% for item in recipe.items %}
+                    {% set _item_unit = (item.product.unit.name or item.product.unit.code if item.product and item.product.unit else 'kg') %}
                     <li class="d-flex justify-content-between border-bottom py-1">
                         <span>{{ item.product.name if item.product else 'Noma\'lum' }}</span>
-                        <span class="text-muted">{{ item.quantity }} kg</span>
+                        <span class="text-muted">{{ item.quantity }} {{ _item_unit }}</span>
                     </li>
                     {% else %}
                     <li class="text-muted">Tarkib bo'sh</li>

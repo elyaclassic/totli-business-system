@@ -520,6 +520,11 @@
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link {% if page_title and 'Bajariladigan ishlar' in page_title %}active{% endif %}" href="/info/piecework-tasks">
+                                <i class="bi bi-list-task"></i> Bajariladigan ishlar (bo'lak narxi)
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link {% if page_title == 'Ishga qabul qilish hujjatlari' or (page_title and ('Ishga qabul hujjati' in page_title or page_title.startswith('Ishga qabul '))) %}active{% endif %}" href="/employees/hiring-docs">
                                 <i class="bi bi-file-earmark-person"></i> Ishga qabul hujjati
                             </a>

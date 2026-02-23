@@ -22,7 +22,7 @@
 
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-list-check"></i> Shu buyurtma uchun xom ashyo (kg)</span>
+        <span><i class="bi bi-list-check"></i> Shu buyurtma uchun xom ashyo</span>
         {% if read_only and current_user and current_user.role == 'admin' %}
         <form method="POST" action="/production/{{ production.id }}/revert" style="display: inline;">
             <button type="submit" class="btn btn-warning btn-sm"
@@ -38,12 +38,13 @@
                 <thead class="table-light">
                     <tr>
                         <th>Xom ashyo</th>
-                        <th>Retseptda (1 kg uchun)</th>
-                        <th>Shu buyurtma uchun (kg)</th>
+                        <th>Retseptda (1 chiqish uchun)</th>
+                        <th>Shu buyurtma uchun</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for pi in production.production_items %}
+                    {% set _unit = (pi.product.unit.name or pi.product.unit.code if pi.product and pi.product.unit else 'kg') %}
                     <tr>
                         <td>
                             <strong>{{ pi.product.name if pi.product else 'Noma\'lum' }}</strong>
@@ -52,16 +53,18 @@
                         <td>
                             {% for ri in recipe.items %}
                                 {% if ri.product_id == pi.product_id %}
-                                {{ "%.3f"|format(ri.quantity) }} kg
+                                {% set _ri_unit = (ri.product.unit.name or ri.product.unit.code if ri.product and ri.product.unit else 'kg') %}
+                                {{ "%.3f"|format(ri.quantity) }} {{ _ri_unit }}
                                 {% endif %}
                             {% endfor %}
                         </td>
                         <td>
                             {% if read_only %}
-                            {{ "%.3f"|format(pi.quantity) }} kg
+                            {{ "%.3f"|format(pi.quantity) }} {{ _unit }}
                             {% else %}
                             <input type="number" name="qty_{{ pi.id }}" class="form-control form-control-sm" 
                                    value="{{ "%.3f"|format(pi.quantity) }}" step="0.001" min="0" required style="max-width: 120px;">
+                            <span class="text-muted small ms-1">{{ _unit }}</span>
                             {% endif %}
                         </td>
                     </tr>

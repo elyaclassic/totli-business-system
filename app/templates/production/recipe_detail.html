@@ -55,7 +55,7 @@
                     </tr>
                     <tr>
                         <td>Chiqish miqdori:</td>
-                        <td><strong>{{ recipe.output_quantity }} kg</strong></td>
+                        <td><strong>{{ recipe.output_quantity }} {{ (recipe.product.unit.name or recipe.product.unit.code if recipe.product and recipe.product.unit else 'kg') }}</strong></td>
                     </tr>
                     <tr>
                         <td>Holati:</td>
@@ -121,7 +121,8 @@
                     {% endif %}
                 {% endfor %}
                 <h4 class="text-center text-primary">{{ "{:,.0f}".format(ns.total_cost) }} so'm</h4>
-                <p class="text-center text-muted mb-0">1 kg uchun: {{ "{:,.0f}".format(ns.total_cost / recipe.output_quantity if recipe.output_quantity > 0 else 0) }} so'm</p>
+                {% set _out_unit = (recipe.product.unit.name or recipe.product.unit.code if recipe.product and recipe.product.unit else 'kg') %}
+                <p class="text-center text-muted mb-0">1 {{ _out_unit }} uchun: {{ "{:,.0f}".format(ns.total_cost / recipe.output_quantity if recipe.output_quantity > 0 else 0) }} so'm</p>
             </div>
         </div>
     </div>
@@ -156,7 +157,7 @@
                                 <strong>{{ item.product.name if item.product else 'Noma\'lum' }}</strong>
                                 {% if item.product %}<br><small class="text-muted"><code>{{ item.product.barcode or item.product.code or '-' }}</code></small>{% endif %}
                             </td>
-                            <td>{{ item.quantity }} kg</td>
+                            <td>{{ item.quantity }} {{ (item.product.unit.name or item.product.unit.code if item.product and item.product.unit else 'kg') }}</td>
                             <td>{{ "{:,.0f}".format(unit_price) }} so'm</td>
                             <td><strong>{{ "{:,.0f}".format(item.quantity * unit_price) }} so'm</strong></td>
                             <td>

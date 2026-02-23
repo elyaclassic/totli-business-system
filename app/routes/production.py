@@ -380,11 +380,18 @@ async def production_recipes(
     current_user: User = Depends(require_auth),
 ):
     warehouses = db.query(Warehouse).all()
-    recipes = db.query(Recipe).all()
+    recipes = (
+        db.query(Recipe)
+        .options(
+            joinedload(Recipe.product).joinedload(Product.unit),
+            joinedload(Recipe.items).joinedload(RecipeItem.product).joinedload(Product.unit),
+        )
+        .all()
+    )
     products = db.query(Product).filter(Product.type.in_(["tayyor", "yarim_tayyor"])).all()
     materials = db.query(Product).filter(Product.type == "hom_ashyo").all()
     recipe_products_json = json.dumps([
-        {"id": p.id, "name": (p.name or ""), "unit": (p.unit.name if p.unit else "kg")}
+        {"id": p.id, "name": (p.name or ""), "unit": (p.unit.name or p.unit.code if p.unit else "kg")}
         for p in products
     ]).replace("<", "\\u003c")
     return templates.TemplateResponse("production/recipes.html", {
@@ -406,7 +413,15 @@ async def production_recipe_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    recipe = (
+        db.query(Recipe)
+        .options(
+            joinedload(Recipe.product).joinedload(Product.unit),
+            joinedload(Recipe.items).joinedload(RecipeItem.product).joinedload(Product.unit),
+        )
+        .filter(Recipe.id == recipe_id)
+        .first()
+    )
     if not recipe:
         raise HTTPException(status_code=404, detail="Retsept topilmadi")
     materials = db.query(Product).filter(Product.type.in_(["hom_ashyo", "yarim_tayyor", "tayyor"])).all()
@@ -570,14 +585,26 @@ async def production_edit_materials(
 ):
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
-    production = db.query(Production).filter(Production.id == prod_id).first()
+    production = (
+        db.query(Production)
+        .options(
+            joinedload(Production.production_items).joinedload(ProductionItem.product).joinedload(Product.unit),
+        )
+        .filter(Production.id == prod_id)
+        .first()
+    )
     if not production:
         raise HTTPException(status_code=404, detail="Buyurtma topilmadi")
     if production.status == "completed" and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Yakunlangan buyurtmani faqat administrator ko'ra oladi")
     if production.status not in ("draft", "completed"):
         raise HTTPException(status_code=400, detail="Faqat kutilmoqdagi yoki yakunlangan buyurtmani ko'rish mumkin")
-    recipe = db.query(Recipe).filter(Recipe.id == production.recipe_id).first()
+    recipe = (
+        db.query(Recipe)
+        .options(joinedload(Recipe.items).joinedload(RecipeItem.product).joinedload(Product.unit))
+        .filter(Recipe.id == production.recipe_id)
+        .first()
+    )
     if not recipe:
         raise HTTPException(status_code=404, detail="Retsept topilmadi")
     if not production.production_items:

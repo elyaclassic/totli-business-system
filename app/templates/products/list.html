@@ -251,11 +251,11 @@
                         </div>
                         <div class="col-md-3">
                             <label class="form-label small mb-0" for="edit_product_purchase_price">Olish narxi</label>
-                            <input type="number" id="edit_product_purchase_price" class="form-control form-control-sm" name="purchase_price" step="0.01" min="0" value="0">
+                            <input type="number" id="edit_product_purchase_price" class="form-control form-control-sm" name="purchase_price" step="any" min="0" value="0" placeholder="0">
                         </div>
                         <div class="col-md-3">
                             <label class="form-label small mb-0" for="edit_product_sale_price">Sotuv narxi</label>
-                            <input type="number" id="edit_product_sale_price" class="form-control form-control-sm" name="sale_price" step="0.01" min="0" value="0">
+                            <input type="number" id="edit_product_sale_price" class="form-control form-control-sm" name="sale_price" step="any" min="0" value="0" placeholder="0">
                         </div>
                         <div class="col-12">
                             <label class="form-label small mb-0">Rasm</label>
@@ -290,8 +290,10 @@
         document.getElementById('edit_product_type').value = btn.getAttribute('data-type') || 'tayyor';
         document.getElementById('edit_product_unit').value = btn.getAttribute('data-unit-id') || '0';
         document.getElementById('edit_product_barcode').value = btn.getAttribute('data-barcode') || '';
-        document.getElementById('edit_product_purchase_price').value = btn.getAttribute('data-purchase-price') || '0';
-        document.getElementById('edit_product_sale_price').value = btn.getAttribute('data-sale-price') || '0';
+        var purchaseVal = (btn.getAttribute('data-purchase-price') || '0').toString().replace(',', '.');
+        var saleVal = (btn.getAttribute('data-sale-price') || '0').toString().replace(',', '.');
+        document.getElementById('edit_product_purchase_price').value = purchaseVal;
+        document.getElementById('edit_product_sale_price').value = saleVal;
         var imgName = btn.getAttribute('data-image') || '';
         var preview = document.getElementById('edit_product_image_preview');
         var fileInp = document.getElementById('edit_product_image');
