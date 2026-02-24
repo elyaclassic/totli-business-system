@@ -66,6 +66,7 @@
                             <th>Miqdor</th>
                             <th>Narx</th>
                             <th>Summa</th>
+                            {% if doc.warehouse_id %}<th class="text-center">Tarix</th>{% endif %}
                         </tr>
                     </thead>
                     <tbody>
@@ -76,6 +77,11 @@
                             <td>{{ "{:,.3f}".format(item.quantity or 0) }}</td>
                             <td>{{ "{:,.0f}".format(item.price or 0) }} so'm</td>
                             <td>{{ "{:,.0f}".format(item.total or 0) }} so'm</td>
+                            {% if doc.warehouse_id %}
+                            <td class="text-center">
+                                <a href="/reports/stock/source?warehouse_id={{ doc.warehouse_id }}&product_id={{ item.product_id }}" class="btn btn-sm btn-outline-info" title="Harakat tarixi"><i class="bi bi-clock-history"></i></a>
+                            </td>
+                            {% endif %}
                         </tr>
                         {% else %}
                         <tr><td colspan="5" class="text-muted text-center py-3">Hujjatda mahsulot yo'q.</td></tr>

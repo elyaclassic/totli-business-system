@@ -14,6 +14,7 @@ from openpyxl.styles import Font, PatternFill
 from app.core import templates
 from app.models.database import get_db, Order, Stock, StockMovement, Product, Partner, Warehouse, User, Production, Recipe, StockAdjustmentDoc, StockAdjustmentDocItem, Employee
 from app.deps import get_current_user, require_auth, require_admin
+from app.utils.user_scope import get_warehouses_for_user
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -66,7 +67,7 @@ async def reports_form(request: Request, db: Session = Depends(get_db), current_
     today = datetime.now()
     start_date = today.replace(day=1).strftime("%Y-%m-%d")
     end_date = today.strftime("%Y-%m-%d")
-    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
+    warehouses = get_warehouses_for_user(db, current_user)
     allowed_types = get_allowed_report_types(current_user)
     return templates.TemplateResponse("reports/form.html", {
         "request": request,
@@ -166,6 +167,7 @@ async def report_stock(
     warehouse_id: str = None,
     merged: int = None,
     cleared: int = None,
+    recalculated: int = None,
     msg: str = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
@@ -173,12 +175,16 @@ async def report_stock(
     """Qoldiq hisoboti — ombor bo'yicha qoldiqlar. Bir ombor + mahsulot uchun bitta qator (dublikatlar yig'indisi)."""
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
+    warehouses = get_warehouses_for_user(db, current_user)
+    wh_ids = [w.id for w in warehouses]
     wh_id = None
     if warehouse_id is not None and str(warehouse_id).strip() != "":
         try:
-            wh_id = int(warehouse_id)
+            wid = int(warehouse_id)
+            if not wh_ids or wid in wh_ids:
+                wh_id = wid
         except (ValueError, TypeError):
-            wh_id = None
+            pass
     values = _stock_report_filtered(db, wh_id)
     stocks = [{"warehouse": v["warehouse"], "product": v["product"], "quantity": v["quantity"]} for v in values]
     # Jami summa: har bir qator uchun quantity * purchase_price yig'indisi (anniq)
@@ -187,7 +193,6 @@ async def report_stock(
         qty = float(v.get("quantity") or 0)
         price = float(getattr(v.get("product"), "purchase_price", None) or 0)
         total_sum += qty * price
-    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
     return templates.TemplateResponse("reports/stock.html", {
         "request": request,
         "stocks": stocks,
@@ -196,10 +201,12 @@ async def report_stock(
         "selected_warehouse_id": wh_id,
         "merged": merged,
         "cleared": cleared,
+        "recalculated": recalculated,
         "msg": msg,
         "today": datetime.now().strftime("%Y-%m-%d"),
         "page_title": "Qoldiq hisoboti",
         "current_user": current_user,
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 
@@ -292,6 +299,14 @@ async def report_stock_source(
             "quantity_change": float(m.quantity_change or 0),
             "quantity_after": float(m.quantity_after or 0),
         })
+    # Qoldiq (harakatdan keyin) — ketma-ket yig'indi (eng eski harakatdan boshlab), eski yozuvlardagi xatolarni bartaraf etish
+    if rows:
+        chronological = list(reversed(rows))
+        balance = 0.0
+        for r in chronological:
+            balance += r["quantity_change"]
+            r["quantity_after"] = round(balance, 6)
+        rows = list(reversed(chronological))
     current_stock = db.query(Stock).filter(
         Stock.warehouse_id == warehouse_id,
         Stock.product_id == product_id,
@@ -336,6 +351,76 @@ async def report_stock_merge_duplicates(
         url=f"/reports/stock?merged={merged}",
         status_code=303,
     )
+
+
+@router.post("/stock/recalculate-from-movements")
+async def report_stock_recalculate_from_movements(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Stock qoldiqlarini StockMovement tarixidan qayta hisoblash (faqat admin). Eski ikki marta qo'shilgan xatolikni tuzatish uchun."""
+    from collections import defaultdict
+    # Tasdiqlangan qoldiq tuzatish hujjatlarini aniqlash (boshqa hujjat turlari hammasi hisobga olinadi)
+    adj_ids = db.query(StockMovement.document_id).filter(
+        StockMovement.document_type == "StockAdjustmentDoc",
+        StockMovement.document_id.isnot(None),
+    ).distinct().all()
+    adj_ids = [r[0] for r in adj_ids if r[0]]
+    confirmed_adj_ids = set()
+    if adj_ids:
+        for doc in db.query(StockAdjustmentDoc).filter(
+            StockAdjustmentDoc.id.in_(adj_ids),
+            StockAdjustmentDoc.status == "confirmed",
+        ).all():
+            confirmed_adj_ids.add(doc.id)
+    # Har bir (warehouse_id, product_id) uchun harakatlarni created_at bo'yicha olamiz
+    movements = (
+        db.query(StockMovement)
+        .filter(
+            StockMovement.warehouse_id.isnot(None),
+            StockMovement.product_id.isnot(None),
+        )
+        .order_by(StockMovement.created_at.asc())
+        .all()
+    )
+    # (warehouse_id, product_id) -> ro'yxatda har bir hujjat (document_type, document_id) uchun bitta harakat (oldingi ikki marta qo'shilgan xatoni bartaraf etish)
+    by_key = defaultdict(list)
+    for m in movements:
+        if (m.document_type or "") == "StockAdjustmentDoc" and m.document_id not in confirmed_adj_ids:
+            continue
+        key = (m.warehouse_id, m.product_id)
+        by_key[key].append(m)
+    totals = {}
+    for key, lst in by_key.items():
+        seen_doc = set()
+        s = 0.0
+        for m in lst:
+            doc_key = (m.document_type or "", m.document_id)
+            if doc_key in seen_doc:
+                continue
+            seen_doc.add(doc_key)
+            s += float(m.quantity_change or 0)
+        totals[key] = s
+    updated = 0
+    created = 0
+    for (wh_id, prod_id), qty in totals.items():
+        qty = max(0.0, qty)
+        stock = db.query(Stock).filter(
+            Stock.warehouse_id == wh_id,
+            Stock.product_id == prod_id,
+        ).first()
+        if stock:
+            stock.quantity = qty
+            if hasattr(stock, "updated_at"):
+                stock.updated_at = datetime.now()
+            updated += 1
+        else:
+            db.add(Stock(warehouse_id=wh_id, product_id=prod_id, quantity=qty))
+            created += 1
+    db.commit()
+    from urllib.parse import quote
+    msg = quote(f"Stock qoldiqlari harakatlar tarixidan qayta hisoblandi: {updated} yangilandi, {created} yangi qator.")
+    return RedirectResponse(url=f"/reports/stock?recalculated=1&msg={msg}", status_code=303)
 
 
 @router.post("/stock/clear")

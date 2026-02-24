@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role in ('admin', 'rahbar', 'raxbar')) %}
 <div class="container-fluid">
     <div class="row mb-4">
         <div class="col-12">
@@ -111,6 +112,7 @@
                     </button>
                     <a href="/warehouse/template" class="btn btn-outline-secondary btn-sm ms-2" target="_blank" rel="noopener"><i class="bi bi-file-earmark-excel"></i> Andoza</a>
                     <a href="/qoldiqlar/export" class="btn btn-outline-success btn-sm ms-2" target="_blank" rel="noopener"><i class="bi bi-download"></i> Joriy qoldiqlar (Excel)</a>
+                    <a href="/qoldiqlar/tarix" class="btn btn-outline-info btn-sm ms-2" title="Mahsulot qayerdan keldi va qayerga ketdi — harakatlar tarixi"><i class="bi bi-clock-history"></i> Mahsulot harakati tarixi</a>
                 </div>
             </div>
             <div class="card">
@@ -122,7 +124,7 @@
                                     <th>№</th>
                                     <th>Sana</th>
                                     <th>Foydalanuvchi</th>
-                                    <th>Jami summa tannarx (so'm)</th>
+                                    {% if show_tannarx %}<th>Jami summa tannarx (so'm)</th>{% endif %}
                                     <th>Jami sotuv (so'm)</th>
                                     <th>Holat</th>
                                     <th></th>
@@ -134,7 +136,7 @@
                                     <td><a href="/qoldiqlar/tovar/hujjat/{{ d.id }}">{{ d.number }}</a></td>
                                     <td>{{ d.date.strftime('%d.%m.%Y %H:%M') if d.date else '-' }}</td>
                                     <td>{{ d.user.full_name or d.user.username if d.user else '-' }}</td>
-                                    <td>{{ "{:,.0f}".format(d.total_tannarx or 0) }}</td>
+                                    {% if show_tannarx %}<td>{{ "{:,.0f}".format(d.total_tannarx or 0) }}</td>{% endif %}
                                     <td>{{ "{:,.0f}".format(d.total_sotuv or 0) }}</td>
                                     <td>
                                         {% if d.status == 'draft' %}
@@ -158,7 +160,7 @@
                                 </tr>
                                 {% else %}
                                 <tr>
-                                    <td colspan="7" class="text-muted text-center py-4">
+                                    <td colspan="{% if show_tannarx %}7{% else %}6{% endif %}" class="text-muted text-center py-4">
                                         Hujjatlar yo'q. <a href="/qoldiqlar/tovar/hujjat/new">Yangi hujjat yaratish</a>
                                     </td>
                                 </tr>

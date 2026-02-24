@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role in ('admin', 'rahbar', 'raxbar')) %}
+{% set source_costs = source_costs if source_costs is defined else {} %}
 <style>
 .form-1c { max-width: 900px; }
 .form-1c .form-row { display: flex; align-items: center; border-bottom: 1px solid #dee2e6; min-height: 32px; }
@@ -126,8 +128,8 @@
                             <th style="width:40px">#</th>
                             <th>Mahsulot</th>
                             <th style="width:120px">Miqdor</th>
-                            <th style="width:110px">Tannarx (so'm)</th>
-                            <th style="width:120px">Summa (so'm)</th>
+                            {% if show_tannarx %}<th style="width:110px">Tannarx (so'm)</th><th style="width:120px">Summa (so'm)</th>{% endif %}
+                            {% if transfer and transfer.from_warehouse_id %}<th class="text-center" style="width:60px">Tarix</th>{% endif %}
                             <th style="width:50px"></th>
                         </tr>
                     </thead>
@@ -155,8 +157,15 @@
                                 <input type="text" name="quantity_{{ loop.index }}" class="form-control qty-input" value="{{ "%.3f"|format(row.quantity) if row.quantity is not none else "" }}" inputmode="decimal">
                                 {% endif %}
                             </td>
+                            {% if show_tannarx %}
                             <td class="cost-cell text-end">{{ "{:,.0f}".format(row_cost) }}</td>
                             <td class="sum-cell text-end text-success">{{ "{:,.0f}".format(row_sum) }}</td>
+                            {% endif %}
+                            {% if transfer and transfer.from_warehouse_id %}
+                            <td class="text-center">
+                                <a href="/reports/stock/source?warehouse_id={{ transfer.from_warehouse_id }}&product_id={{ row.product_id }}" class="btn btn-sm btn-outline-info" title="Harakat tarixi"><i class="bi bi-clock-history"></i></a>
+                            </td>
+                            {% endif %}
                             <td>
                                 {% if transfer.status != 'confirmed' %}
                                 <button type="button" class="btn btn-outline-danger btn-sm rm-row">&times;</button>
@@ -173,8 +182,8 @@
                                 <div class="combo-drop" id="comboDrop1" style="display:none;"></div>
                             </td>
                             <td><input type="text" name="quantity_1" class="form-control qty-input" value="" inputmode="decimal"></td>
-                            <td class="cost-cell text-end">—</td>
-                            <td class="sum-cell text-end">—</td>
+                            {% if show_tannarx %}<td class="cost-cell text-end">—</td><td class="sum-cell text-end">—</td>{% endif %}
+                            {% if transfer and transfer.from_warehouse_id %}<td></td>{% endif %}
                             <td><button type="button" class="btn btn-outline-danger btn-sm rm-row">&times;</button></td>
                         </tr>
                         {% endif %}
@@ -210,6 +219,8 @@
 
 <script>
 (function() {
+    var showTannarx = {{ 'true' if show_tannarx else 'false' }};
+    var hasTarixColumn = {{ 'true' if (transfer and transfer.from_warehouse_id) else 'false' }};
     var stockByWhProduct = {{ stock_by_warehouse_product | tojson | safe }};
     var stockCostByWhProduct = {{ (stock_cost_by_warehouse_product or {}) | tojson | safe }};
     var products = {{ products_list | tojson | safe }};
@@ -229,13 +240,15 @@
         var tr = document.createElement('tr');
         tr.className = 'item-row';
         if (costVal != null && !isNaN(costVal)) tr.setAttribute('data-cost', costVal);
+        var costSumHtml = showTannarx ? ('<td class="cost-cell text-end">' + costDisplay + '</td><td class="sum-cell text-end text-success">' + sumDisplay + '</td>') : '';
+        var tarixTd = hasTarixColumn ? '<td></td>' : '';
         tr.innerHTML = '<td class="row-num">' + rowIndex + '</td>' +
             '<td class="combo-wrap"><input type="text" class="form-control combo-input" placeholder="Nom yoki kod (F4)" data-row="' + rowIndex + '" autocomplete="off">' +
             '<input type="hidden" name="product_id_' + rowIndex + '" value="' + (pid || '') + '">' +
             '<div class="combo-drop" id="comboDrop' + rowIndex + '" style="display:none;"></div></td>' +
             '<td><input type="text" name="quantity_' + rowIndex + '" class="form-control qty-input" value="' + (qty || '') + '" inputmode="decimal"></td>' +
-            '<td class="cost-cell text-end">' + costDisplay + '</td>' +
-            '<td class="sum-cell text-end text-success">' + sumDisplay + '</td>' +
+            costSumHtml +
+            tarixTd +
             '<td><button type="button" class="btn btn-outline-danger btn-sm rm-row">&times;</button></td>';
         itemsBody.appendChild(tr);
         var comboInput = tr.querySelector('.combo-input');

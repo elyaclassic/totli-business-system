@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role in ('admin', 'rahbar', 'raxbar')) %}
 {% if merged is not none and merged > 0 %}
 <div class="alert alert-success alert-dismissible fade show" role="alert">
     <i class="bi bi-check-circle"></i> {{ merged }} ta dublikat qator birlashtirildi. Qoldiq hisoboti endi to'g'ri.
@@ -10,6 +11,12 @@
 {% if cleared is not none and cleared >= 0 and msg %}
 <div class="alert alert-success alert-dismissible fade show" role="alert">
     <i class="bi bi-check-circle"></i> {{ msg }} ({{ cleared }} ta yozuv o'chirildi.)
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+{% if recalculated and msg %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    <i class="bi bi-check-circle"></i> {{ msg }}
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 {% endif %}
@@ -40,6 +47,10 @@
             <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#importStockModal" title="Exceldan qoldiqlarni yuklash"><i class="bi bi-upload"></i> Import</button>
             <a href="/reports/stock/export{% if selected_warehouse_id %}?warehouse_id={{ selected_warehouse_id }}{% endif %}" class="btn btn-success"><i class="bi bi-file-earmark-excel"></i> Excel</a>
             {% if current_user and current_user.role == 'admin' %}
+            <form method="post" action="/reports/stock/recalculate-from-movements" class="d-inline" onsubmit="return confirm('Stock qoldiqlari harakatlar tarixidan qayta hisoblanadi (Yangi sotuv va boshqa sahifalardagi qoldiq to\'g\'rilanadi). Davom etasizmi?');">
+                <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
+                <button type="submit" class="btn btn-outline-info btn-sm" title="Qoldiqlarni harakatlar tarixidan qayta hisoblash"><i class="bi bi-calculator"></i> Qoldiqlarni tarixdan qayta hisoblash</button>
+            </form>
             <form method="post" action="/reports/stock/merge-duplicates" class="d-inline" onsubmit="return confirm('Barcha ombor+mahsulot dublikatlarini bitta qatorga yig\'ish. Davom etasizmi?');">
                 <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
                 <button type="submit" class="btn btn-outline-warning btn-sm" title="Bir xil ombor va mahsulot uchun bir nechta qatorlarni bitta qatorga birlashtirish"><i class="bi bi-diagram-3"></i> Dublikatlarni birlashtirish</button>
@@ -55,8 +66,7 @@
         <div class="alert alert-info py-2 mb-3 small">
             <strong><i class="bi bi-info-circle"></i> Qoldiq manbai:</strong>
             Miqdor — <code>Stock</code> jadvalidan (har ombor + mahsulot bo‘yicha yig‘indi).
-            Tannarx — mahsulotning tannarxi (so‘m).
-            Summa = Qoldiq × Tannarx (anniq hisob).
+            {% if show_tannarx %}Tannarx — mahsulotning tannarxi (so‘m). Summa = Qoldiq × Tannarx (anniq hisob).{% endif %}
             <br><strong>Faqat tasdiqlangan hujjatlar</strong> (qoldiq tuzatish, kirim, sotuv va b.) qoldiqni o‘zgartiradi — qoralama hujjatlar hisobotda ko‘rinmaydi.
         </div>
     </div>
@@ -70,8 +80,7 @@
                     <th>Tovar nomi</th>
                     <th class="text-end">Qoldiq (miqdor)</th>
                     <th>O'lchov</th>
-                    <th class="text-end">Tannarx (so'm)</th>
-                    <th class="text-end">Summa (so'm)</th>
+                    {% if show_tannarx %}<th class="text-end">Tannarx (so'm)</th><th class="text-end">Summa (so'm)</th>{% endif %}
                     <th class="text-center">Manbai</th>
                 </tr>
             </thead>
@@ -94,8 +103,10 @@
                         </td>
                         <td class="text-end fw-bold">{{ "{:,.3f}".format(qty) }}</td>
                         <td>{{ stock.product.unit.code if stock.product and stock.product.unit else '-' }}</td>
+                        {% if show_tannarx %}
                         <td class="text-end">{{ "{:,.2f}".format(price) }}</td>
                         <td class="text-end text-success">{{ "{:,.2f}".format(row_sum) }}</td>
+                        {% endif %}
                         <td class="text-center">
                             <a href="/reports/stock/source?warehouse_id={{ stock.warehouse.id }}&product_id={{ stock.product.id }}" class="btn btn-sm btn-outline-info" title="Qoldiq qayerdan kelganini ko'rish"><i class="bi bi-link-45deg"></i></a>
                         </td>
@@ -103,7 +114,7 @@
                     {% endfor %}
                 {% else %}
                     <tr>
-                        <td colspan="9" class="text-center text-muted py-5">
+                        <td colspan="{% if show_tannarx %}9{% else %}7{% endif %}" class="text-center text-muted py-5">
                             {% if selected_warehouse_id %}
                             Ushbu omborda qoldiqlar topilmadi.
                             {% else %}
@@ -114,7 +125,7 @@
                     </tr>
                 {% endif %}
             </tbody>
-            {% if stocks and total_sum is defined %}
+            {% if stocks and total_sum is defined and show_tannarx %}
             <tfoot class="table-light fw-bold">
                 <tr>
                     <td colspan="6" class="text-end">Jami summa (so'm):</td>

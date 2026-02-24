@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card mb-3">
+    <div class="card-body">
+        <a href="/qoldiqlar" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> Qoldiqlar</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-clock-history"></i> Mahsulot harakati tarixi — qayerdan keldi / qayerga ketdi
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">1C dagi qoldiqlar bo'limidagi kabi: tanlangan ombor va mahsulot uchun barcha kirim/chiqim harakatlari (hujjat turi, raqam, sana, o'zgarish, qoldiq) ko'rinadi.</p>
+        <form method="get" action="/qoldiqlar/tarix" class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label">Ombor</label>
+                <select name="warehouse_id" class="form-select" required>
+                    <option value="">Tanlang</option>
+                    {% for wh in warehouses or [] %}
+                    <option value="{{ wh.id }}">{{ wh.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Mahsulot</label>
+                <select name="product_id" class="form-select" required>
+                    <option value="">Tanlang</option>
+                    {% for p in products or [] %}
+                    <option value="{{ p.id }}" {% if selected_product_id and selected_product_id == p.id %}selected{% endif %}>{{ p.name }}{% if p.code or p.barcode %} ({{ p.code or p.barcode }}){% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-eye"></i> Ko'rish</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

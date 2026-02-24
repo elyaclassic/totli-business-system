@@ -18,9 +18,12 @@
 
 <div class="container-fluid">
     <div class="row mb-2">
-        <div class="col-12">
-            <h5 class="mb-0">Ombordan omborga o'tkazish</h5>
-            <p class="text-muted mb-0 small">Bir ombordagi mahsulotni boshqa omborga ko'chiring</p>
+        <div class="col-12 d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <h5 class="mb-0">Ombordan omborga o'tkazish</h5>
+                <p class="text-muted mb-0 small">Bir ombordagi mahsulotni boshqa omborga ko'chiring</p>
+            </div>
+            <a href="/qoldiqlar/tarix" class="btn btn-outline-info btn-sm"><i class="bi bi-clock-history"></i> Mahsulot harakati tarixi</a>
         </div>
     </div>
     {% if request.query_params.get('success') %}

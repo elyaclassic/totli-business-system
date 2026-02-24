@@ -85,6 +85,7 @@
                                     <th>Miqdor</th>
                                     <th>Narx</th>
                                     <th>Summa</th>
+                                    {% if purchase.warehouse_id %}<th class="text-center">Tarix</th>{% endif %}
                                     <th></th>
                                 </tr>
                             </thead>
@@ -97,6 +98,11 @@
                                         item.product.unit else '' }}</td>
                                     <td>{{ "{:,.0f}".format(item.price) }} so'm</td>
                                     <td><strong>{{ "{:,.0f}".format(item.total) }} so'm</strong></td>
+                                    {% if purchase.warehouse_id %}
+                                    <td class="text-center">
+                                        <a href="/reports/stock/source?warehouse_id={{ purchase.warehouse_id }}&product_id={{ item.product_id }}" class="btn btn-sm btn-outline-info" title="Harakat tarixi"><i class="bi bi-clock-history"></i></a>
+                                    </td>
+                                    {% endif %}
                                     <td>
                                         {% if purchase.status == 'draft' %}
                                         <form method="POST"
@@ -114,7 +120,7 @@
                             </tbody>
                             <tfoot>
                                 <tr>
-                                    <th colspan="4" class="text-end">Tovarlar jami:</th>
+                                    <th colspan="{% if purchase.warehouse_id %}5{% else %}4{% endif %}" class="text-end">Tovarlar jami:</th>
                                     <th colspan="2"><strong>{{ "{:,.0f}".format(purchase.total or 0) }} so'm</strong></th>
                                 </tr>
                             </tfoot>

@@ -15,6 +15,9 @@
             <h3>{{ product.name }}</h3>
             <p><b>Kod:</b> {{ product.code }}</p>
             <p><b>Shtixkod:</b> {{ product.barcode }}</p>
+            <p>
+                <a href="/qoldiqlar/tarix?product_id={{ product.id }}" class="btn btn-outline-info btn-sm"><i class="bi bi-clock-history"></i> Mahsulot harakati tarixi</a>
+            </p>
             {% if product.image %}
             <img src="/static/images/products/{{ product.image }}" alt="Rasm" class="img-thumbnail mb-3" style="max-width:200px;">
             {% endif %}

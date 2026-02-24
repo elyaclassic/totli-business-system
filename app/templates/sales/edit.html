@@ -80,7 +80,7 @@
                     <div class="table-responsive">
                         <table class="table table-sm">
                             <thead>
-                                <tr><th>№</th><th>Mahsulot</th><th>Miqdor</th><th>Narx</th><th>Summa</th>{% if order.status == 'draft' %}<th></th>{% endif %}</tr>
+                                <tr><th>№</th><th>Mahsulot</th><th>Miqdor</th><th>Narx</th><th>Summa</th>{% if order.warehouse_id %}<th class="text-center">Tarix</th>{% endif %}{% if order.status == 'draft' %}<th></th>{% endif %}</tr>
                             </thead>
                             <tbody>
                                 {% for item in order.items %}
@@ -90,6 +90,11 @@
                                     <td>{{ "{:,.3f}".format(item.quantity or 0) }}</td>
                                     <td>{{ "{:,.0f}".format(item.price) }} so'm</td>
                                     <td><strong>{{ "{:,.0f}".format(item.total) }} so'm</strong></td>
+                                    {% if order.warehouse_id %}
+                                    <td class="text-center">
+                                        <a href="/reports/stock/source?warehouse_id={{ order.warehouse_id }}&product_id={{ item.product_id }}" class="btn btn-sm btn-outline-info" title="Harakat tarixi"><i class="bi bi-clock-history"></i></a>
+                                    </td>
+                                    {% endif %}
                                     {% if order.status == 'draft' %}
                                     <td>
                                         <form method="POST" action="/sales/{{ order.id }}/delete-item/{{ item.id }}" style="display:inline;" onsubmit="return confirm('Ushbu qatorni o\'chirmoqchimisiz?');">
@@ -102,11 +107,12 @@
                             </tbody>
                             <tfoot>
                                 <tr>
-                                    <th colspan="4" class="text-end">Jami:</th>
+                                    <th colspan="{% if order.warehouse_id %}5{% else %}4{% endif %}" class="text-end">Jami:</th>
                                     <th colspan="2"><strong>{{ "{:,.0f}".format(order.total or 0) }} so'm</strong></th>
                                 </tr>
+                                {% if show_foyda_zarar %}
                                 <tr>
-                                    <th colspan="4" class="text-end">Foyda / Zarar:</th>
+                                    <th colspan="{% if order.warehouse_id %}5{% else %}4{% endif %}" class="text-end">Foyda / Zarar:</th>
                                     <th colspan="2">
                                         {% if (foyda_zarar or 0) >= 0 %}
                                         <strong class="text-success">{{ "{:,.0f}".format(foyda_zarar or 0) }} so'm</strong>
@@ -115,6 +121,7 @@
                                         {% endif %}
                                     </th>
                                 </tr>
+                                {% endif %}
                             </tfoot>
                         </table>
                     </div>

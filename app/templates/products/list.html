@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role in ('admin', 'rahbar', 'raxbar')) %}
 {% if import_ok == '1' %}
     <div class="alert alert-success alert-dismissible fade show" role="alert">
     <strong>Import muvaffaqiyatli.</strong>
@@ -90,6 +91,7 @@
                             <th class="products-sort" data-sort="barcode" role="button" title="Saralash">Shtrix kod <i class="bi bi-arrow-down-up products-sort-icon"></i></th>
                             <th class="products-sort" data-sort="name" role="button" title="Saralash">Nomi <i class="bi bi-arrow-down-up products-sort-icon"></i></th>
                             <th class="products-sort" data-sort="type" role="button" title="Saralash">Turi <i class="bi bi-arrow-down-up products-sort-icon"></i></th>
+                            <th class="text-center">Tarix</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -115,6 +117,9 @@
                                 {% else %}
                                 <span class="badge bg-info">Xom ashyo</span>
                                 {% endif %}
+                            </td>
+                            <td class="text-center">
+                                <a href="/qoldiqlar/tarix?product_id={{ product.id }}" class="btn btn-sm btn-outline-info" title="Mahsulot harakati tarixi"><i class="bi bi-clock-history"></i></a>
                             </td>
                             <td>
                                 <button type="button" class="btn btn-sm btn-outline-secondary btn-copy-product" title="Nusxa ko'chirish"
@@ -146,7 +151,7 @@
                         {% endfor %}
                         {% else %}
                         <tr>
-                            <td colspan="{% if current_user and current_user.role == 'admin' %}7{% else %}5{% endif %}" class="text-center text-muted py-5">
+                            <td colspan="{% if current_user and current_user.role == 'admin' %}8{% else %}6{% endif %}" class="text-center text-muted py-5">
                                 <i class="bi bi-box-seam fs-1 d-block mb-2"></i>
                                 Hozircha tovarlar yo'q<br>
                                 <small>Yuqoridagi Yaratish tugmasini bosing</small>
@@ -249,10 +254,14 @@
                             <label class="form-label small mb-0" for="edit_product_barcode">Shtrixkod</label>
                             <input type="text" id="edit_product_barcode" class="form-control form-control-sm" name="barcode" autocomplete="off">
                         </div>
+                        {% if show_tannarx %}
                         <div class="col-md-3">
                             <label class="form-label small mb-0" for="edit_product_purchase_price">Olish narxi</label>
                             <input type="number" id="edit_product_purchase_price" class="form-control form-control-sm" name="purchase_price" step="any" min="0" value="0" placeholder="0">
                         </div>
+                        {% else %}
+                        <input type="hidden" id="edit_product_purchase_price" name="purchase_price" value="0">
+                        {% endif %}
                         <div class="col-md-3">
                             <label class="form-label small mb-0" for="edit_product_sale_price">Sotuv narxi</label>
                             <input type="number" id="edit_product_sale_price" class="form-control form-control-sm" name="sale_price" step="any" min="0" value="0" placeholder="0">
