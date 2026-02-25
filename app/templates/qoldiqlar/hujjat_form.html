@@ -49,27 +49,10 @@
             {% endif %}
         </div>
         <div class="card-body py-2">
-            {% if request.query_params.get('msg') %}
-            <div class="alert alert-info py-2 small">{{ request.query_params.get('msg') }}</div>
-            {% endif %}
             {% if doc %}
             <div class="row hujjat-doc-info mb-2">
                 <div class="col-md-6">
-                    <p class="mb-0">
-                        <strong>Hujjat raqami:</strong> <span class="badge bg-primary">{{ doc.number }}</span> &nbsp;
-                        {% if doc.status == 'draft' %}
-                        <strong>Sana:</strong>
-                        <form method="post" action="/qoldiqlar/tovar/hujjat/{{ doc.id }}/update-date" class="d-inline" id="dateForm">
-                            <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
-                            <input type="datetime-local" name="date" value="{{ doc.date.strftime('%Y-%m-%dT%H:%M') if doc.date else '' }}" 
-                                   class="form-control form-control-sm d-inline-block" style="width: auto; display: inline;" 
-                                   onchange="document.getElementById('dateForm').submit();">
-                        </form>
-                        {% else %}
-                        <strong>Sana:</strong> {{ doc.date.strftime('%d.%m.%Y %H:%M') if doc.date else '-' }}
-                        {% endif %}
-                        &nbsp; <strong>Foydalanuvchi:</strong> {{ doc.user.full_name or doc.user.username if doc.user else '-' }}
-                    </p>
+                    <p class="mb-0"><strong>Hujjat raqami:</strong> <span class="badge bg-primary">{{ doc.number }}</span> &nbsp; <strong>Sana:</strong> {{ doc.date.strftime('%d.%m.%Y %H:%M') if doc.date else '-' }} &nbsp; <strong>Foydalanuvchi:</strong> {{ doc.user.full_name or doc.user.username if doc.user else '-' }}</p>
                 </div>
                 <div class="col-md-6">
                     <p class="mb-0"><strong>Holat:</strong> {% if doc.status == 'draft' %}<span class="badge bg-warning text-dark">Qoralama</span>{% else %}<span class="badge bg-success">Tasdiqlangan</span>{% endif %}
@@ -287,18 +270,15 @@
     });
 
     const productList = document.getElementById('product_list') || document.getElementById('add_row_product_list');
-    const addRowProductList = document.getElementById('add_row_product_list');
 
-    function filterProducts(term, productSelectElement) {
-        var list = productSelectElement || productList;
-        if (!list || !list.options) return [];
+    function filterProducts(term) {
+        if (!productList || !productList.options) return [];
         term = (term || '').trim().toLowerCase();
         if (!term) return [];
-        return Array.from(list.options).filter(function(opt) {
-            var name = (opt.dataset.name || opt.textContent || '').toLowerCase();
+        return Array.from(productList.options).filter(function(opt) {
+            var name = (opt.dataset.name || '').toLowerCase();
             var code = (opt.dataset.code || '').toLowerCase();
-            var fullText = name + ' ' + code;
-            return name.indexOf(term) !== -1 || code.indexOf(term) !== -1 || fullText.indexOf(term) !== -1;
+            return name.indexOf(term) !== -1 || code.indexOf(term) !== -1;
         });
     }
 
@@ -337,28 +317,24 @@
             const resultsDiv = row.querySelector('.product-results');
             if (!resultsDiv) return;
             term = (term || '').trim().toLowerCase();
-            const matches = term ? filterProducts(term, productList) : Array.from(productList.options);
+            const matches = term ? filterProducts(term) : Array.from(productList.options);
             resultsDiv.innerHTML = '';
             if (matches.length > 0) {
                 matches.forEach(function(opt) {
                     const a = document.createElement('a');
                     a.href = '#'; a.className = 'list-group-item list-group-item-action';
-                    var displayName = opt.dataset.name || opt.textContent || '';
-                    var displayCode = opt.dataset.code || '';
-                    a.textContent = displayName + (displayCode ? ' (' + displayCode + ')' : '');
+                    a.textContent = (opt.dataset.name || '') + (opt.dataset.code ? ' (' + opt.dataset.code + ')' : '');
                     a.addEventListener('click', function(e) {
                         e.preventDefault();
                         const inp = row.querySelector('.product-search');
                         const hid = row.querySelector('.row-product-id');
-                        if (inp) inp.value = displayName + (displayCode ? ' (' + displayCode + ')' : '');
+                        if (inp) inp.value = opt.dataset.name + (opt.dataset.code ? ' (' + opt.dataset.code + ')' : '');
                         if (hid) hid.value = opt.value;
                         resultsDiv.style.display = 'none';
                     });
                     resultsDiv.appendChild(a);
                 });
                 resultsDiv.style.display = 'block';
-            } else {
-                resultsDiv.style.display = 'none';
             }
         }
         function bindProductSearch(row) {
@@ -402,51 +378,31 @@
     const addProductSearch = document.querySelector('.add-product-search');
     const addProductResults = document.querySelector('.add-product-results');
     const addRowProductId = document.getElementById('add_row_product_id');
-    if (addProductSearch && addProductResults && addRowProductId && addRowProductList) {
-        addProductSearch.addEventListener('focus', function() {
-            if (!addRowProductId.value) {
-                const term = this.value.trim();
-                if (term) {
-                    showAddProductResults(term);
-                } else {
-                    showAddProductResults('');
-                }
-            }
-        });
+    if (addProductSearch && addProductResults && addRowProductId) {
         addProductSearch.addEventListener('input', function() {
             const term = this.value.trim();
-            addRowProductId.value = '';
-            showAddProductResults(term);
-        });
-        function showAddProductResults(term) {
+            addProductResults.style.display = 'none';
             addProductResults.innerHTML = '';
-            const matches = term ? filterProducts(term, addRowProductList) : Array.from(addRowProductList.options);
+            addRowProductId.value = '';
+            const matches = filterProducts(term);
             if (matches.length > 0) {
                 matches.forEach(function(opt) {
                     const a = document.createElement('a');
                     a.href = '#'; a.className = 'list-group-item list-group-item-action';
-                    var displayName = opt.dataset.name || opt.textContent || '';
-                    var displayCode = opt.dataset.code || '';
-                    a.textContent = displayName + (displayCode ? ' (' + displayCode + ')' : '');
+                    a.textContent = (opt.dataset.name || '') + (opt.dataset.code ? ' (' + opt.dataset.code + ')' : '');
                     a.addEventListener('click', function(e) {
                         e.preventDefault();
-                        addProductSearch.value = displayName + (displayCode ? ' (' + displayCode + ')' : '');
+                        addProductSearch.value = opt.dataset.name + (opt.dataset.code ? ' (' + opt.dataset.code + ')' : '');
                         addRowProductId.value = opt.value;
                         addProductResults.style.display = 'none';
                     });
                     addProductResults.appendChild(a);
                 });
                 addProductResults.style.display = 'block';
-            } else {
-                addProductResults.style.display = 'none';
             }
-        }
+        });
         document.addEventListener('click', function(ev) {
-            if (addProductSearch && addProductResults && 
-                !addProductSearch.contains(ev.target) && 
-                !addProductResults.contains(ev.target)) {
-                addProductResults.style.display = 'none';
-            }
+            if (!addProductSearch.contains(ev.target) && !addProductResults.contains(ev.target)) addProductResults.style.display = 'none';
         });
     }
 

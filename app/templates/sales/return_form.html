@@ -43,15 +43,20 @@
                         </thead>
                         <tbody>
                             {% for item in order.items %}
+                            {% set _uc = (item.product.unit.code or '')|lower if (item.product and item.product.unit) else '' %}
+                            {% set _is_dona = _uc in ['dona', 'pc', 'pcs', 'ta', 'шт'] %}
+                            {% set qty_display = "{:,.0f}".format((item.quantity or 0)|round(0)|int) if _is_dona else "{:,.3f}".format(item.quantity or 0) %}
+                            {% set qty_max = (item.quantity or 0)|round(0)|int if _is_dona else item.quantity %}
+                            {% set step_attr = "1" if _is_dona else "0.01" %}
                             <tr>
                                 <td>{{ item.product.name if item.product else '-' }}</td>
-                                <td>{{ "{:,.3f}".format(item.quantity or 0) }}</td>
+                                <td>{{ qty_display }}</td>
                                 <td>{{ "{:,.0f}".format(item.price or 0) }} so'm</td>
                                 <td>{{ "{:,.0f}".format(item.total or 0) }} so'm</td>
                                 <td>
                                     <input type="hidden" name="product_id" value="{{ item.product_id }}">
                                     <input type="number" name="quantity_return" class="form-control form-control-sm" style="width: 120px;"
-                                           min="0" max="{{ item.quantity }}" step="0.01" value="0"
+                                           min="0" max="{{ qty_max }}" step="{{ step_attr }}" value="0"
                                            placeholder="0">
                                 </td>
                             </tr>

@@ -15,10 +15,30 @@ from app.utils.auth import verify_password, create_session_token
 router = APIRouter(tags=["auth"])
 
 
+def _redirect_after_login(user: User) -> str:
+    """Rolga qarab login yoki bosh sahifadan keyin qayerga yo'naltirish. Admin dan boshqa bosh sahifaga kirmaydi — ishlab chiqarishga yo'naltiriladi."""
+    role = (user.role or "").strip().lower()
+    if role == "admin":
+        return "/"  # Faqat admin bosh sahifani ko'radi
+    if role == "manager":
+        return "/sales"  # Buyurtmalar / Sotuvlar
+    role_home = {
+        "agent": "/dashboard/agent",
+        "driver": "/dashboard/agent",
+        "production": "/production/orders",
+        "qadoqlash": "/production/orders",
+        "sotuvchi": "/sales/pos",
+        "rahbar": "/production/orders",
+        "raxbar": "/production/orders",
+    }
+    # Boshqa barcha rollar (operator va h.k.) — bosh sahifaga emas, ishlab chiqarish oynasiga
+    return role_home.get(role, "/production/orders")
+
+
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, current_user: Optional[User] = Depends(get_current_user)):
     if current_user:
-        return RedirectResponse(url="/", status_code=303)
+        return RedirectResponse(url=_redirect_after_login(current_user), status_code=303)
     err = request.query_params.get("error")
     if err == "please_retry":
         err = "Xatolik yuz berdi. Qayta kirishni urinib ko'ring."
@@ -53,9 +73,7 @@ async def login(
             })
         token = create_session_token(user.id, user.username)
         use_https = os.getenv("HTTPS", "").lower() in ("1", "true", "yes")
-        # Rolga qarab bosh sahifaga yo'naltirish
-        role_home = {"agent": "/dashboard/agent", "driver": "/dashboard/agent", "production": "/production", "qadoqlash": "/production", "sotuvchi": "/sales/pos"}
-        redirect_url = role_home.get((user.role or "").strip(), "/")
+        redirect_url = _redirect_after_login(user)
         resp = RedirectResponse(url=redirect_url, status_code=303)
         resp.set_cookie(
             key="session_token",

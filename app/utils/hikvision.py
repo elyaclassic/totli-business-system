@@ -232,27 +232,26 @@ class HikvisionAPI:
             emp_no = (e.get("employeeNoString") or e.get("employeeNo") or "").strip() or str(e.get("id", "")).strip()
             if not emp_no:
                 continue
-            name = (e.get("name") or e.get("personName") or e.get("employeeName") or e.get("userName") or "").strip() or "Noma'lum"
-            time1 = e.get("time") or e.get("dateTime") or e.get("eventTime") or e.get("startTime") or e.get("inTime") or e.get("firstTime") or ""
-            time2 = e.get("endTime") or e.get("outTime") or e.get("lastTime") or e.get("exitTime") or ""
-            rec = {"employeeNo": emp_no, "time": time1, "name": name}
+            rec = {
+                "employeeNo": emp_no,
+                "time": e.get("time") or e.get("dateTime") or e.get("eventTime") or "",
+                "name": e.get("name") or e.get("personName") or "Noma'lum",
+            }
             for k, v in e.items():
                 if v and isinstance(v, str) and any(x in k.lower() for x in ("pic", "photo", "image", "snap", "uri")):
                     if "pic" in k.lower() or "photo" in k.lower() or "image" in k.lower() or "snap" in k.lower():
                         rec[k] = v
             out.append(rec)
-            if time2 and str(time2).strip() and str(time2).strip() != str(time1).strip():
-                out.append({"employeeNo": emp_no, "time": time2.strip(), "name": name, **{k: v for k, v in rec.items() if k not in ("employeeNo", "time", "name")}})
         return out
 
     def get_events(self, start_date: date, end_date: date) -> List[Dict[str, Any]]:
         """
-        Berilgan sana oralig'ida barcha kirish/chiqish hodisalarini olish (pagination to'liq).
-        Keyingi sahifa uchun qurilma javobidagi searchResultPosition ishlatiladi (birinchi kirish va so'ngi chiqish to'g'ri bo'lishi uchun).
+        Berilgan sana oralig'ida kirish/chiqish hodisalarini olish.
+        Bir nechta vaqt formati sinanadi (qurilma firmwaresiga qarab).
         """
         out: List[Dict[str, Any]] = []
-        max_results = 500
-        max_pages = 200
+        max_results = 100
+        max_position = 20000
         time_formats = [
             (start_date.strftime("%Y-%m-%d") + " 00:00:00", end_date.strftime("%Y-%m-%d") + " 23:59:59"),
             (start_date.strftime("%Y-%m-%d") + "T00:00:00", end_date.strftime("%Y-%m-%d") + "T23:59:59"),
@@ -262,9 +261,7 @@ class HikvisionAPI:
             if out:
                 break
             position = 0
-            page = 0
-            while page < max_pages:
-                page += 1
+            while True:
                 try:
                     url = f"{self.base_url}/ISAPI/AccessControl/AcsEvent?format=json"
                     payload = {
@@ -287,16 +284,10 @@ class HikvisionAPI:
                     out.extend(chunk)
                     acs = (data.get("AcsEvent") or data.get("acsEvent")) if isinstance(data, dict) else None
                     acs_dict = acs if isinstance(acs, dict) else {}
-                    has_more = str(acs_dict.get("responseStatusStrg") or "").strip().upper() == "MORE"
-                    next_pos = acs_dict.get("searchResultPosition") or (data.get("searchResultPosition") if isinstance(data, dict) else None)
-                    if next_pos is not None and str(next_pos).strip() != "":
-                        try:
-                            position = int(next_pos)
-                        except (TypeError, ValueError):
-                            position += len(chunk) if chunk else max_results
-                    else:
-                        position += len(chunk) if chunk else max_results
-                    if not has_more or len(chunk) < max_results:
+                    if acs_dict.get("responseStatusStrg") != "MORE":
+                        break
+                    position += max_results
+                    if position >= max_position:
                         break
                 except Exception:
                     break
@@ -365,60 +356,29 @@ def sync_hikvision_attendance(
         if not events:
             result["errors"].append("Hikvision qurilmasidan shu sana uchun hodisa qaytmadi. IP/parol va sana to'g'riligini tekshiring.")
 
-        # employeeNo / hikvision_id / code -> employee_id
+        # employeeNo -> employee_id (barcha xodimlar, jumladan Hikvision'dan import qilingan is_active=False)
         employee_by_no: Dict[str, int] = {}
-        # Ism bo'yicha qidirish (hodim imyadan qidiriladi): normallashtirilgan ism -> employee_id
-        employee_by_name: Dict[str, int] = {}
         for emp in db_session.query(Employee).all():
             for key in (getattr(emp, "hikvision_id", None), getattr(emp, "code", None)):
                 if key:
                     employee_by_no[str(key).strip()] = emp.id
-            fn = (emp.full_name or "").strip()
-            if fn:
-                key_lower = fn.lower()
-                employee_by_name[key_lower] = emp.id
-                for part in key_lower.split():
-                    if len(part) > 1 and part not in employee_by_name:
-                        employee_by_name[part] = emp.id
-
-        def resolve_employee_id(ev: Dict[str, Any]) -> Optional[int]:
-            emp_no = (ev.get("employeeNo") or "").strip()
-            name = (ev.get("name") or ev.get("personName") or "").strip()
-            if emp_no and emp_no in employee_by_no:
-                return employee_by_no[emp_no]
-            if name:
-                by_full = employee_by_name.get(name.lower())
-                if by_full:
-                    return by_full
-                for part in name.lower().split():
-                    if part in employee_by_name:
-                        return employee_by_name[part]
-            return None
-
-        # (employee_id, sana) bo'yicha barcha vaqtlar — birinchi kirish = min(dt), so'ngi chiqish = max(dt)
+        
+        # (employee_id, sana) bo'yicha vaqtlar va hodisalarni yig'ish (rasm uchun birinchi hodisani saqlaymiz)
         from collections import defaultdict
-        by_emp_date: Dict[tuple, List[tuple]] = defaultdict(list)  # (emp_id, ev_date) -> [(dt, ev), ...]
+        by_emp_date: Dict[tuple, List[tuple]] = defaultdict(list)  # (dt, ev)
         for ev in events:
-            emp_id = resolve_employee_id(ev)
+            emp_no = ev.get("employeeNo") or ""
+            emp_id = employee_by_no.get(emp_no)
             if not emp_id:
                 continue
-            ev_time = (ev.get("time") or "").strip()
+            ev_time = ev.get("time") or ""
             if not ev_time:
                 continue
             try:
                 if "T" in ev_time:
                     dt = datetime.fromisoformat(ev_time.replace("Z", "+00:00"))
                 else:
-                    s = ev_time[:19]
-                    dt = None
-                    for fmt in ("%Y-%m-%d %H:%M:%S", "%m-%d-%Y %H:%M:%S", "%d.%m.%Y %H:%M:%S"):
-                        try:
-                            dt = datetime.strptime(s, fmt)
-                            break
-                        except ValueError:
-                            pass
-                    if dt is None:
-                        dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+                    dt = datetime.strptime(ev_time[:19], "%Y-%m-%d %H:%M:%S")
             except Exception:
                 continue
             ev_date = dt.date()
@@ -430,7 +390,7 @@ def sync_hikvision_attendance(
         if result["events_count"] > 0 and result["matched_count"] == 0:
             result["errors"].append(
                 "Hikvisiondan %s ta hodisa keldi, lekin hech bir xodim ro'yxatga mos emas. "
-                "Xodimlarda «Hikvision ID» / «Kod» yoki ism (F.I.O.) qurilmadagi ma'lumotga mos bo'lishi kerak." % result["events_count"]
+                "Xodimlarda «Hikvision ID» yoki «Kod» maydonini qurilmadagi raqamga moslang." % result["events_count"]
             )
         unique_dates = sorted(set(d for (_, d) in by_emp_date))
         result["days_with_data"] = unique_dates

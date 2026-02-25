@@ -10,14 +10,11 @@
     {% endif %}
 
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h5 class="mb-0"><i class="bi bi-calculator"></i> Oylik hisoblash — {{ year }}-yil {{ month }}-oy</h5>
-        <div>
-            <a href="/employees/salary" class="btn btn-outline-secondary btn-sm me-1"><i class="bi bi-arrow-left"></i> Hujjatlar ro'yxati</a>
-            <a href="/employees" class="btn btn-outline-secondary btn-sm"><i class="bi bi-person-badge"></i> Xodimlar</a>
-        </div>
+        <h5 class="mb-0"><i class="bi bi-calculator"></i> Oylik hisoblash</h5>
+        <a href="/employees" class="btn btn-outline-secondary btn-sm"><i class="bi bi-person-badge"></i> Xodimlar</a>
     </div>
 
-    <div class="card mb-2">
+    <div class="card mb-3">
         <div class="card-body py-2">
             <form method="get" action="/employees/salary" class="row g-2 align-items-end">
                 <div class="col-auto">
@@ -33,18 +30,15 @@
                     <input type="number" name="year" class="form-control form-control-sm" value="{{ year }}" min="2020" max="2030" style="width: 90px;">
                 </div>
                 <div class="col-auto">
-                    <button type="submit" class="btn btn-sm btn-primary">Boshqa oy</button>
+                    <button type="submit" class="btn btn-sm btn-primary">Ko'rsatish</button>
                 </div>
             </form>
         </div>
     </div>
-    <div class="alert alert-info py-2 small mb-2">
-        <strong>Ro'yxat qanday to'ldiriladi?</strong> Xodimlarni qo'lda tanlab qo'shish yo'q — ro'yxat <strong>avtomatik</strong>. Faqat <strong>ishga qabul qilingan</strong> (Ishga qabul qilish bo'limida rasman qabul qilingan, ishga kirgan sana belgilangan) va <strong>ishdan bo'shatilmagan</strong> xodimlar shu yerda ko'rinadi. Agar ro'yxat bo'sh bo'lsa, <a href="/employees" class="alert-link">Xodimlar</a> bo'limida xodimni oching va <strong>Ishga qabul qilish</strong> orqali rasman qabul qiling; keyin u shu oylik hujjatida o'z-o'zidan paydo bo'ladi.
-    </div>
 
     <div class="card">
         <div class="card-header">
-            <span>Xodimlar ({{ rows|length }})</span>
+            <span>Oylik — {{ year }}-yil {{ month }}-oy</span>
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -63,34 +57,10 @@
                     </thead>
                     <tbody>
                         {% for row in rows %}
-                        <tr id="salary-row-{{ row.employee.id }}">
-                            <td>
-                                {{ row.employee.full_name }} <small class="text-muted">({{ row.employee.code }})</small>
-                                {% if row.piecework_info %}
-                                <br><small class="text-info">Bo'lak: {{ row.piecework_info.name }}, 1 {{ row.piecework_info.unit_name }} = {{ "{:,.0f}".format(row.piecework_info.price_per_unit) }} so'm</small>
-                                {% if row.piecework_info.produced_units > 0 %}
-                                <br><small class="text-success">Ishlab chiqarilgan: {{ row.piecework_info.produced_label }} → {{ "{:,.0f}".format(row.piecework_info.auto_base) }} so'm</small>
-                                {% endif %}
-                                {% endif %}
-                                {% if row.attendance_info %}
-                                <br><small class="text-info">Me'yor: {{ row.attendance_info.working_days_in_month }} kun × {{ row.attendance_info.work_hours_per_day }} soat = {{ row.attendance_info.norm_hours }} soat/oy</small>
-                                <br><small class="text-success">Tabel: {{ row.attendance_info.worked_days }} kun, {{ row.attendance_info.worked_hours }} soat ishlagan → {{ "{:,.0f}".format(row.attendance_info.monthly_salary) }} × ({{ row.attendance_info.worked_hours }}/{{ row.attendance_info.norm_hours }}) = {{ "{:,.0f}".format(row.base_salary) }} so'm</small>
-                                {% endif %}
-                            </td>
+                        <tr>
+                            <td>{{ row.employee.full_name }} <small class="text-muted">({{ row.employee.code }})</small></td>
                             <td class="text-end">
-                                {% if row.piecework_info %}
-                                <div class="d-flex align-items-center gap-1 justify-content-end flex-wrap">
-                                    <input type="number" id="units_{{ row.employee.id }}" class="form-control form-control-sm text-end piecework-units" style="width:70px" step="0.01" min="0" placeholder="birlik" title="Bajarilgan birliklar (avtomatik: ishlab chiqarish)" data-price="{{ row.piecework_info.price_per_unit }}" data-base-id="base_{{ row.employee.id }}" value="{{ row.piecework_info.produced_units }}">
-                                    <span class="small text-muted">× {{ row.piecework_info.unit_name }}</span>
-                                    <input type="number" name="base_{{ row.employee.id }}" form="salaryForm" id="base_{{ row.employee.id }}" class="form-control form-control-sm text-end" style="width:100px" step="1000" value="{{ row.base_salary }}">
-                                </div>
-                                <small class="text-muted">Ishlab chiqarishdan avtomatik yig'ilgan; o'zgartirish mumkin.</small> {% if row.piecework_info.produced_units == 0 %}<br><small class="text-warning">Agar 0 bo'lsa: buyurtmani yakunlagan foydalanuvchi xodimga bog'langan bo'lishi kerak (Xodimlar → xodimda «Foydalanuvchi») yoki Ishlab chiqarish buyurtmalarida operatorni qo'lda belgilang.</small>{% endif %}
-                                {% elif row.attendance_info %}
-                                <input type="number" name="base_{{ row.employee.id }}" form="salaryForm" id="base_{{ row.employee.id }}" class="form-control form-control-sm text-end" style="width:100px" step="1000" value="{{ row.base_salary }}">
-                                <small class="text-muted">Tabel bo'yicha avtomatik; o'zgartirish mumkin.</small>
-                                {% else %}
                                 <input type="number" name="base_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:100px" step="1000" value="{{ row.base_salary }}">
-                                {% endif %}
                             </td>
                             <td class="text-end">
                                 <input type="number" name="bonus_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:90px" step="1000" value="{{ row.bonus }}">
@@ -101,9 +71,7 @@
                             <td class="text-end">
                                 <input type="number" name="advance_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:90px" step="1000" value="{{ row.advance_deduction }}">
                             </td>
-                            <td class="text-end fw-bold row-total {% if row.total < 0 %}text-danger{% endif %}" id="total_display_{{ row.employee.id }}">
-                                {{ "{:,.0f}".format(row.total) }}{% if row.total < 0 %} <small class="text-danger">(avans oshdi)</small>{% endif %}
-                            </td>
+                            <td class="text-end fw-bold">{{ "{:,.0f}".format(row.total) }}</td>
                             <td class="text-end">{{ "{:,.0f}".format(row.paid) }}</td>
                             <td>
                                 {% if row.status == 'paid' %}
@@ -113,8 +81,8 @@
                                 <form method="post" action="/employees/salary/mark-paid/{{ row.employee.id }}" class="d-inline">
                                     <input type="hidden" name="year" value="{{ year }}">
                                     <input type="hidden" name="month" value="{{ month }}">
-                                    <input type="hidden" name="paid_amount" value="{{ row.total if row.total >= 0 else 0 }}">
-                                    <button type="submit" class="btn btn-sm btn-outline-success ms-1" {% if row.total < 0 %}disabled title="Jami manfiy (avans oshdi) — to'lash kerak emas"{% endif %}>To'langan deb belgilash</button>
+                                    <input type="hidden" name="paid_amount" value="{{ row.total }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-success ms-1">To'langan deb belgilash</button>
                                 </form>
                                 {% endif %}
                             </td>
@@ -135,42 +103,4 @@
         </div>
     </div>
 </div>
-<script>
-(function() {
-    function updateRowTotal(empId) {
-        var tr = document.getElementById('salary-row-' + empId);
-        if (!tr) return;
-        var base = parseFloat(document.querySelector('input[name="base_' + empId + '"]')?.value) || 0;
-        var bonus = parseFloat(document.querySelector('input[name="bonus_' + empId + '"]')?.value) || 0;
-        var deduction = parseFloat(document.querySelector('input[name="deduction_' + empId + '"]')?.value) || 0;
-        var advance = parseFloat(document.querySelector('input[name="advance_' + empId + '"]')?.value) || 0;
-        var total = base + bonus - deduction - advance;
-        var totalTd = document.getElementById('total_display_' + empId);
-        if (totalTd) {
-            totalTd.textContent = total.toLocaleString('uz-UZ', { maximumFractionDigits: 0 }) + (total < 0 ? ' (avans oshdi)' : '');
-            totalTd.classList.toggle('text-danger', total < 0);
-        }
-    }
-    document.querySelectorAll('.piecework-units').forEach(function(inp) {
-        inp.addEventListener('input', function() {
-            var price = parseFloat(this.getAttribute('data-price')) || 0;
-            var units = parseFloat(this.value) || 0;
-            var baseId = this.getAttribute('data-base-id');
-            var baseInp = document.getElementById(baseId);
-            if (baseInp) {
-                baseInp.value = Math.round(units * price);
-                var empId = baseId.replace('base_', '');
-                updateRowTotal(empId);
-            }
-        });
-    });
-    document.querySelectorAll('tr[id^="salary-row-"]').forEach(function(tr) {
-        var empId = tr.id.replace('salary-row-', '');
-        ['base', 'bonus', 'deduction', 'advance'].forEach(function(name) {
-            var inp = document.querySelector('input[name="' + name + '_' + empId + '"]');
-            if (inp) inp.addEventListener('input', function() { updateRowTotal(empId); });
-        });
-    });
-})();
-</script>
 {% endblock %}

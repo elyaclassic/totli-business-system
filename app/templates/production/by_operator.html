@@ -37,7 +37,14 @@
                 <tbody>
                     {% for op_name, total_kg in operator_totals %}
                     <tr>
-                        <td><strong>{{ op_name }}</strong></td>
+                        <td>
+                            {% set emp_id = name_to_employee_id.get(op_name) %}
+                            {% if emp_id %}
+                            <a href="/production/orders?operator_id={{ emp_id }}&date_from={{ filter_date_from or '' }}&date_to={{ filter_date_to or '' }}" class="text-primary text-decoration-none"><strong>{{ op_name }}</strong></a>
+                            {% else %}
+                            <strong>{{ op_name }}</strong>
+                            {% endif %}
+                        </td>
                         <td class="text-end"><strong>{{ "%.2f"|format(total_kg) }}</strong> kg</td>
                     </tr>
                     {% endfor %}
@@ -64,7 +71,7 @@
                         <td>{{ prod.date.strftime('%d.%m.%Y %H:%M') if prod.date else '-' }}</td>
                         <td>
                             {% if prod.operator %}
-                            <strong>{{ prod.operator.full_name }}</strong>
+                            <a href="/production/orders?operator_id={{ prod.operator.id }}&date_from={{ filter_date_from or '' }}&date_to={{ filter_date_to or '' }}" class="text-primary text-decoration-none"><strong>{{ prod.operator.full_name }}</strong></a>
                             {% elif prod.user %}
                             <span class="text-muted">{{ prod.user.full_name }}</span>
                             {% else %}
@@ -73,7 +80,7 @@
                         </td>
                         <td>
                             {% if prod.recipe %}
-                            <a href="/production/recipes/{{ prod.recipe_id }}">{{ prod.recipe.name }}</a>
+                            <a href="/production/{{ prod.id }}/materials">{{ prod.recipe.name }}</a>
                             {% else %}
                             —
                             {% endif %}

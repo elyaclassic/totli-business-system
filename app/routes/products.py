@@ -82,6 +82,27 @@ async def product_import_template(current_user: User = Depends(require_auth)):
     )
 
 
+@router.get("/check", response_class=HTMLResponse)
+async def products_check_duplicates(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tovarlar tekshiruvi: bir xil nomdagi tovarlar (dublikatlar) ro'yxati."""
+    by_name: dict = {}
+    for p in db.query(Product).filter(Product.is_active == True, Product.name.isnot(None)).all():
+        key = (p.name or "").strip().lower()
+        if key:
+            by_name.setdefault(key, []).append(p)
+    duplicate_groups = [prods for prods in by_name.values() if len(prods) > 1]
+    return templates.TemplateResponse("products/check.html", {
+        "request": request,
+        "current_user": current_user,
+        "page_title": "Tovarlar tekshiruvi",
+        "duplicate_groups": duplicate_groups,
+    })
+
+
 @router.get("/import")
 async def products_import_get(current_user: User = Depends(require_auth)):
     return RedirectResponse(url="/products", status_code=303)
@@ -235,6 +256,7 @@ async def products_list(
         "import_updated": updated,
         "import_error": import_error,
         "import_detail": import_detail,
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 

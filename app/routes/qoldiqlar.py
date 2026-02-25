@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.core import templates
+from app.utils.user_scope import get_warehouses_for_user
 from app.models.database import (
     get_db,
     User,
@@ -41,7 +42,7 @@ async def qoldiqlar_page(
 ):
     """Qoldiqlar sahifasi: kassa, tovar (forma spiska 1C), kontragent qoldiqlarini kiritish"""
     cash_registers = db.query(CashRegister).filter(CashRegister.is_active == True).all()
-    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
+    warehouses = get_warehouses_for_user(db, current_user)
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
     stocks = db.query(Stock).join(Warehouse).join(Product).order_by(Stock.updated_at.desc()).limit(300).all()
     partners = db.query(Partner).filter(Partner.is_active == True).order_by(Partner.name).all()
@@ -75,6 +76,7 @@ async def qoldiqlar_page(
         "kontragent_docs": kontragent_docs,
         "current_user": current_user,
         "page_title": "Qoldiqlar",
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 
@@ -490,6 +492,7 @@ async def qoldiqlar_tovar_hujjat_list(
         "docs": docs,
         "current_user": current_user,
         "page_title": "Tovar qoldiqlari hujjatlari",
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 
@@ -500,7 +503,7 @@ async def qoldiqlar_tovar_hujjat_new(
     current_user: User = Depends(require_auth),
 ):
     """Yangi tovar qoldiq hujjati (qoralama)"""
-    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
+    warehouses = get_warehouses_for_user(db, current_user)
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
     return templates.TemplateResponse("qoldiqlar/hujjat_form.html", {
         "request": request,
@@ -509,6 +512,7 @@ async def qoldiqlar_tovar_hujjat_new(
         "products": products,
         "current_user": current_user,
         "page_title": "Tovar qoldiqlari — yangi hujjat",
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 
@@ -693,7 +697,7 @@ async def qoldiqlar_tovar_hujjat_view(
     doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
-    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
+    warehouses = get_warehouses_for_user(db, current_user)
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
     return templates.TemplateResponse("qoldiqlar/hujjat_form.html", {
         "request": request,
@@ -702,6 +706,7 @@ async def qoldiqlar_tovar_hujjat_view(
         "products": products,
         "current_user": current_user,
         "page_title": f"Tovar qoldiqlari {doc.number}",
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 

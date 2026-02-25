@@ -32,11 +32,22 @@
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 {% endif %}
+{% if request.query_params.get('fix_dates') %}
+<div class="alert alert-success alert-dismissible fade show py-2 small">
+    <i class="bi bi-calendar-check"></i> {{ request.query_params.get('fix_dates') }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
 <div class="container-fluid production-orders-wrap">
 <div class="d-flex justify-content-between align-items-center mb-2">
     <h4 class="mb-0"><i class="bi bi-clipboard-check"></i> Ishlab chiqarish buyurtmalari</h4>
     <div class="d-flex gap-2">
+        {% if current_user and (current_user.role or '')|lower in ['admin', 'rahbar', 'raxbar'] %}
         <a href="/production/by-operator" class="btn btn-outline-primary btn-sm"><i class="bi bi-person-badge"></i> Operator bo'yicha</a>
+        <form method="post" action="/production/orders/fix-dates-from-numbers" class="d-inline" onsubmit="return confirm('Barcha ishlab chiqarish hujjatlarida sana hujjat raqamidan (PR-YYYYMMDD) o\'rnatiladi. Davom etasizmi?');">
+            <button type="submit" class="btn btn-outline-secondary btn-sm" title="Tasdiqni bekor qilib qayta tasdiqlaganda sana o'zgargan hujjatlar uchun"><i class="bi bi-calendar-event"></i> Sanani hujjat raqamidan tuzatish</button>
+        </form>
+        {% endif %}
         <a href="/production/new" class="btn btn-success"><i class="bi bi-plus-circle"></i> Yaratish</a>
     </div>
 </div>
@@ -49,6 +60,15 @@
             <input type="date" name="date_from" class="form-control form-control-sm" style="width: auto;" value="{{ filter_date_from or '' }}" title="Dan">
             <span class="small text-muted">—</span>
             <input type="date" name="date_to" class="form-control form-control-sm" style="width: auto;" value="{{ filter_date_to or '' }}" title="Gacha">
+            {% if current_user and (current_user.role or '')|lower in ['admin', 'rahbar', 'raxbar'] %}
+            <label class="form-label mb-0 small text-muted ms-2">Operator:</label>
+            <select name="operator_id" class="form-select form-select-sm" style="width: auto; max-width: 220px;" onchange="this.form.submit()">
+                <option value="">— Barchasi —</option>
+                {% for emp in employees %}
+                <option value="{{ emp.id }}" {% if filter_operator_id == emp.id %}selected{% endif %}>{{ emp.full_name }}</option>
+                {% endfor %}
+            </select>
+            {% endif %}
             <span class="small text-muted ms-2">Qidiruv:</span>
             <input type="text" name="q" class="form-control form-control-sm" style="width: 140px;" value="{{ filter_q or '' }}" autocomplete="off" placeholder="Raqam, retsept...">
             <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-search"></i> Qidirish</button>
@@ -101,7 +121,7 @@
                     <td>{{ prod.date.strftime('%d.%m.%Y %H:%M') }}</td>
                     <td>
                         {% if prod.recipe %}
-                        <a href="/production/recipes/{{ prod.recipe_id }}">{{ prod.recipe.name }}</a>
+                        <a href="/production/{{ prod.id }}/materials">{{ prod.recipe.name }}</a>
                         {% else %}
                         -
                         {% endif %}

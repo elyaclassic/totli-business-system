@@ -5,58 +5,31 @@ import os
 
 Base = declarative_base()
 
-# Database URL ni environment variable'dan olish yoki default SQLite ishlatish
-# SQL Server uchun: DATABASE_URL=mssql+pyodbc://user:password@server/database?driver=ODBC+Driver+17+for+SQL+Server
-# SQLite uchun: DATABASE_URL=sqlite:///totli_holva.db yoki o'rnatilmasa avtomatik SQLite
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Loyiha ildizidagi baza (qayerdan ishga tushirilmasa ham bir xil fayl)
+_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_db_path = os.path.join(_root, "totli_holva.db")
+DATABASE_URL = f"sqlite:///{_db_path}"
 
-if not DATABASE_URL:
-    # Default: SQLite (loyiha ildizidagi baza)
-    _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    _db_path = os.path.join(_root, "totli_holva.db")
-    DATABASE_URL = f"sqlite:///{_db_path}"
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    pool_pre_ping=True,
+    echo=False,
+)
 
-# SQL Server yoki SQLite ekanligini aniqlash
-_is_sqlite = DATABASE_URL.startswith("sqlite")
-_is_sql_server = "mssql" in DATABASE_URL.lower() or "sqlserver" in DATABASE_URL.lower()
 
-# Engine yaratish
-if _is_sqlite:
-    # SQLite uchun
-    engine = create_engine(
-        DATABASE_URL,
-        connect_args={"check_same_thread": False},
-        pool_pre_ping=True,
-        echo=False,
-    )
-    
-    def _set_sqlite_pragma(conn, _):
-        """Har bir ulanishda SQLite tezligini oshirish uchun PRAGMA."""
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA synchronous=NORMAL")
-        cursor.execute("PRAGMA cache_size=-64000")
-        cursor.execute("PRAGMA temp_store=MEMORY")
-        cursor.close()
-    
-    from sqlalchemy import event
-    event.listen(engine, "connect", _set_sqlite_pragma)
-elif _is_sql_server:
-    # SQL Server uchun
-    engine = create_engine(
-        DATABASE_URL,
-        pool_pre_ping=True,
-        echo=False,
-        pool_size=10,
-        max_overflow=20,
-    )
-else:
-    # Boshqa database'lar (PostgreSQL, MySQL va h.k.)
-    engine = create_engine(
-        DATABASE_URL,
-        pool_pre_ping=True,
-        echo=False,
-    )
+def _set_sqlite_pragma(conn, _):
+    """Har bir ulanishda SQLite tezligini oshirish uchun PRAGMA."""
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA cache_size=-64000")
+    cursor.execute("PRAGMA temp_store=MEMORY")
+    cursor.close()
+
+
+from sqlalchemy import event
+event.listen(engine, "connect", _set_sqlite_pragma)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -136,7 +109,6 @@ class User(Base):
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)   # Ombor
     cash_register_id = Column(Integer, ForeignKey("cash_registers.id"), nullable=True)  # Kassa
     is_active = Column(Boolean, default=True)
-    allowed_sections = Column(Text, nullable=True)  # JSON: ["reports_sales", "reports_stock", "reports_debts", ...] - ruxsat berilgan bo'limlar
     created_at = Column(DateTime, default=datetime.now)
     
     department = relationship("Department", foreign_keys=[department_id], backref="users")
@@ -225,6 +197,24 @@ class ProductPrice(Base):
     price_type = relationship("PriceType", back_populates="product_prices")
 
 
+class ProductPriceHistory(Base):
+    """Narx o'zgarishi hujjati — har bir saqlash avvalgi va yangi narxlarni tarixda qoldiradi"""
+    __tablename__ = "product_price_history"
+    id = Column(Integer, primary_key=True, index=True)
+    doc_number = Column(String(50), unique=True, index=True, nullable=False)  # PN-YYYYMMDD-NNN
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    price_type_id = Column(Integer, ForeignKey("price_types.id"), nullable=True)  # None = umumiy sotuv narxi
+    old_purchase_price = Column(Float, default=0)
+    new_purchase_price = Column(Float, default=0)
+    old_sale_price = Column(Float, default=0)
+    new_sale_price = Column(Float, default=0)
+    changed_at = Column(DateTime, default=datetime.now)
+    changed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    product = relationship("Product", backref="price_history")
+    price_type = relationship("PriceType", backref="price_history")
+    changed_by = relationship("User", backref="price_change_docs")
+
+
 # ==========================================
 # OMBORLAR VA QOLDIQLAR
 # ==========================================
@@ -253,7 +243,6 @@ class Stock(Base):
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"))
     product_id = Column(Integer, ForeignKey("products.id"))
     quantity = Column(Float, default=0)
-    cost_price = Column(Float, default=0)  # Tannarx (so'm) — ombor bo'yicha o'rtacha
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
     warehouse = relationship("Warehouse", back_populates="stocks")
@@ -460,13 +449,10 @@ class Recipe(Base):
     output_quantity = Column(Float, default=1)  # Chiqish miqdori
     description = Column(Text)
     is_active = Column(Boolean, default=True)
-    # Retsept tanlanganda ishlab chiqarish formasida avtomatik to'ldiriladigan omborlar
-    default_warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)  # 1-ombor: xom ashyo
-    default_output_warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)  # 2-ombor: yarim tayyor
+    default_warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)  # Retseptda tanlangan 1-ombor (xom ashyo)
+    default_output_warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)  # Retseptda tanlangan 2-ombor (yarim tayyor)
     
     product = relationship("Product")
-    default_warehouse = relationship("Warehouse", foreign_keys=[default_warehouse_id])
-    default_output_warehouse = relationship("Warehouse", foreign_keys=[default_output_warehouse_id])
     items = relationship("RecipeItem", back_populates="recipe")
     stages = relationship("RecipeStage", back_populates="recipe", order_by="RecipeStage.stage_number", cascade="all, delete-orphan")
 
@@ -516,7 +502,6 @@ class Production(Base):
     operator_id = Column(Integer, ForeignKey("employees.id"), nullable=True)  # Operator (xodim)
     note = Column(Text)
     created_at = Column(DateTime, default=datetime.now)
-    order_id = Column(Integer, ForeignKey("orders.id"), nullable=True)  # Qaysi buyurtma uchun
 
     recipe = relationship("Recipe")
     warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
@@ -526,7 +511,6 @@ class Production(Base):
     output_warehouse = relationship("Warehouse", foreign_keys=[output_warehouse_id])
     production_items = relationship("ProductionItem", back_populates="production", cascade="all, delete-orphan")
     stages = relationship("ProductionStage", back_populates="production", cascade="all, delete-orphan", order_by="ProductionStage.stage_number")
-    order = relationship("Order", foreign_keys=[order_id])
 
 
 class ProductionItem(Base):
@@ -681,14 +665,12 @@ class Order(Base):
     payment_type = Column(String(20), nullable=True)  # naqd, plastik — to'lov turi (POS sotuvlar uchun)
     note = Column(Text)
     created_at = Column(DateTime, default=datetime.now)
-    production_id = Column(Integer, ForeignKey("productions.id"), nullable=True)  # Ishlab chiqarishga bog'lanish
     
     partner = relationship("Partner", back_populates="orders")
     warehouse = relationship("Warehouse")
     items = relationship("OrderItem", back_populates="order")
     price_type = relationship("PriceType")
     user = relationship("User", foreign_keys=[user_id])
-    production = relationship("Production", foreign_keys=[production_id])
 
 
 class OrderItem(Base):
@@ -785,19 +767,6 @@ class Payment(Base):
 # XODIMLAR
 # ==========================================
 
-class PieceworkTask(Base):
-    """Bajariladigan ishlar (bo'lak narxi) — ishga qabulda 'Bo'lak' turida tanlash uchun"""
-    __tablename__ = "piecework_tasks"
-    id = Column(Integer, primary_key=True, index=True)
-    code = Column(String(50), unique=True, index=True, nullable=True)
-    name = Column(String(200), nullable=True)
-    price_per_unit = Column(Float, default=0)
-    unit_name = Column(String(50), nullable=True)
-    description = Column(Text, nullable=True)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.now)
-
-
 class Employee(Base):
     """Xodimlar"""
     __tablename__ = "employees"
@@ -813,28 +782,12 @@ class Employee(Base):
     hire_date = Column(Date)
     birth_date = Column(Date, nullable=True)  # Tug'ilgan kun (bosh sahifa bildirishnomalari uchun)
     salary = Column(Float, default=0)
-    salary_type = Column(String(50), nullable=True)  # oylik, soatlik, bo'lak (migratsiya orqali qo'shilgan)
-    days_off_per_month = Column(Integer, default=0)  # Oy ichida dam olish kuni (oylik + tabel: ish kuni = 30 - bu)
-    work_hours_per_day = Column(Float, default=10)   # Kunlik ish soati (masalan 8:00–18:00 = 10)
-    piecework_task_id = Column(Integer, ForeignKey("piecework_tasks.id"), nullable=True)  # Bo'lak turida qaysi ish
     is_active = Column(Boolean, default=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     hikvision_id = Column(String(50))  # Hikvision tizimidagi ID
     created_at = Column(DateTime, default=datetime.now)
 
     salaries = relationship("Salary", back_populates="employee")
-    piecework_task = relationship("PieceworkTask", foreign_keys=[piecework_task_id])
-
-
-class SalaryDoc(Base):
-    """Oylik hujjati (yil, oy bo'yicha bitta hujjat)"""
-    __tablename__ = "salary_docs"
-    id = Column(Integer, primary_key=True, index=True)
-    number = Column(String(30), unique=True, index=True)  # OY-2026-02
-    year = Column(Integer, nullable=False)
-    month = Column(Integer, nullable=False)
-    status = Column(String(20), default="draft")  # draft, confirmed, cancelled
-    created_at = Column(DateTime, default=datetime.now)
 
 
 class Salary(Base):
@@ -915,9 +868,6 @@ class EmploymentDoc(Base):
     position = Column(String(100), nullable=True)
     department = Column(String(100), nullable=True)
     salary = Column(Float, default=0)
-    salary_type = Column(String(50), nullable=True)   # oylik, soatlik, bo'lak
-    days_off_per_month = Column(Integer, default=0)   # Oy ichida dam olish kuni (oylik hisobda: ish kuni = 30 - bu)
-    work_hours_per_day = Column(Float, default=10)    # Kunlik ish soati (masalan 8:00–18:00 = 10)
     note = Column(String(500), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     confirmed_at = Column(DateTime, nullable=True)   # Tasdiqlangan vaqti
@@ -1182,16 +1132,30 @@ class Notification(Base):
     expires_at = Column(DateTime, nullable=True)
 
 
+def ensure_recipe_warehouse_columns():
+    """recipes jadvaliga default_warehouse_id va default_output_warehouse_id qo'shadi (mavjud bo'lsa o'tkazib yuboriladi)."""
+    from sqlalchemy import text
+    try:
+        with engine.begin() as conn:
+            r = conn.execute(text("PRAGMA table_info(recipes)"))
+            cols = [row[1] for row in r]
+            if "default_warehouse_id" not in cols:
+                conn.execute(text("ALTER TABLE recipes ADD COLUMN default_warehouse_id INTEGER REFERENCES warehouses(id)"))
+            if "default_output_warehouse_id" not in cols:
+                conn.execute(text("ALTER TABLE recipes ADD COLUMN default_output_warehouse_id INTEGER REFERENCES warehouses(id)"))
+    except Exception as e:
+        print(f"ensure_recipe_warehouse_columns: {e}")
+
+
 # Bazani yaratish — faqat jadvallar yaratiladi, mavjud ma'lumotlar o'chirilmaydi (saqlanadi)
 def init_db():
     Base.metadata.create_all(bind=engine)
+    ensure_recipe_warehouse_columns()
     print("Database tayyor (mavjud ma'lumotlar saqlanadi).")
 
 
 def ensure_attendance_advance_tables():
-    """Davomat, tabel hujjati va avans jadvalarini yaratadi (faqat SQLite); SQL Server uchun migration ishlatiladi."""
-    if not _is_sqlite:
-        return  # SQL Server yoki boshqa database'lar uchun migration ishlatiladi
+    """Davomat, tabel hujjati va avans jadvalarini yaratadi (SQLite); salaries.advance_deduction qo'shadi."""
     from sqlalchemy import text
     with engine.begin() as conn:
         conn.execute(text("""
@@ -1228,14 +1192,8 @@ def ensure_attendance_advance_tables():
                 created_at DATETIME
             )
         """))
-        # SQLite uchun PRAGMA, SQL Server uchun INFORMATION_SCHEMA
-        if _is_sqlite:
-            r = conn.execute(text("PRAGMA table_info(salaries)"))
-            cols = [row[1] for row in r]
-        else:
-            # SQL Server uchun
-            r = conn.execute(text("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'salaries'"))
-            cols = [row[0] for row in r]
+        r = conn.execute(text("PRAGMA table_info(salaries)"))
+        cols = [row[1] for row in r]
         if "advance_deduction" not in cols:
             conn.execute(text("ALTER TABLE salaries ADD COLUMN advance_deduction FLOAT"))
         conn.execute(text("""
@@ -1254,187 +1212,10 @@ def ensure_attendance_advance_tables():
                 created_at DATETIME
             )
         """))
-        # SQLite uchun PRAGMA, SQL Server uchun INFORMATION_SCHEMA
-        if _is_sqlite:
-            r = conn.execute(text("PRAGMA table_info(employment_docs)"))
-            ed_cols = [row[1] for row in r]
-        else:
-            r = conn.execute(text("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'employment_docs'"))
-            ed_cols = [row[0] for row in r]
+        r = conn.execute(text("PRAGMA table_info(employment_docs)"))
+        ed_cols = [row[1] for row in r]
         if "confirmed_at" not in ed_cols:
             conn.execute(text("ALTER TABLE employment_docs ADD COLUMN confirmed_at DATETIME"))
-        if "salary_type" not in ed_cols:
-            conn.execute(text("ALTER TABLE employment_docs ADD COLUMN salary_type VARCHAR(50)"))
-        if "days_off_per_month" not in ed_cols:
-            conn.execute(text("ALTER TABLE employment_docs ADD COLUMN days_off_per_month INTEGER DEFAULT 0"))
-        if "work_hours_per_day" not in ed_cols:
-            conn.execute(text("ALTER TABLE employment_docs ADD COLUMN work_hours_per_day FLOAT DEFAULT 10"))
-
-
-def ensure_purchase_expenses():
-    """Purchases jadvaliga total_expenses ustunini va purchase_expenses jadvalini qo'shadi (faqat SQLite); SQL Server uchun migration ishlatiladi."""
-    if not _is_sqlite:
-        return  # SQL Server yoki boshqa database'lar uchun migration ishlatiladi
-    from sqlalchemy import text
-    try:
-        with engine.begin() as conn:
-            # total_expenses ustunini tekshirish va qo'shish
-            if _is_sqlite:
-                r = conn.execute(text("PRAGMA table_info(purchases)"))
-                cols = [row[1] for row in r]
-            else:
-                r = conn.execute(text("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'purchases'"))
-                cols = [row[0] for row in r]
-            if "total_expenses" not in cols:
-                conn.execute(text("ALTER TABLE purchases ADD COLUMN total_expenses REAL DEFAULT 0"))
-                conn.execute(text("UPDATE purchases SET total_expenses = 0 WHERE total_expenses IS NULL"))
-            # purchase_expenses jadvalini yaratish
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS purchase_expenses (
-                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                    purchase_id INTEGER REFERENCES purchases(id),
-                    name VARCHAR(200),
-                    amount REAL,
-                    created_at DATETIME
-                )
-            """))
-    except Exception as e:
-        print(f"[ensure_purchase_expenses] Xatolik: {e}")
-
-
-def ensure_order_production_columns():
-    """Orders va Productions jadvallariga order_id va production_id ustunlarini qo'shadi (faqat SQLite); SQL Server uchun migration ishlatiladi."""
-    if not _is_sqlite:
-        return  # SQL Server yoki boshqa database'lar uchun migration ishlatiladi
-    from sqlalchemy import text
-    try:
-        with engine.begin() as conn:
-            # Orders jadvaliga production_id ustunini qo'shish
-            if _is_sqlite:
-                r = conn.execute(text("PRAGMA table_info(orders)"))
-                order_cols = [row[1] for row in r]
-            else:
-                r = conn.execute(text("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'orders'"))
-                order_cols = [row[0] for row in r]
-            if "production_id" not in order_cols:
-                conn.execute(text("ALTER TABLE orders ADD COLUMN production_id INTEGER REFERENCES productions(id)"))
-            
-            # Productions jadvaliga order_id ustunini qo'shish
-            if _is_sqlite:
-                r = conn.execute(text("PRAGMA table_info(productions)"))
-                prod_cols = [row[1] for row in r]
-            else:
-                r = conn.execute(text("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'productions'"))
-                prod_cols = [row[0] for row in r]
-            if "order_id" not in prod_cols:
-                conn.execute(text("ALTER TABLE productions ADD COLUMN order_id INTEGER REFERENCES orders(id)"))
-    except Exception as e:
-        print(f"[ensure_order_production_columns] Xatolik: {e}")
-
-
-def ensure_recipe_warehouse_columns():
-    """Recipes jadvaliga default_warehouse_id va default_output_warehouse_id ustunlarini qo'shadi (SQLite)."""
-    if not _is_sqlite:
-        return
-    from sqlalchemy import text
-    try:
-        with engine.begin() as conn:
-            r = conn.execute(text("PRAGMA table_info(recipes)"))
-            cols = [row[1] for row in r]
-            if "default_warehouse_id" not in cols:
-                conn.execute(text("ALTER TABLE recipes ADD COLUMN default_warehouse_id INTEGER REFERENCES warehouses(id)"))
-            if "default_output_warehouse_id" not in cols:
-                conn.execute(text("ALTER TABLE recipes ADD COLUMN default_output_warehouse_id INTEGER REFERENCES warehouses(id)"))
-    except Exception as e:
-        print(f"[ensure_recipe_warehouse_columns] Xatolik: {e}")
-
-
-def ensure_user_allowed_sections_column():
-    """Users jadvaliga allowed_sections ustunini qo'shadi (SQLite)."""
-    if not _is_sqlite:
-        return
-    from sqlalchemy import text
-    try:
-        with engine.begin() as conn:
-            r = conn.execute(text("PRAGMA table_info(users)"))
-            cols = [row[1] for row in r]
-            if "allowed_sections" not in cols:
-                conn.execute(text("ALTER TABLE users ADD COLUMN allowed_sections TEXT"))
-    except Exception as e:
-        print(f"[ensure_user_allowed_sections_column] Xatolik: {e}")
-
-
-def ensure_stock_cost_column():
-    """Stocks jadvaliga cost_price ustunini qo'shadi (SQLite) — ombor bo'yicha tannarx."""
-    if not _is_sqlite:
-        return
-    from sqlalchemy import text
-    try:
-        with engine.begin() as conn:
-            r = conn.execute(text("PRAGMA table_info(stocks)"))
-            cols = [row[1] for row in r]
-            if "cost_price" not in cols:
-                conn.execute(text("ALTER TABLE stocks ADD COLUMN cost_price REAL DEFAULT 0"))
-    except Exception as e:
-        print(f"[ensure_stock_cost_column] Xatolik: {e}")
-
-
-def ensure_employee_salary_columns():
-    """Employees jadvaliga salary_type, piecework_task_id va piecework_tasks jadvalini qo'shadi (SQLite)."""
-    if not _is_sqlite:
-        return
-    from sqlalchemy import text
-    try:
-        with engine.begin() as conn:
-            # piecework_tasks jadvali (piecework_task_id FK uchun)
-            r = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='piecework_tasks'"))
-            if r.fetchone() is None:
-                conn.execute(text("""
-                    CREATE TABLE piecework_tasks (
-                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                        code VARCHAR(50),
-                        name VARCHAR(200),
-                        price_per_unit FLOAT DEFAULT 0,
-                        unit_name VARCHAR(50),
-                        description TEXT,
-                        is_active INTEGER DEFAULT 1,
-                        created_at DATETIME
-                    )
-                """))
-            # employees ustunlari
-            r = conn.execute(text("PRAGMA table_info(employees)"))
-            cols = [row[1] for row in r]
-            if "salary_type" not in cols:
-                conn.execute(text("ALTER TABLE employees ADD COLUMN salary_type VARCHAR(50)"))
-            if "piecework_task_id" not in cols:
-                conn.execute(text("ALTER TABLE employees ADD COLUMN piecework_task_id INTEGER REFERENCES piecework_tasks(id)"))
-            if "days_off_per_month" not in cols:
-                conn.execute(text("ALTER TABLE employees ADD COLUMN days_off_per_month INTEGER DEFAULT 0"))
-            if "work_hours_per_day" not in cols:
-                conn.execute(text("ALTER TABLE employees ADD COLUMN work_hours_per_day FLOAT DEFAULT 10"))
-    except Exception as e:
-        print(f"[ensure_employee_salary_columns] Xatolik: {e}")
-
-
-def ensure_salary_docs_table():
-    """salary_docs jadvalini yaratadi (SQLite)."""
-    if not _is_sqlite:
-        return
-    from sqlalchemy import text
-    try:
-        with engine.begin() as conn:
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS salary_docs (
-                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                    number VARCHAR(30) UNIQUE,
-                    year INTEGER NOT NULL,
-                    month INTEGER NOT NULL,
-                    status VARCHAR(20) DEFAULT 'draft',
-                    created_at DATETIME
-                )
-            """))
-    except Exception as e:
-        print(f"[ensure_salary_docs_table] Xatolik: {e}")
 
 
 if __name__ == "__main__":

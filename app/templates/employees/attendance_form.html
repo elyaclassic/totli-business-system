@@ -186,6 +186,7 @@
 <script>
 (function() {
     var btn = document.getElementById('toggleHikvisionPassword');
+<<<<<<< Current (Your changes)
     if (btn) {
         var inp = document.getElementById('hikvisionPassword');
         var icon = document.getElementById('hikvisionPasswordIcon');
@@ -304,6 +305,25 @@
             autoSyncTimer = setInterval(runAutoSync, mins * 60 * 1000);
         });
     }
+=======
+    if (!btn) return;
+    var inp = document.getElementById('hikvisionPassword');
+    var icon = document.getElementById('hikvisionPasswordIcon');
+    if (!inp || !icon) return;
+    btn.addEventListener('click', function() {
+        if (inp.type === 'password') {
+            inp.type = 'text';
+            icon.classList.remove('bi-eye');
+            icon.classList.add('bi-eye-slash');
+            btn.title = 'Parolni yashirish';
+        } else {
+            inp.type = 'password';
+            icon.classList.remove('bi-eye-slash');
+            icon.classList.add('bi-eye');
+            btn.title = 'Parolni ko\'rsatish';
+        }
+    });
+>>>>>>> Incoming (Background Agent changes)
 })();
 </script>
 {% endblock %}

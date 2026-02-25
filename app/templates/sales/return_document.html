@@ -23,23 +23,18 @@
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="mb-0"><i class="bi bi-file-earmark-text"></i> Qaytarish hujjati {{ doc.number }}</h4>
         <div>
-            {% if doc.status == 'completed' and current_user and current_user.role == 'admin' %}
+            {% if doc.status == 'completed' %}
             <form method="post" action="/sales/return/revert/{{ doc.id }}" class="d-inline me-2" onsubmit="return confirm('Tasdiqni bekor qilsangiz, omborga qo\'shilgan qoldiq olib tashlanadi. Davom etasizmi?');">
-                <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
                 <button type="submit" class="btn btn-warning"><i class="bi bi-x-circle me-1"></i>Tasdiqni bekor qilish</button>
             </form>
-            {% elif doc.status == 'cancelled' %}
-            {% if current_user and current_user.role == 'admin' %}
+            {% else %}
             <a href="/sales/return/edit/{{ doc.id }}" class="btn btn-outline-primary me-2"><i class="bi bi-pencil me-1"></i>Tahrirlash</a>
             <form method="post" action="/sales/return/confirm/{{ doc.id }}" class="d-inline me-2" onsubmit="return confirm('Qayta tasdiqlasangiz, qoldiq omborga qo\'shiladi. Davom etasizmi?');">
-                <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
                 <button type="submit" class="btn btn-success"><i class="bi bi-check2-circle me-1"></i>Qayta tasdiqlash</button>
             </form>
-            <form method="post" action="/sales/return/delete/{{ doc.id }}" class="d-inline me-2" onsubmit="return confirm('Ushbu bekor qilingan qaytarish hujjatini o\'chirishni xohlaysizmi?');">
-                <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
+            <form method="post" action="/sales/return/delete/{{ doc.id }}" class="d-inline me-2" onsubmit="return confirm('Hujjatni o\'chirishni xohlaysizmi?');">
                 <button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash me-1"></i>O'chirish</button>
             </form>
-            {% endif %}
             {% endif %}
             <button type="button" class="btn btn-outline-secondary me-2" onclick="window.print();"><i class="bi bi-printer"></i> Chop etish</button>
             <a href="/sales/returns" class="btn btn-outline-primary"><i class="bi bi-arrow-left"></i> Savdodan qaytarish</a>
@@ -66,22 +61,18 @@
                             <th>Miqdor</th>
                             <th>Narx</th>
                             <th>Summa</th>
-                            {% if doc.warehouse_id %}<th class="text-center">Tarix</th>{% endif %}
                         </tr>
                     </thead>
                     <tbody>
                         {% for item in doc.items %}
+                        {% set _uc = (item.product.unit.code or '')|lower if (item.product and item.product.unit) else '' %}
+                        {% set _is_dona = _uc in ['dona', 'pc', 'pcs', 'ta', 'шт'] %}
                         <tr>
                             <td>{{ loop.index }}</td>
                             <td>{{ item.product.name if item.product else '-' }}</td>
-                            <td>{{ "{:,.3f}".format(item.quantity or 0) }}</td>
+                            <td>{{ "{:,.0f}".format((item.quantity or 0)|round(0)|int) if _is_dona else "{:,.3f}".format(item.quantity or 0) }}</td>
                             <td>{{ "{:,.0f}".format(item.price or 0) }} so'm</td>
                             <td>{{ "{:,.0f}".format(item.total or 0) }} so'm</td>
-                            {% if doc.warehouse_id %}
-                            <td class="text-center">
-                                <a href="/reports/stock/source?warehouse_id={{ doc.warehouse_id }}&product_id={{ item.product_id }}" class="btn btn-sm btn-outline-info" title="Harakat tarixi"><i class="bi bi-clock-history"></i></a>
-                            </td>
-                            {% endif %}
                         </tr>
                         {% else %}
                         <tr><td colspan="5" class="text-muted text-center py-3">Hujjatda mahsulot yo'q.</td></tr>

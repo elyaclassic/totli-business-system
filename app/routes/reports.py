@@ -12,7 +12,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 
 from app.core import templates
-from app.models.database import get_db, Order, Stock, StockMovement, Product, Partner, Warehouse, User, Production, Recipe, StockAdjustmentDoc, StockAdjustmentDocItem, Employee
+from app.models.database import get_db, Order, Stock, StockMovement, Product, Partner, Warehouse, User, Production, Recipe, StockAdjustmentDoc, StockAdjustmentDocItem, Employee, Purchase, WarehouseTransfer
 from app.deps import get_current_user, require_auth, require_admin
 from app.utils.user_scope import get_warehouses_for_user
 
@@ -228,7 +228,7 @@ def _document_url(doc_type: str, doc_id: int) -> str:
     if doc_type == "Purchase":
         return f"/purchases/edit/{doc_id}"
     if doc_type == "Production":
-        return f"/production/orders"
+        return f"/production/{doc_id}/materials"
     if doc_type == "WarehouseTransfer":
         return f"/warehouse/transfers/{doc_id}"
     if doc_type == "StockAdjustmentDoc":
@@ -295,10 +295,51 @@ async def report_stock_source(
             "document_type": m.document_type or "",
             "document_type_label": _document_type_label(m.document_type or ""),
             "document_number": m.document_number or f"{m.document_type}-{m.document_id}",
+            "document_id": m.document_id,
             "document_url": _document_url(m.document_type or "", m.document_id),
             "quantity_change": float(m.quantity_change or 0),
             "quantity_after": float(m.quantity_after or 0),
         })
+    # Barcha hujjat turlarida sana — hujjat sanasi (harakat yozilgan vaqt emas), barcha mahsulotlar uchun bir xil
+    purchase_ids = [r["document_id"] for r in rows if (r.get("document_type") or "") == "Purchase" and r.get("document_id")]
+    sale_ids = [r["document_id"] for r in rows if (r.get("document_type") or "") in ("Sale", "SaleReturn", "SaleReturnRevert") and r.get("document_id")]
+    transfer_ids = [r["document_id"] for r in rows if (r.get("document_type") or "") == "WarehouseTransfer" and r.get("document_id")]
+    purchases_by_id = {p.id: p for p in db.query(Purchase).filter(Purchase.id.in_(purchase_ids)).all()} if purchase_ids else {}
+    orders_by_id = {o.id: o for o in db.query(Order).filter(Order.id.in_(sale_ids)).all()} if sale_ids else {}
+    transfers_by_id = {t.id: t for t in db.query(WarehouseTransfer).filter(WarehouseTransfer.id.in_(transfer_ids)).all()} if transfer_ids else {}
+    for r in rows:
+        doc_type = r.get("document_type") or ""
+        doc_id = r.get("document_id")
+        if doc_type == "Purchase" and doc_id and doc_id in purchases_by_id and purchases_by_id[doc_id].date:
+            r["date"] = purchases_by_id[doc_id].date.strftime("%d.%m.%Y %H:%M")
+        elif doc_type in ("Sale", "SaleReturn", "SaleReturnRevert") and doc_id and doc_id in orders_by_id and orders_by_id[doc_id].date:
+            r["date"] = orders_by_id[doc_id].date.strftime("%d.%m.%Y %H:%M")
+        elif doc_type == "WarehouseTransfer" and doc_id and doc_id in transfers_by_id and transfers_by_id[doc_id].date:
+            r["date"] = transfers_by_id[doc_id].date.strftime("%d.%m.%Y %H:%M")
+    # Ishlab chiqarish qatorlari uchun: hujjat sanasi va hujjatda ko'rsatilgan miqdor bilan harakatdagi miqdorni solishtirish (farq bo'lsa ogohlantirish)
+    from sqlalchemy.orm import joinedload
+    from app.utils.production_order import production_output_quantity_for_stock
+    prod_ids = [r["document_id"] for r in rows if (r.get("document_type") or "") == "Production" and r.get("document_id")]
+    productions_by_id = {}
+    if prod_ids:
+        for p in db.query(Production).options(joinedload(Production.recipe)).filter(Production.id.in_(prod_ids)).all():
+            productions_by_id[p.id] = p
+    for r in rows:
+        if (r.get("document_type") or "") != "Production" or not r.get("document_id"):
+            continue
+        prod = productions_by_id.get(r["document_id"])
+        if not prod:
+            continue
+        # Qoldiq manbai hisobotida sana — hujjat sanasi (Production.date), tasdiqlash vaqtida emas
+        if prod.date:
+            r["date"] = prod.date.strftime("%d.%m.%Y %H:%M")
+        if not prod.recipe:
+            continue
+        expected = production_output_quantity_for_stock(db, prod, prod.recipe)
+        change = r.get("quantity_change") or 0
+        if abs(expected - change) > 0.001:
+            r["quantity_mismatch"] = True
+            r["document_quantity"] = expected
     # Qoldiq (harakatdan keyin) — ketma-ket yig'indi (eng eski harakatdan boshlab), eski yozuvlardagi xatolarni bartaraf etish
     if rows:
         chronological = list(reversed(rows))
@@ -312,12 +353,16 @@ async def report_stock_source(
         Stock.product_id == product_id,
     ).all()
     current_qty = sum(float(s.quantity or 0) for s in current_stock)
+    # Dona mahsulotlar uchun ko'rsatishda butun son (216, 6), boshqalar uchun 3 xona kasr
+    _unit_str = ((getattr(product, "unit", None) and (product.unit.name or "") or "") + " " + (getattr(product, "unit", None) and (product.unit.code or "") or "")).lower()
+    is_dona = product and "dona" in _unit_str
     return templates.TemplateResponse("reports/stock_source.html", {
         "request": request,
         "warehouse": warehouse,
         "product": product,
         "movements": rows,
         "current_qty": current_qty,
+        "is_dona": is_dona,
         "page_title": "Qoldiq manbai",
         "current_user": current_user,
     })
@@ -360,6 +405,19 @@ async def report_stock_recalculate_from_movements(
 ):
     """Stock qoldiqlarini StockMovement tarixidan qayta hisoblash (faqat admin). Eski ikki marta qo'shilgan xatolikni tuzatish uchun."""
     from collections import defaultdict
+    # O'chirilgan ishlab chiqarish hujjatlariga tegishli "orfan" harakatlarni o'chirish (qoldiq to'g'ri tushadi)
+    existing_production_ids = {r[0] for r in db.query(Production.id).all()}
+    orphan_production_movements = db.query(StockMovement).filter(
+        StockMovement.document_type == "Production",
+        StockMovement.document_id.isnot(None),
+    ).all()
+    deleted_orphans = 0
+    for m in orphan_production_movements:
+        if m.document_id not in existing_production_ids:
+            db.delete(m)
+            deleted_orphans += 1
+    if deleted_orphans:
+        db.flush()
     # Tasdiqlangan qoldiq tuzatish hujjatlarini aniqlash (boshqa hujjat turlari hammasi hisobga olinadi)
     adj_ids = db.query(StockMovement.document_id).filter(
         StockMovement.document_type == "StockAdjustmentDoc",
@@ -419,7 +477,10 @@ async def report_stock_recalculate_from_movements(
             created += 1
     db.commit()
     from urllib.parse import quote
-    msg = quote(f"Stock qoldiqlari harakatlar tarixidan qayta hisoblandi: {updated} yangilandi, {created} yangi qator.")
+    msg_parts = [f"Stock qoldiqlari harakatlar tarixidan qayta hisoblandi: {updated} yangilandi, {created} yangi qator."]
+    if deleted_orphans:
+        msg_parts.append(f" O'chirilgan ishlab chiqarish hujjatlariga tegishli {deleted_orphans} ta harakat olib tashlandi.")
+    msg = quote("".join(msg_parts))
     return RedirectResponse(url=f"/reports/stock?recalculated=1&msg={msg}", status_code=303)
 
 

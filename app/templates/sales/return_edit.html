@@ -39,12 +39,16 @@
                         </thead>
                         <tbody>
                             {% for item in doc.items %}
+                            {% set _uc = (item.product.unit.code or '')|lower if (item.product and item.product.unit) else '' %}
+                            {% set _is_dona = _uc in ['dona', 'pc', 'pcs', 'ta', 'шт'] %}
+                            {% set qty_val = (item.quantity or 0)|round(0)|int if _is_dona else (item.quantity or 0) %}
+                            {% set step_attr = "1" if _is_dona else "0.001" %}
                             <tr>
                                 <td>{{ item.product.name if item.product else '-' }}</td>
                                 <td>
                                     <input type="hidden" name="product_id" value="{{ item.product_id }}">
                                     <input type="number" name="quantity" class="form-control form-control-sm" style="width: 100px;"
-                                           min="0" step="0.001" value="{{ item.quantity or 0 }}">
+                                           min="0" step="{{ step_attr }}" value="{{ qty_val }}">
                                 </td>
                                 <td>
                                     <input type="number" name="price" class="form-control form-control-sm" style="width: 120px;"

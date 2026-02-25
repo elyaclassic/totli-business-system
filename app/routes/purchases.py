@@ -24,6 +24,7 @@ from app.models.database import (
 )
 from app.deps import require_auth, require_admin
 from app.utils.notifications import check_low_stock_and_notify
+from app.utils.user_scope import get_warehouses_for_user
 from app.utils.product_price import get_suggested_price
 from fastapi.responses import JSONResponse
 from fastapi import Query
@@ -63,7 +64,7 @@ async def purchase_new(
 ):
     products = db.query(Product).filter(Product.is_active == True).all()
     partners = db.query(Partner).filter(Partner.is_active == True).order_by(Partner.name).all()
-    warehouses = db.query(Warehouse).all()
+    warehouses = get_warehouses_for_user(db, current_user)
     return templates.TemplateResponse("purchases/new.html", {
         "request": request,
         "products": products,

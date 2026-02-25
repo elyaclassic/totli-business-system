@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 
 {% block content %}
-{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role in ('admin', 'rahbar', 'raxbar')) %}
 <div class="container-fluid">
     <div class="row mb-3">
         <div class="col-12">
@@ -113,9 +112,9 @@
                                         <th>#</th>
                                         <th>Mahsulot</th>
                                         <th>Qoldiq</th>
-                                        {% if show_tannarx %}<th>Tannarx</th><th>Summa</th>{% endif %}
+                                        <th>Tannarx</th>
+                                        <th>Summa</th>
                                         <th>Kirim (hujjat)</th>
-                                        <th class="text-center">Tarix</th>
                                         {% if current_user and current_user.role == 'admin' %}<th>Amal</th>{% endif %}
                                     </tr>
                                 </thead>
@@ -131,10 +130,8 @@
                                                 {% endif %}
                                             </td>
                                             <td class="fw-bold">{{ "{:,.3f}".format(stock.quantity) }}</td>
-                                            {% if show_tannarx %}
-                                            <td>{{ "{:,.0f}".format((stock.cost_price if stock.cost_price else (stock.product.purchase_price if stock.product else 0))) }} so'm</td>
-                                            <td class="text-success">{{ "{:,.0f}".format(stock.quantity * (stock.cost_price if stock.cost_price else (stock.product.purchase_price if stock.product else 0))) }} so'm</td>
-                                            {% endif %}
+                                            <td>{{ "{:,.0f}".format(stock.product.purchase_price if stock.product else 0) }} so'm</td>
+                                            <td class="text-success">{{ "{:,.0f}".format(stock.quantity * (stock.product.purchase_price if stock.product else 0)) }} so'm</td>
                                             <td>
                                                 {% if stock_sources and stock.id in stock_sources and stock_sources[stock.id] %}
                                                     {% for num, url, d in stock_sources[stock.id] %}
@@ -143,9 +140,6 @@
                                                 {% else %}
                                                 <span class="text-muted" title="Kirim hujjati yoʻq — Excel yoki boshqa manba orqali kiritilgan">—</span>
                                                 {% endif %}
-                                            </td>
-                                            <td class="text-center">
-                                                <a href="/reports/stock/source?warehouse_id={{ stock.warehouse_id }}&product_id={{ stock.product_id }}" class="btn btn-sm btn-outline-info" title="Harakat tarixi — qayerdan keldi / qayerga ketdi"><i class="bi bi-clock-history"></i></a>
                                             </td>
                                             {% if current_user and current_user.role == 'admin' %}
                                             <td>
@@ -157,7 +151,7 @@
                                         </tr>
                                         {% endfor %}
                                     {% else %}
-                                        <tr><td colspan="{% if show_tannarx %}{% if current_user and current_user.role == 'admin' %}8{% else %}7{% endif %}{% else %}{% if current_user and current_user.role == 'admin' %}6{% else %}5{% endif %}{% endif %}" class="text-center text-muted py-3">Bu omborda hozircha qoldiq yo'q</td></tr>
+                                        <tr><td colspan="{% if current_user and current_user.role == 'admin' %}7{% else %}6{% endif %}" class="text-center text-muted py-3">Bu omborda hozircha qoldiq yo'q</td></tr>
                                     {% endif %}
                                 </tbody>
                             </table>
@@ -196,9 +190,9 @@
                         <th>Tovar</th>
                         <th>Ombor</th>
                         <th>Qoldiq</th>
-                        {% if show_tannarx %}<th>Tannarx</th><th>Summa</th>{% endif %}
+                        <th>Tannarx</th>
+                        <th>Summa</th>
                         <th>Kirim (hujjat)</th>
-                        <th class="text-center">Tarix</th>
                         {% if current_user and current_user.role == 'admin' %}<th>Amal</th>{% endif %}
                     </tr>
                 </thead>
@@ -215,10 +209,8 @@
                             </td>
                             <td>{{ stock.warehouse.name if stock.warehouse else '-' }}</td>
                             <td class="fw-bold">{{ "{:,.3f}".format(stock.quantity) }}</td>
-                            {% if show_tannarx %}
-                            <td>{{ "{:,.0f}".format((stock.cost_price if stock.cost_price else (stock.product.purchase_price if stock.product else 0))) }} so'm</td>
-                            <td class="text-success">{{ "{:,.0f}".format(stock.quantity * (stock.cost_price if stock.cost_price else (stock.product.purchase_price if stock.product else 0))) }} so'm</td>
-                            {% endif %}
+                            <td>{{ "{:,.0f}".format(stock.product.purchase_price if stock.product else 0) }} so'm</td>
+                            <td class="text-success">{{ "{:,.0f}".format(stock.quantity * (stock.product.purchase_price if stock.product else 0)) }} so'm</td>
                             <td>
                                 {% if stock_sources and stock.id in stock_sources and stock_sources[stock.id] %}
                                     {% for num, url, d in stock_sources[stock.id] %}
@@ -227,9 +219,6 @@
                                 {% else %}
                                 <span class="text-muted" title="Kirim hujjati yoʻq — Excel yoki boshqa manba orqali kiritilgan">—</span>
                                 {% endif %}
-                            </td>
-                            <td class="text-center">
-                                <a href="/reports/stock/source?warehouse_id={{ stock.warehouse_id }}&product_id={{ stock.product_id }}" class="btn btn-sm btn-outline-info" title="Harakat tarixi — qayerdan keldi / qayerga ketdi"><i class="bi bi-clock-history"></i></a>
                             </td>
                             {% if current_user and current_user.role == 'admin' %}
                             <td>
@@ -242,7 +231,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="{% if show_tannarx %}{% if current_user and current_user.role == 'admin' %}9{% else %}8{% endif %}{% else %}{% if current_user and current_user.role == 'admin' %}7{% else %}6{% endif %}{% endif %}" class="text-center text-muted py-5">
+                            <td colspan="{% if current_user and current_user.role == 'admin' %}8{% else %}7{% endif %}" class="text-center text-muted py-5">
                                 <i class="bi bi-boxes fs-1 d-block mb-2"></i>
                                 Qoldiqlar topilmadi
                             </td>

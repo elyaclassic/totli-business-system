@@ -16,15 +16,29 @@ from app.deps import get_current_user, require_auth
 router = APIRouter(tags=["home"])
 
 
+# Bosh sahifa faqat admin va rahbar (manager) uchun
+_ROLE_HOME = {
+    "agent": "/dashboard/agent",
+    "driver": "/dashboard/agent",
+    "production": "/production",
+    "qadoqlash": "/production",
+    "sotuvchi": "/sales/pos",
+}
+
+
 @router.get("/", response_class=HTMLResponse)
 async def home(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Bosh sahifa - Dashboard"""
+    """Bosh sahifa - faqat admin va rahbar (manager) ko'radi; boshqalar o'z role sahifasiga yo'naltiriladi."""
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
+    role = (getattr(current_user, "role", None) or "").strip().lower()
+    if role not in ("admin", "manager"):
+        redirect_url = _ROLE_HOME.get(role, "/production/orders")
+        return RedirectResponse(url=redirect_url, status_code=303)
     error = request.query_params.get("error")
     try:
         stats = {

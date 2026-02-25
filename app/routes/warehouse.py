@@ -9,7 +9,7 @@ from urllib.parse import quote, unquote
 import openpyxl
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_, func, text
 
 from app.core import templates
@@ -29,8 +29,14 @@ from app.models.database import (
     WarehouseTransferItem,
 )
 from app.deps import require_auth, require_admin
+from app.utils.user_scope import get_warehouses_for_user
 
 router = APIRouter(prefix="/warehouse", tags=["warehouse"])
+
+
+def _warehouses_for_user(db: Session, user: User):
+    """Foydalanuvchi uchun ko'rinadigan omborlar: sozlamada belgilangan yoki admin/raxbar uchun barcha."""
+    return get_warehouses_for_user(db, user)
 
 
 @router.get("", response_class=HTMLResponse)
@@ -41,8 +47,12 @@ async def warehouse_list(
 ):
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
-    warehouses = db.query(Warehouse).all()
-    stocks = db.query(Stock).join(Product).join(Warehouse).filter(Stock.quantity > 0).all()
+    warehouses = _warehouses_for_user(db, current_user)
+    wh_ids = [w.id for w in warehouses]
+    stocks_q = db.query(Stock).join(Product).join(Warehouse).filter(Stock.quantity > 0)
+    if wh_ids:
+        stocks_q = stocks_q.filter(Stock.warehouse_id.in_(wh_ids))
+    stocks = stocks_q.all()
     stock_sources = {}
     for s in stocks:
         items = []
@@ -131,6 +141,7 @@ async def warehouse_list(
         "purchase_docs": purchase_docs,
         "current_user": current_user,
         "page_title": "Ombor qoldiqlari",
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 
@@ -309,6 +320,10 @@ async def warehouse_transfers_list(
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
     transfers = db.query(WarehouseTransfer).order_by(WarehouseTransfer.date.desc()).limit(200).all()
+    if getattr(current_user, "role", None) == "manager":
+        wh_ids = [w.id for w in _warehouses_for_user(db, current_user)]
+        if wh_ids:
+            transfers = [t for t in transfers if (t.from_warehouse_id in wh_ids or t.to_warehouse_id in wh_ids)]
     error = request.query_params.get("error")
     return templates.TemplateResponse("warehouse/transfers_list.html", {
         "request": request,
@@ -327,7 +342,7 @@ async def warehouse_transfer_new(
 ):
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
-    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
+    warehouses = _warehouses_for_user(db, current_user)
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
     stocks = db.query(Stock).filter(Stock.quantity > 0).all()
     stock_by_warehouse_product = {}
@@ -347,6 +362,7 @@ async def warehouse_transfer_new(
         "stock_by_warehouse_product": stock_by_warehouse_product,
         "now": datetime.now(),
         "page_title": "Ombordan omborga o'tkazish (yaratish)",
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 
@@ -362,7 +378,7 @@ async def warehouse_transfer_edit(
     transfer = db.query(WarehouseTransfer).filter(WarehouseTransfer.id == transfer_id).first()
     if not transfer:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
-    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
+    warehouses = _warehouses_for_user(db, current_user)
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
     stocks = db.query(Stock).filter(Stock.quantity > 0).all()
     stock_by_warehouse_product = {}
@@ -382,6 +398,7 @@ async def warehouse_transfer_edit(
         "stock_by_warehouse_product": stock_by_warehouse_product,
         "now": transfer.date or datetime.now(),
         "page_title": f"O'tkazish {transfer.number}",
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 

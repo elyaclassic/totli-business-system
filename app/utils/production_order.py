@@ -23,6 +23,61 @@ from app.models.database import (
 from app.utils.notifications import create_notification
 
 
+def get_semi_finished_warehouse(db: Session):
+    """Yarim tayyor omborini topish (nomi yoki kodida 'yarim' yoki 'semi' bo'lgan)."""
+    return db.query(Warehouse).filter(
+        func.lower(Warehouse.name).contains("yarim") |
+        func.lower(Warehouse.name).contains("semi") |
+        func.lower(Warehouse.code).contains("yarim") |
+        func.lower(Warehouse.code).contains("semi")
+    ).first()
+
+
+def get_product_stock_in_warehouse(db: Session, warehouse_id: int, product_id: int) -> float:
+    """Berilgan omborda mahsulot qoldig'ini qaytaradi."""
+    stock = db.query(Stock).filter(
+        Stock.warehouse_id == warehouse_id,
+        Stock.product_id == product_id,
+    ).first()
+    return float(stock.quantity if stock else 0.0)
+
+
+def notify_operator_semi_finished_available(
+    db: Session,
+    order_number: str,
+    order_id: int,
+    product_name: str,
+):
+    """
+    Yarim tayyor omborda mahsulot bor ekanini operatorlar (ishlab chiqarish bo'limi) ga bildirish.
+    Ovozli push uchun priority='high' ishlatiladi.
+    """
+    production_department = db.query(Department).filter(
+        func.lower(Department.name).contains("ishlab") |
+        func.lower(Department.name).contains("chiqarish") |
+        func.lower(Department.code).contains("prod")
+    ).first()
+    if production_department:
+        users = db.query(User).filter(
+            User.department_id == production_department.id,
+            User.is_active == True,
+        ).all()
+    else:
+        users = db.query(User).filter(User.is_active == True).limit(10).all()
+    for user in users:
+        create_notification(
+            db=db,
+            title="📦 Yarim tayyor omborda mahsulot bor",
+            message=f"Sotuv {order_number} uchun «{product_name}» yarim tayyor omborda mavjud. Tashlab bering.",
+            notification_type="info",
+            user_id=user.id,
+            priority="high",
+            action_url=f"/sales/edit/{order_id}",
+            related_entity_type="order",
+            related_entity_id=order_id,
+        )
+
+
 def recipe_kg_per_unit(recipe: Optional[Recipe]) -> float:
     """Retsept uchun 1 dona (birlik) ning og'irligi kg da. Nomidan 250gr/400gr/2kg/3kg/4kg/5kg/1kg aniqlanadi, aks holda retseptdagi output_quantity."""
     if not recipe:
@@ -43,6 +98,23 @@ def recipe_kg_per_unit(recipe: Optional[Recipe]) -> float:
     if "1kg" in name or "1 kg" in name:
         return 1.0
     return float(recipe.output_quantity or 1.0)
+
+
+def production_output_quantity_for_stock(db: Session, production, recipe) -> float:
+    """Tayyor mahsulot uchun qoldiq/harakatda yoziladigan miqdor: dona mahsulotda production.quantity, kg mahsulotda production.quantity * recipe_kg_per_unit(recipe)."""
+    if not recipe:
+        return 0.0
+    output_product = db.query(Product).filter(Product.id == recipe.product_id).first()
+    if not output_product:
+        _unit_str = ""
+    else:
+        unit = getattr(output_product, "unit", None)
+        name = (getattr(unit, "name", None) or "") if unit else ""
+        code = (getattr(unit, "code", None) or "") if unit else ""
+        _unit_str = (name + " " + code).lower()
+    if "dona" in _unit_str:
+        return float(production.quantity or 0)
+    return float(production.quantity or 0) * recipe_kg_per_unit(recipe)
 
 
 def check_semi_finished_stock(
@@ -340,3 +412,38 @@ def notify_production_users(
                 action_url=f"/production/orders",
                 related_entity_type="production",
             )
+
+
+def notify_managers_production_ready(db: Session, production) -> None:
+    """
+    Ishlab chiqarish buyurtmasi operator tomonidan yakunlanganda menejerlarga ovozli push (high priority) bildirishnoma.
+    """
+    if not production:
+        return
+    order_number = ""
+    if getattr(production, "order_id", None):
+        order = db.query(Order).filter(Order.id == production.order_id).first()
+        if order:
+            order_number = order.number or ""
+    recipe = db.query(Recipe).filter(Recipe.id == production.recipe_id).first()
+    product_name = "Mahsulot"
+    if recipe and recipe.product_id:
+        p = db.query(Product).filter(Product.id == recipe.product_id).first()
+        if p:
+            product_name = p.name or product_name
+    managers = db.query(User).filter(
+        User.is_active == True,
+        User.role.in_(["manager", "admin"]),
+    ).all()
+    for user in managers:
+        create_notification(
+            db=db,
+            title="✅ Ishlab chiqarish tayyor",
+            message=f"Buyurtma {order_number} uchun «{product_name}» tayyorlandi. Ishlab chiqarish raqami: {production.number}",
+            notification_type="success",
+            user_id=user.id,
+            priority="high",
+            action_url=f"/production/orders",
+            related_entity_type="production",
+            related_entity_id=production.id,
+        )

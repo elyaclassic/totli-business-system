@@ -5,7 +5,7 @@ bo'limlar, yo'nalishlar, foydalanuvchilar, lavozimlar, hududlar, uskunalar.
 import io
 from typing import Optional
 from urllib.parse import quote
-from fastapi import APIRouter, Request, Depends, Form, File, HTTPException, UploadFile
+from fastapi import APIRouter, Request, Depends, Form, File, HTTPException, UploadFile, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 import openpyxl
@@ -20,6 +20,7 @@ from app.models.database import (
     PriceType,
     Product,
     ProductPrice,
+    ProductPriceHistory,
     CashRegister,
     Department,
     Direction,
@@ -27,7 +28,6 @@ from app.models.database import (
     Region,
     Machine,
     Employee,
-    PieceworkTask,
 )
 from app.deps import require_auth, require_admin
 from app.utils.auth import hash_password
@@ -505,22 +505,42 @@ async def info_prices(
             "price_types": [],
             "current_price_type_id": None,
             "product_prices_by_type": {},
+            "product_tannarx": {},
             "current_user": current_user,
             "page_title": "Narxni o'rnatish",
         })
     current_pt_id = price_type_id or (price_types[0].id if price_types else None)
-    products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
+    products = db.query(Product).options(joinedload(Product.unit)).filter(
+        Product.is_active == True
+    ).order_by(Product.name).all()
     product_prices = db.query(ProductPrice).filter(ProductPrice.price_type_id == current_pt_id).all()
     product_prices_by_type = {pp.product_id: pp.sale_price for pp in product_prices}
+    product_tannarx = {p.id: float(p.purchase_price or 0) for p in products}
     return templates.TemplateResponse("info/prices.html", {
         "request": request,
         "products": products,
         "price_types": price_types,
         "current_price_type_id": current_pt_id,
         "product_prices_by_type": product_prices_by_type,
+        "product_tannarx": product_tannarx,
         "current_user": current_user,
         "page_title": "Narxni o'rnatish",
     })
+
+
+def _next_price_history_doc_number(db: Session) -> str:
+    """Narx o'zgarishi hujjati raqami: PN-YYYYMMDD-NNN"""
+    from datetime import datetime
+    prefix = f"PN-{datetime.now().strftime('%Y%m%d')}-"
+    last = db.query(ProductPriceHistory).filter(ProductPriceHistory.doc_number.like(f"{prefix}%")).order_by(ProductPriceHistory.id.desc()).first()
+    if not last or not last.doc_number:
+        num = 1
+    else:
+        try:
+            num = int(last.doc_number.rsplit("-", 1)[-1]) + 1
+        except (ValueError, IndexError):
+            num = 1
+    return f"{prefix}{num:03d}"
 
 
 @router.post("/prices/edit/{product_id}")
@@ -537,21 +557,80 @@ async def info_prices_edit(
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Mahsulot topilmadi")
-    product.purchase_price = purchase_price
+    old_purchase = float(product.purchase_price or 0)
     if price_type_id:
         pp = db.query(ProductPrice).filter(
             ProductPrice.product_id == product_id,
             ProductPrice.price_type_id == price_type_id,
         ).first()
+        old_sale = float(pp.sale_price if pp else 0)
+        product.purchase_price = purchase_price
         if pp:
             pp.sale_price = sale_price
         else:
             db.add(ProductPrice(product_id=product_id, price_type_id=price_type_id, sale_price=sale_price))
     else:
+        old_sale = float(product.sale_price or 0)
+        product.purchase_price = purchase_price
         product.sale_price = sale_price
+    doc_number = _next_price_history_doc_number(db)
+    db.add(ProductPriceHistory(
+        doc_number=doc_number,
+        product_id=product_id,
+        price_type_id=price_type_id,
+        old_purchase_price=old_purchase,
+        new_purchase_price=float(purchase_price or 0),
+        old_sale_price=old_sale,
+        new_sale_price=float(sale_price or 0),
+        changed_by_id=current_user.id,
+    ))
     db.commit()
     redirect_url = f"/info/prices?price_type_id={price_type_id}" if price_type_id else "/info/prices"
     return RedirectResponse(url=redirect_url, status_code=303)
+
+
+@router.get("/prices/history", response_class=HTMLResponse)
+async def info_prices_history(
+    request: Request,
+    product_id: Optional[str] = Query(None, description="Mahsulot ID (bo'sh = barchasi)"),
+    price_type_id: Optional[str] = Query(None, description="Narx turi ID (bo'sh = barchasi)"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Narx o'zgarishlari tarixi — hujjatlar ro'yxati (avvalgi va yangi narx)."""
+    from sqlalchemy.orm import joinedload
+    pid = None
+    ptid = None
+    if product_id and str(product_id).strip():
+        try:
+            pid = int(product_id)
+        except (ValueError, TypeError):
+            pass
+    if price_type_id and str(price_type_id).strip():
+        try:
+            ptid = int(price_type_id)
+        except (ValueError, TypeError):
+            pass
+    q = db.query(ProductPriceHistory).options(
+        joinedload(ProductPriceHistory.product),
+        joinedload(ProductPriceHistory.price_type),
+        joinedload(ProductPriceHistory.changed_by),
+    ).order_by(ProductPriceHistory.changed_at.desc())
+    if pid is not None:
+        q = q.filter(ProductPriceHistory.product_id == pid)
+    if ptid is not None:
+        q = q.filter(ProductPriceHistory.price_type_id == ptid)
+    history = q.limit(500).all()
+    price_types = db.query(PriceType).filter(PriceType.is_active == True).order_by(PriceType.name).all()
+    products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
+    return templates.TemplateResponse("info/price_history.html", {
+        "request": request,
+        "history": history,
+        "price_types": price_types,
+        "products": products,
+        "current_user": current_user,
+        "page_title": "Narx o'zgarishlari tarixi",
+    })
 
 
 # ---------- Cash ----------
@@ -605,75 +684,6 @@ async def info_cash_edit(
     cash.department_id = department_id if department_id else None
     db.commit()
     return RedirectResponse(url="/info/cash", status_code=303)
-
-
-@router.post("/cash/recalculate/{cash_id}")
-async def info_cash_recalculate(
-    cash_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
-    """Kassa balansini Payment yozuvlaridan qayta hisoblash (faqat admin) - boshlang'ich balansni saqlab qoladi"""
-    from app.models.database import Payment, CashBalanceDoc, CashBalanceDocItem
-    from sqlalchemy import func
-    
-    cash = db.query(CashRegister).filter(CashRegister.id == cash_id).first()
-    if not cash:
-        raise HTTPException(status_code=404, detail="Kassa topilmadi")
-    
-    # Hozirgi balansni saqlab qolish (boshlang'ich balans sifatida)
-    current_balance = float(cash.balance or 0)
-    
-    # Payment yozuvlaridan jami kirim va chiqimni hisoblash
-    total_income = db.query(func.coalesce(func.sum(Payment.amount), 0)).filter(
-        Payment.cash_register_id == cash_id,
-        Payment.type == "income"
-    ).scalar() or 0
-    
-    total_expense = db.query(func.coalesce(func.sum(Payment.amount), 0)).filter(
-        Payment.cash_register_id == cash_id,
-        Payment.type == "expense"
-    ).scalar() or 0
-    
-    # Payment yozuvlaridan o'zgarishlar
-    payment_change = float(total_income) - float(total_expense)
-    
-    # CashBalanceDoc yozuvlaridan eng eski tasdiqlangan hujjatdan boshlang'ich balansni topish
-    oldest_confirmed_doc_item = (
-        db.query(CashBalanceDocItem)
-        .join(CashBalanceDoc, CashBalanceDocItem.doc_id == CashBalanceDoc.id)
-        .filter(
-            CashBalanceDocItem.cash_register_id == cash_id,
-            CashBalanceDoc.status == "confirmed"
-        )
-        .order_by(CashBalanceDoc.created_at.asc())
-        .first()
-    )
-    
-    if oldest_confirmed_doc_item and oldest_confirmed_doc_item.previous_balance is not None:
-        # Eng eski tasdiqlangan hujjatdan oldingi balansni boshlang'ich balans sifatida olish
-        initial_balance = float(oldest_confirmed_doc_item.previous_balance)
-        # Boshlang'ich balans + Payment yozuvlaridan o'zgarishlar
-        calculated_balance = initial_balance + payment_change
-    else:
-        # Agar tasdiqlangan hujjat bo'lmasa, hozirgi balansni boshlang'ich balans sifatida ishlatish
-        # Lekin bu muammo bo'lishi mumkin, chunki balans allaqachon o'zgargan bo'lishi mumkin
-        # Shuning uchun Payment yozuvlaridan hisoblashni davom ettiramiz
-        # Agar Payment yozuvlari bo'lmasa, hozirgi balansni saqlab qolish
-        if payment_change == 0:
-            # Payment yozuvlari yo'q, hozirgi balansni saqlab qolish
-            calculated_balance = current_balance
-        else:
-            # Payment yozuvlaridan hisoblash
-            # Lekin bu noto'g'ri bo'lishi mumkin, chunki boshlang'ich balansni bilmaymiz
-            # Shuning uchun hozirgi balansni saqlab qolish va Payment yozuvlaridan o'zgarishlarni qo'shish
-            calculated_balance = current_balance + payment_change
-    
-    # Balansni yangilash
-    cash.balance = calculated_balance
-    db.commit()
-    
-    return RedirectResponse(url=f"/info/cash?recalculated=1&balance={calculated_balance}", status_code=303)
 
 
 @router.post("/cash/delete/{cash_id}")
@@ -949,8 +959,6 @@ async def info_users(
     departments = db.query(Department).filter(Department.is_active == True).order_by(Department.name).all()
     warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
     cash_registers = db.query(CashRegister).filter(CashRegister.is_active == True).order_by(CashRegister.name).all()
-    employees = db.query(Employee).order_by(Employee.full_name).all()
-    user_to_employee = {e.user_id: e for e in employees if getattr(e, "user_id", None)}
     error = request.query_params.get("error", "").strip()
     return templates.TemplateResponse("info/users.html", {
         "request": request,
@@ -958,8 +966,6 @@ async def info_users(
         "departments": departments,
         "warehouses": warehouses,
         "cash_registers": cash_registers,
-        "employees": employees,
-        "user_to_employee": user_to_employee,
         "current_user": current_user,
         "page_title": "Foydalanuvchilar",
         "error": error,
@@ -986,18 +992,13 @@ async def info_users_add(
     full_name: str = Form(...),
     role: str = Form("user"),
     is_active: bool = Form(True),
-    employee_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    import json
     form = await request.form()
     department_ids = _parse_id_list(form.getlist("department_ids"))
     warehouse_ids = _parse_id_list(form.getlist("warehouse_ids"))
     cash_register_ids = _parse_id_list(form.getlist("cash_register_ids"))
-    # Ruxsatlar: allowed_sections - JSON array
-    allowed_sections_list = form.getlist("allowed_sections")
-    allowed_sections_json = json.dumps(allowed_sections_list) if allowed_sections_list else None
     existing = db.query(User).filter(User.username == username).first()
     if existing:
         msg = quote(f"'{username}' login bilan foydalanuvchi allaqachon mavjud! Boshqa login tanlang.")
@@ -1011,14 +1012,9 @@ async def info_users_add(
         department_id=department_ids[0] if department_ids else None,
         warehouse_id=warehouse_ids[0] if warehouse_ids else None,
         cash_register_id=cash_register_ids[0] if cash_register_ids else None,
-        allowed_sections=allowed_sections_json,
     )
     db.add(user)
     db.flush()
-    if employee_id:
-        emp = db.query(Employee).filter(Employee.id == employee_id).first()
-        if emp:
-            emp.user_id = user.id
     for did in department_ids:
         dept = db.query(Department).filter(Department.id == did).first()
         if dept:
@@ -1043,18 +1039,13 @@ async def info_users_edit(
     full_name: str = Form(...),
     role: str = Form("user"),
     is_active: bool = Form(True),
-    employee_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    import json
     form = await request.form()
     department_ids = _parse_id_list(form.getlist("department_ids"))
     warehouse_ids = _parse_id_list(form.getlist("warehouse_ids"))
     cash_register_ids = _parse_id_list(form.getlist("cash_register_ids"))
-    # Ruxsatlar: allowed_sections - JSON array
-    allowed_sections_list = form.getlist("allowed_sections")
-    allowed_sections_json = json.dumps(allowed_sections_list) if allowed_sections_list else None
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
@@ -1069,7 +1060,6 @@ async def info_users_edit(
     user.department_id = department_ids[0] if department_ids else None
     user.warehouse_id = warehouse_ids[0] if warehouse_ids else None
     user.cash_register_id = cash_register_ids[0] if cash_register_ids else None
-    user.allowed_sections = allowed_sections_json
     user.departments_list.clear()
     user.warehouses_list.clear()
     user.cash_registers_list.clear()
@@ -1085,12 +1075,6 @@ async def info_users_edit(
         cash = db.query(CashRegister).filter(CashRegister.id == cid).first()
         if cash:
             user.cash_registers_list.append(cash)
-    for emp in db.query(Employee).filter(Employee.user_id == user_id).all():
-        emp.user_id = None
-    if employee_id:
-        emp = db.query(Employee).filter(Employee.id == employee_id).first()
-        if emp:
-            emp.user_id = user_id
     db.commit()
     return RedirectResponse(url="/info/users", status_code=303)
 
@@ -1189,75 +1173,6 @@ async def info_positions_delete(
     position.is_active = False
     db.commit()
     return RedirectResponse(url="/info/positions", status_code=303)
-
-
-# ---------- Bajariladigan ishlar (bo'lak narxi) ----------
-@router.get("/piecework-tasks", response_class=HTMLResponse)
-async def info_piecework_tasks(
-    request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)
-):
-    if not current_user:
-        return RedirectResponse(url="/login", status_code=303)
-    piecework_tasks = db.query(PieceworkTask).order_by(PieceworkTask.name).all()
-    return templates.TemplateResponse("info/piecework_tasks.html", {
-        "request": request,
-        "current_user": current_user,
-        "page_title": "Bajariladigan ishlar (bo'lak narxi)",
-        "piecework_tasks": piecework_tasks,
-    })
-
-
-@router.post("/piecework-tasks/add")
-async def info_piecework_tasks_add(
-    code: str = Form(...),
-    name: str = Form(...),
-    price_per_unit: float = Form(0),
-    unit_name: str = Form("dona"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    task = PieceworkTask(
-        code=code.strip(),
-        name=name.strip(),
-        price_per_unit=float(price_per_unit),
-        unit_name=(unit_name or "dona").strip(),
-    )
-    db.add(task)
-    db.commit()
-    return RedirectResponse(url="/info/piecework-tasks", status_code=303)
-
-
-@router.post("/piecework-tasks/edit/{task_id}")
-async def info_piecework_tasks_edit(
-    task_id: int,
-    code: str = Form(...),
-    name: str = Form(...),
-    price_per_unit: float = Form(0),
-    unit_name: str = Form("dona"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    task = db.query(PieceworkTask).filter(PieceworkTask.id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Ish topilmadi")
-    task.code = code.strip()
-    task.name = name.strip()
-    task.price_per_unit = float(price_per_unit)
-    task.unit_name = (unit_name or "dona").strip()
-    db.commit()
-    return RedirectResponse(url="/info/piecework-tasks", status_code=303)
-
-
-@router.post("/piecework-tasks/delete/{task_id}")
-async def info_piecework_tasks_delete(
-    task_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_auth)
-):
-    task = db.query(PieceworkTask).filter(PieceworkTask.id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Ish topilmadi")
-    db.delete(task)
-    db.commit()
-    return RedirectResponse(url="/info/piecework-tasks", status_code=303)
 
 
 # ---------- Regions ----------

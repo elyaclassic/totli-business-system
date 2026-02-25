@@ -1,73 +1,13 @@
 {% extends "base.html" %}
 
 {% block content %}
-{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role in ('admin', 'rahbar', 'raxbar')) %}
-{% if merged is not none and merged > 0 %}
-<div class="alert alert-success alert-dismissible fade show" role="alert">
-    <i class="bi bi-check-circle"></i> {{ merged }} ta dublikat qator birlashtirildi. Qoldiq hisoboti endi to'g'ri.
-    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-</div>
-{% endif %}
-{% if cleared is not none and cleared >= 0 and msg %}
-<div class="alert alert-success alert-dismissible fade show" role="alert">
-    <i class="bi bi-check-circle"></i> {{ msg }} ({{ cleared }} ta yozuv o'chirildi.)
-    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-</div>
-{% endif %}
-{% if recalculated and msg %}
-<div class="alert alert-success alert-dismissible fade show" role="alert">
-    <i class="bi bi-check-circle"></i> {{ msg }}
-    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-</div>
-{% endif %}
-<div class="card mb-3">
-    <div class="card-body">
-        <form method="get" action="/reports/stock" class="row g-3 align-items-end">
-            <div class="col-md-4">
-                <label class="form-label">Ombor</label>
-                <select name="warehouse_id" class="form-select" onchange="this.form.submit();">
-                    <option value="">Barcha omborlar</option>
-                    {% for wh in warehouses or [] %}
-                    <option value="{{ wh.id }}" {% if selected_warehouse_id == wh.id %}selected{% endif %}>{{ wh.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-8">
-                <a href="/reports/stock" class="btn btn-outline-secondary btn-sm">Tozalash</a>
-            </div>
-        </form>
-    </div>
-</div>
-
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-boxes"></i> Qoldiq hisoboti</span>
         <div class="btn-group btn-group-sm">
             <a href="/reports/stock/andoza" class="btn btn-outline-secondary" title="Import uchun andoza yuklab olish"><i class="bi bi-file-earmark-arrow-down"></i> Andoza</a>
             <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#importStockModal" title="Exceldan qoldiqlarni yuklash"><i class="bi bi-upload"></i> Import</button>
-            <a href="/reports/stock/export{% if selected_warehouse_id %}?warehouse_id={{ selected_warehouse_id }}{% endif %}" class="btn btn-success"><i class="bi bi-file-earmark-excel"></i> Excel</a>
-            {% if current_user and current_user.role == 'admin' %}
-            <form method="post" action="/reports/stock/recalculate-from-movements" class="d-inline" onsubmit="return confirm('Stock qoldiqlari harakatlar tarixidan qayta hisoblanadi (Yangi sotuv va boshqa sahifalardagi qoldiq to\'g\'rilanadi). Davom etasizmi?');">
-                <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
-                <button type="submit" class="btn btn-outline-info btn-sm" title="Qoldiqlarni harakatlar tarixidan qayta hisoblash"><i class="bi bi-calculator"></i> Qoldiqlarni tarixdan qayta hisoblash</button>
-            </form>
-            <form method="post" action="/reports/stock/merge-duplicates" class="d-inline" onsubmit="return confirm('Barcha ombor+mahsulot dublikatlarini bitta qatorga yig\'ish. Davom etasizmi?');">
-                <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
-                <button type="submit" class="btn btn-outline-warning btn-sm" title="Bir xil ombor va mahsulot uchun bir nechta qatorlarni bitta qatorga birlashtirish"><i class="bi bi-diagram-3"></i> Dublikatlarni birlashtirish</button>
-            </form>
-            <form method="post" action="/reports/stock/clear" class="d-inline" onsubmit="return confirm('Stock jadvalini to\'liq tozalash — barcha qoldiqlar o\'chiriladi. Qayta tiklanmaydi. Davom etasizmi?');">
-                <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
-                <button type="submit" class="btn btn-outline-danger btn-sm" title="Barcha Stock yozuvlarini o'chirish"><i class="bi bi-trash"></i> Stock jadvalini tozalash</button>
-            </form>
-            {% endif %}
-        </div>
-    </div>
-    <div class="card-body">
-        <div class="alert alert-info py-2 mb-3 small">
-            <strong><i class="bi bi-info-circle"></i> Qoldiq manbai:</strong>
-            Miqdor — <code>Stock</code> jadvalidan (har ombor + mahsulot bo‘yicha yig‘indi).
-            {% if show_tannarx %}Tannarx — mahsulotning tannarxi (so‘m). Summa = Qoldiq × Tannarx (anniq hisob).{% endif %}
-            <br><strong>Faqat tasdiqlangan hujjatlar</strong> (qoldiq tuzatish, kirim, sotuv va b.) qoldiqni o‘zgartiradi — qoralama hujjatlar hisobotda ko‘rinmaydi.
+            <a href="/reports/stock/export" class="btn btn-success"><i class="bi bi-file-earmark-excel"></i> Excel</a>
         </div>
     </div>
     <div class="card-body p-0">
@@ -75,64 +15,45 @@
             <thead class="table-light">
                 <tr>
                     <th>#</th>
-                    <th>Ombor</th>
                     <th>Kodi</th>
                     <th>Tovar nomi</th>
-                    <th class="text-end">Qoldiq (miqdor)</th>
+                    <th>Ombor</th>
+                    <th>Qoldiq</th>
                     <th>O'lchov</th>
-                    {% if show_tannarx %}<th class="text-end">Tannarx (so'm)</th><th class="text-end">Summa (so'm)</th>{% endif %}
-                    <th class="text-center">Manbai</th>
+                    <th>Tannarx</th>
+                    <th>Summa</th>
                 </tr>
             </thead>
             <tbody>
                 {% if stocks %}
                     {% for stock in stocks %}
-                    {% set min_stock = getattr(stock.product, 'min_stock', None) or 0 %}
-                    {% set qty = stock.quantity or 0 %}
-                    {% set price = (stock.product.purchase_price or 0) if stock.product else 0 %}
-                    {% set row_sum = qty * price %}
-                    <tr class="{% if min_stock and (qty or 0) <= min_stock %}table-warning{% endif %}">
+                    {% set _uc = (stock.product.unit.code or '')|lower if (stock.product and stock.product.unit) else '' %}
+                    {% set _is_dona = _uc in ['dona', 'pc', 'pcs', 'ta', 'шт'] %}
+                    <tr class="{% if stock.quantity <= stock.product.min_stock %}table-warning{% endif %}">
                         <td>{{ loop.index }}</td>
-                        <td>{{ stock.warehouse.name if stock.warehouse else '-' }}</td>
                         <td><code>{{ stock.product.barcode or stock.product.code or '-' }}</code></td>
                         <td>
-                            <strong>{{ stock.product.name if stock.product else '-' }}</strong>
-                            {% if min_stock and (qty or 0) <= min_stock %}
+                            <strong>{{ stock.product.name }}</strong>
+                            {% if stock.quantity <= stock.product.min_stock %}
                             <br><small class="text-danger">Kam qoldi!</small>
                             {% endif %}
                         </td>
-                        <td class="text-end fw-bold">{{ "{:,.3f}".format(qty) }}</td>
-                        <td>{{ stock.product.unit.code if stock.product and stock.product.unit else '-' }}</td>
-                        {% if show_tannarx %}
-                        <td class="text-end">{{ "{:,.2f}".format(price) }}</td>
-                        <td class="text-end text-success">{{ "{:,.2f}".format(row_sum) }}</td>
-                        {% endif %}
-                        <td class="text-center">
-                            <a href="/reports/stock/source?warehouse_id={{ stock.warehouse.id }}&product_id={{ stock.product.id }}" class="btn btn-sm btn-outline-info" title="Qoldiq qayerdan kelganini ko'rish"><i class="bi bi-link-45deg"></i></a>
-                        </td>
+                        <td>{{ stock.warehouse.name }}</td>
+                        <td class="fw-bold">{{ "{:,.0f}".format((stock.quantity or 0)|round(0)|int) if _is_dona else "{:,.3f}".format(stock.quantity) }}</td>
+                        <td>{{ stock.product.unit.code if stock.product.unit else '-' }}</td>
+                        <td>{{ "{:,.0f}".format(stock.product.purchase_price or 0) }}</td>
+                        <td class="text-success">{{ "{:,.0f}".format(stock.quantity * (stock.product.purchase_price or 0)) }}</td>
                     </tr>
                     {% endfor %}
                 {% else %}
                     <tr>
-                        <td colspan="{% if show_tannarx %}9{% else %}7{% endif %}" class="text-center text-muted py-5">
-                            {% if selected_warehouse_id %}
-                            Ushbu omborda qoldiqlar topilmadi.
-                            {% else %}
+                        <td colspan="8" class="text-center text-muted py-5">
                             <i class="bi bi-boxes fs-1 d-block mb-2"></i>
-                            Qoldiqlar topilmadi.
-                            {% endif %}
+                            Qoldiqlar topilmadi
                         </td>
                     </tr>
                 {% endif %}
             </tbody>
-            {% if stocks and total_sum is defined and show_tannarx %}
-            <tfoot class="table-light fw-bold">
-                <tr>
-                    <td colspan="6" class="text-end">Jami summa (so'm):</td>
-                    <td class="text-end text-success" colspan="3">{{ "{:,.2f}".format(total_sum) }}</td>
-                </tr>
-            </tfoot>
-            {% endif %}
         </table>
     </div>
 </div>
@@ -148,14 +69,7 @@
                 </div>
                 <div class="modal-body">
                     <p class="text-muted small">Andoza ustunlari: <strong>Ombor nomi (yoki kodi)</strong>, <strong>Mahsulot nomi (yoki kodi)</strong>, <strong>Qoldiq</strong>. Ixtiyoriy: <strong>Tannarx (so'm)</strong>, <strong>Sotuv narxi (so'm)</strong>. Birinchi qator sarlavha bo'lsin.</p>
-                    <div class="mb-2">
-                        <label class="form-label">Hujjat sanasi</label>
-                        <input type="date" name="doc_date" class="form-control" value="{{ today or '' }}" title="Bo'sh qoldirilsa bugungi sana ishlatiladi">
-                    </div>
-                    <div class="mb-0">
-                        <label class="form-label">Excel fayl</label>
-                        <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
-                    </div>
+                    <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bekor</button>

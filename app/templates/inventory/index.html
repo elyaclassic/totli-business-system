@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role in ('admin', 'rahbar', 'raxbar')) %}
 <style>
     .inventory-table { font-size: 0.875rem; }
     .inventory-table th, .inventory-table td { padding: 0.5rem; vertical-align: middle; }
@@ -68,12 +69,16 @@
                                 <th style="width: 120px;" class="text-end">Hisobiy qoldiq</th>
                                 <th style="width: 120px;" class="text-end">Haqiqiy qoldiq</th>
                                 <th style="width: 120px;" class="text-end">Farq</th>
-                                <th style="width: 100px;" class="text-end">Tannarx</th>
+                                {% if show_tannarx %}<th style="width: 100px;" class="text-end">Tannarx</th>{% endif %}
                                 <th style="width: 100px;" class="text-end">Sotuv narx</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for item in products_data %}
+                            {% set is_int = item.get('is_integer_unit') %}
+                            {% set qty_fmt = "{:,.0f}".format(item.current_quantity|round(0)|int) if is_int else "{:,.3f}".format(item.current_quantity) %}
+                            {% set qty_val = "%.0f"|format(item.current_quantity) if is_int else "%.3f"|format(item.current_quantity) %}
+                            {% set step_attr = "1" if is_int else "0.001" %}
                             <tr>
                                 <td class="text-center">{{ loop.index }}</td>
                                 <td>
@@ -83,28 +88,29 @@
                                     {% endif %}
                                 </td>
                                 <td class="text-end">
-                                    <span class="fw-bold">{{ "{:,.3f}".format(item.current_quantity) }}</span>
+                                    <span class="fw-bold">{{ qty_fmt }}</span>
                                 </td>
                                 <td class="text-end">
                                     <input type="hidden" name="product_id" value="{{ item.product_id }}">
                                     <input type="number" 
                                            name="actual_quantity" 
                                            class="form-control form-control-sm text-end" 
-                                           step="0.001" 
+                                           step="{{ step_attr }}" 
                                            min="0" 
-                                           value="{{ "%.3f"|format(item.current_quantity) }}"
-                                           data-current="{{ "%.3f"|format(item.current_quantity) }}"
+                                           value="{{ qty_val }}"
+                                           data-current="{{ qty_val }}"
+                                           data-integer-unit="{{ '1' if is_int else '0' }}"
                                            onchange="updateDiff(this);">
                                 </td>
                                 <td class="text-end">
-                                    <span class="diff-value diff-zero" data-product-id="{{ item.product_id }}">0.000</span>
+                                    <span class="diff-value diff-zero" data-product-id="{{ item.product_id }}" data-integer-unit="{{ '1' if is_int else '0' }}">{{ '0' if is_int else '0.000' }}</span>
                                 </td>
-                                <td class="text-end">{{ "{:,.0f}".format(item.cost_price) }}</td>
+                                {% if show_tannarx %}<td class="text-end">{{ "{:,.0f}".format(item.cost_price) }}</td>{% endif %}
                                 <td class="text-end">{{ "{:,.0f}".format(item.sale_price) }}</td>
                             </tr>
                             {% else %}
                             <tr>
-                                <td colspan="7" class="text-muted text-center py-4">
+                                <td colspan="{% if show_tannarx %}7{% else %}6{% endif %}" class="text-muted text-center py-4">
                                     Bu omborda tovarlar topilmadi.
                                 </td>
                             </tr>
@@ -134,14 +140,16 @@ function updateDiff(input) {
     
     const row = input.closest('tr');
     const diffSpan = row.querySelector('.diff-value');
+    const isInt = diffSpan && diffSpan.getAttribute('data-integer-unit') === '1';
     
     if (diffSpan) {
-        diffSpan.textContent = diff.toFixed(3);
+        diffSpan.textContent = isInt ? Math.round(diff).toString() : diff.toFixed(3);
         diffSpan.className = 'diff-value';
         
-        if (diff > 0.001) {
+        var eps = isInt ? 0.5 : 0.001;
+        if (diff > eps) {
             diffSpan.classList.add('diff-positive');
-        } else if (diff < -0.001) {
+        } else if (diff < -eps) {
             diffSpan.classList.add('diff-negative');
         } else {
             diffSpan.classList.add('diff-zero');

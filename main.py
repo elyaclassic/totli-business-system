@@ -1,7 +1,7 @@
 
 # --- Barcha importlar ---
 
-from fastapi import FastAPI, Request, Depends, HTTPException, Form, Cookie, File, UploadFile, Query
+from fastapi import FastAPI, Request, Depends, HTTPException, Form, Cookie, File, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response, StreamingResponse, JSONResponse
@@ -24,26 +24,21 @@ from app.models.database import (
     User, Product, Category, Unit, Warehouse, Stock, StockMovement,
     WarehouseTransfer, WarehouseTransferItem,
     Partner, Order, OrderItem, Payment, CashRegister, CashTransfer, PosDraft,
-    Recipe, RecipeItem, RecipeStage, Production, ProductionItem, ProductionStage, PRODUCTION_STAGE_NAMES, Machine, Employee, Salary, SalaryDoc,
-    Attendance, AttendanceDoc, EmployeeAdvance, EmploymentDoc, PieceworkTask,
+    Recipe, RecipeItem, RecipeStage, Production, ProductionItem, ProductionStage, PRODUCTION_STAGE_NAMES, Machine, Employee, Salary,
+    Attendance, AttendanceDoc, EmployeeAdvance, EmploymentDoc,
     Agent, AgentLocation, Route, RoutePoint, Visit,
     Driver, DriverLocation, Delivery, PartnerLocation,
     Purchase, PurchaseItem, PurchaseExpense, Department, Direction, Region, Position,
-    PriceType, ProductPrice,
+    PriceType, ProductPrice, ProductPriceHistory,
     StockAdjustmentDoc, StockAdjustmentDocItem,
     CashBalanceDoc, CashBalanceDocItem,
     PartnerBalanceDoc, PartnerBalanceDocItem,
-    Notification,
 )
 from app.utils.auth import (
     hash_password, get_user_from_token,
     generate_csrf_token, verify_csrf_token,
 )
-from app.utils.notifications import check_low_stock_and_notify
-from app.utils.production_order import recipe_kg_per_unit, notify_managers_production_ready
-from app.utils.dashboard_export import export_executive_dashboard
-from app.utils.user_scope import get_warehouses_for_user, get_departments_for_user
-from app.utils.live_data import executive_live_data, warehouse_live_data, delivery_live_data
+from app.utils.notifications import check_low_stock_and_notify, get_unread_count, get_user_notifications
 from app.deps import get_current_user, require_auth, require_admin
 from app.core import templates
 from app.routes import auth as auth_routes
@@ -54,21 +49,6 @@ from app.routes import info as info_routes
 
 app = FastAPI(title="TOTLI HOLVA", description="Biznes boshqaruv tizimi", version="1.0")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
-
-
-@app.get("/reports/employees", response_class=HTMLResponse)
-async def reports_employees_page(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    """Xodimlar hisoboti (reports/employees 404 bo'lmasligi uchun main da ham)."""
-    if not current_user:
-        return RedirectResponse(url="/login", status_code=303)
-    employees = db.query(Employee).order_by(Employee.full_name).all()
-    return templates.TemplateResponse("reports/employees.html", {
-        "request": request,
-        "employees": employees,
-        "page_title": "Xodimlar hisoboti",
-        "current_user": current_user,
-    })
-
 
 # Routerlar (auth, dashboard, home, reports, info)
 app.include_router(auth_routes.router)
@@ -483,18 +463,10 @@ async def executive_dashboard_test(request: Request, db: Session = Depends(get_d
         }
     ]
     
-    # Fake current_user object for template compatibility
-    fake_current_user = type('obj', (object,), {
-        'id': 1,
-        'username': fake_user.get('username', 'test'),
-        'full_name': 'Test User',
-        'role': fake_user.get('role', 'admin')
-    })()
-    
     return templates.TemplateResponse("dashboards/executive.html", {
         "request": request,
         "page_title": "Rahbariyat Dashboard",
-        "current_user": fake_current_user,
+        "current_user": None,
         "user": fake_user,
         "stats": stats,
         "sales_trend": sales_trend,
@@ -571,12 +543,12 @@ async def executive_dashboard(request: Request, db: Session = Depends(get_db), c
     sales_trend_labels = []
     sales_trend_data = []
     for i in range(6, -1, -1):
-        day_date = today - timedelta(days=i)
+        date = today - timedelta(days=i)
         sales = db.query(func.sum(Order.total)).filter(
-            func.date(Order.created_at) == day_date,
+            func.date(Order.created_at) == date,
             Order.status == 'completed'
         ).scalar() or 0
-        sales_trend_labels.append(day_date.strftime('%d.%m'))
+        sales_trend_labels.append(date.strftime('%d.%m'))
         sales_trend_data.append(float(sales))
     
     # Top 5 mahsulotlar
@@ -597,20 +569,17 @@ async def executive_dashboard(request: Request, db: Session = Depends(get_db), c
     top_products_labels = [p.name for p in top_products_query] or ['Ma\'lumot yo\'q']
     top_products_data = [float(p.total_qty) for p in top_products_query] or [0]
     
-    # Top 5 agentlar (Agent → Partner → Order orqali)
-    from app.models.database import Partner
+    # Top 5 agentlar
     top_agents_query = db.query(
-        Agent.full_name.label('name'),
+        Agent.name,
         func.sum(Order.total).label('total_sales'),
         func.count(Order.id).label('order_count')
     ).join(
-        Partner, Partner.agent_id == Agent.id
-    ).join(
-        Order, Order.partner_id == Partner.id
+        Order, Agent.id == Order.partner_id  # Assuming agent is partner
     ).filter(
         func.date(Order.created_at) >= week_ago,
         Order.status == 'completed'
-    ).group_by(Agent.id, Agent.full_name).order_by(
+    ).group_by(Agent.id, Agent.name).order_by(
         func.sum(Order.total).desc()
     ).limit(5).all()
     
@@ -680,17 +649,17 @@ async def executive_export(request: Request, db: Session = Depends(get_db), curr
 
 # Live Data Endpoints
 @app.get("/dashboard/executive/live")
-async def executive_live(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
+async def executive_live(request: Request, db: Session = Depends(get_db)):
     """Live data for Executive Dashboard"""
     return await executive_live_data(request, db)
 
 @app.get("/dashboard/warehouse/live")
-async def warehouse_live(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
+async def warehouse_live(request: Request, db: Session = Depends(get_db)):
     """Live data for Warehouse Dashboard"""
     return await warehouse_live_data(request, db)
 
 @app.get("/dashboard/delivery/live")
-async def delivery_live(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
+async def delivery_live(request: Request, db: Session = Depends(get_db)):
     """Live data for Delivery Dashboard"""
     return await delivery_live_data(request, db)
 
@@ -776,12 +745,12 @@ async def sales_dashboard(request: Request, db: Session = Depends(get_db), curre
     weekly_labels = []
     weekly_data = []
     for i in range(6, -1, -1):
-        day_date = today - timedelta(days=i)
+        date = today - timedelta(days=i)
         sales = db.query(func.sum(Order.total)).filter(
-            func.date(Order.created_at) == day_date,
+            func.date(Order.created_at) == date,
             Order.status == 'completed'
         ).scalar() or 0
-        weekly_labels.append(['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'][day_date.weekday()])
+        weekly_labels.append(['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'][date.weekday()])
         weekly_data.append(float(sales))
     
     weekly_sales = {"labels": weekly_labels, "data": weekly_data}
@@ -1077,10 +1046,10 @@ async def agent_dashboard(request: Request, db: Session = Depends(get_db), curre
     cumulative_sales = 0
     
     for i in range(0, 30, 5):
-        day_date = month_ago + timedelta(days=i)
+        date = month_ago + timedelta(days=i)
         sales = db.query(func.sum(Order.total)).filter(
             func.date(Order.created_at) >= month_ago,
-            func.date(Order.created_at) <= day_date,
+            func.date(Order.created_at) <= date,
             Order.status == 'completed'
         ).scalar() or 0
         
@@ -1171,18 +1140,10 @@ async def agent_dashboard_test(request: Request, db: Session = Depends(get_db), 
         'target': [833333, 1666666, 2500000, 3333333, 4166666, 5000000, 5833333]
     }
     
-    # Fake current_user object for template compatibility
-    fake_current_user = type('obj', (object,), {
-        'id': 1,
-        'username': fake_user.get('username', 'test'),
-        'full_name': 'Test User',
-        'role': fake_user.get('role', 'agent')
-    })()
-    
     return templates.TemplateResponse("dashboards/agent.html", {
         "request": request,
         "page_title": "Agent Dashboard",
-        "current_user": fake_current_user,
+        "current_user": None,
         "user": fake_user,
         "agent": agent,
         "kpi": kpi,
@@ -1208,32 +1169,11 @@ async def production_dashboard(request: Request, db: Session = Depends(get_db), 
     today = datetime.now().date()
     week_ago = today - timedelta(days=7)
     
-    # Today's production - faqat yarim tayyor va tayyor omborlarga yozilganlar
-    from app.models.database import Warehouse
-    from sqlalchemy import or_
-    try:
-        today_production = db.query(func.sum(Production.quantity)).join(
-            Warehouse, Production.output_warehouse_id == Warehouse.id
-        ).filter(
-            func.date(Production.date) == today,
-            Production.status == 'completed',
-            Production.output_warehouse_id.isnot(None),
-            or_(
-                func.lower(func.coalesce(Warehouse.name, '')).like('%yarim%'),
-                func.lower(func.coalesce(Warehouse.name, '')).like('%semi%'),
-                func.lower(func.coalesce(Warehouse.name, '')).like('%tayyor%'),
-                func.lower(func.coalesce(Warehouse.name, '')).like('%finished%'),
-                func.lower(func.coalesce(Warehouse.code, '')).like('%yarim%'),
-                func.lower(func.coalesce(Warehouse.code, '')).like('%semi%'),
-                func.lower(func.coalesce(Warehouse.code, '')).like('%tayyor%'),
-                func.lower(func.coalesce(Warehouse.code, '')).like('%finished%')
-            )
-        ).scalar() or 0
-    except Exception as e:
-        print(f"Today production query error: {e}")
-        import traceback
-        traceback.print_exc()
-        today_production = 0
+    # Today's production
+    today_production = db.query(func.sum(Production.quantity)).filter(
+        func.date(Production.date) == today,
+        Production.status == 'completed'
+    ).scalar() or 0
     
     # Daily plan (placeholder - could be from a Plan table)
     plan = 3000
@@ -1295,30 +1235,13 @@ async def production_dashboard(request: Request, db: Session = Depends(get_db), 
     chart_plan = []
     
     for i in range(6, -1, -1):
-        day_date = today - timedelta(days=i)
-        try:
-            production = db.query(func.sum(Production.quantity)).join(
-                Warehouse, Production.output_warehouse_id == Warehouse.id
-            ).filter(
-                func.date(Production.date) == day_date,
-                Production.status == 'completed',
-                Production.output_warehouse_id.isnot(None),
-                or_(
-                    func.lower(func.coalesce(Warehouse.name, '')).like('%yarim%'),
-                    func.lower(func.coalesce(Warehouse.name, '')).like('%semi%'),
-                    func.lower(func.coalesce(Warehouse.name, '')).like('%tayyor%'),
-                    func.lower(func.coalesce(Warehouse.name, '')).like('%finished%'),
-                    func.lower(func.coalesce(Warehouse.code, '')).like('%yarim%'),
-                    func.lower(func.coalesce(Warehouse.code, '')).like('%semi%'),
-                    func.lower(func.coalesce(Warehouse.code, '')).like('%tayyor%'),
-                    func.lower(func.coalesce(Warehouse.code, '')).like('%finished%')
-                )
-            ).scalar() or 0
-        except Exception as e:
-            print(f"Weekly chart production query error for {day_date}: {e}")
-            production = 0
+        date = today - timedelta(days=i)
+        production = db.query(func.sum(Production.quantity)).filter(
+            func.date(Production.date) == date,
+            Production.status == 'completed'
+        ).scalar() or 0
         
-        chart_labels.append(['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'][day_date.weekday()])
+        chart_labels.append(['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'][date.weekday()])
         chart_data.append(int(production))
         chart_plan.append(plan)
     
@@ -1378,18 +1301,10 @@ async def production_dashboard_test(request: Request, db: Session = Depends(get_
         'plan': [3000, 3000, 3000, 3000, 3000, 2500, 2000]
     }
     
-    # Fake current_user object for template compatibility
-    fake_current_user = type('obj', (object,), {
-        'id': 1,
-        'username': fake_user.get('username', 'test'),
-        'full_name': 'Test User',
-        'role': fake_user.get('role', 'production')
-    })()
-    
     return templates.TemplateResponse("dashboards/production.html", {
         "request": request,
         "page_title": "Ishlab chiqarish Dashboard",
-        "current_user": fake_current_user,
+        "current_user": None,
         "user": fake_user,
         "metrics": metrics,
         "production_orders": production_orders,
@@ -1446,21 +1361,11 @@ async def warehouse_dashboard(request: Request, db: Session = Depends(get_db), c
     }
     
     # Low stock items
-    low_stock_q = db.query(Stock, Product).join(
+    low_stock_items = db.query(Stock, Product).join(
         Product, Stock.product_id == Product.id
     ).filter(
         Stock.quantity < 20
-    )
-    if getattr(current_user, "role", None) == "manager":
-        from sqlalchemy.orm import joinedload
-        u = db.query(User).options(joinedload(User.warehouses_list)).filter(User.id == current_user.id).first()
-        if u and (getattr(u, "warehouses_list", None) or getattr(u, "warehouse_id", None)):
-            wh_ids = [w.id for w in (getattr(u, "warehouses_list", None) or [])]
-            if getattr(u, "warehouse_id", None) and u.warehouse_id not in wh_ids:
-                wh_ids.append(u.warehouse_id)
-            if wh_ids:
-                low_stock_q = low_stock_q.filter(Stock.warehouse_id.in_(wh_ids))
-    low_stock_items = low_stock_q.order_by(Stock.quantity).limit(10).all()
+    ).order_by(Stock.quantity).limit(10).all()
     
     low_stock = []
     for stock, product in low_stock_items:
@@ -1505,14 +1410,14 @@ async def warehouse_dashboard(request: Request, db: Session = Depends(get_db), c
     chart_outgoing = []
     
     for i in range(6, -1, -1):
-        day_date = today - timedelta(days=i)
+        date = today - timedelta(days=i)
         incoming = db.query(func.sum(PurchaseItem.quantity)).join(
             Purchase, PurchaseItem.purchase_id == Purchase.id
         ).filter(
-            func.date(Purchase.date) == day_date
+            func.date(Purchase.date) == date
         ).scalar() or 0
         
-        chart_labels.append(['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'][day_date.weekday()])
+        chart_labels.append(['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'][date.weekday()])
         chart_incoming.append(int(incoming))
         chart_outgoing.append(0)  # Placeholder
     
@@ -1707,15 +1612,15 @@ async def delivery_dashboard(request: Request, db: Session = Depends(get_db), cu
     chart_delayed = []
     
     for i in range(6, -1, -1):
-        day_date = today - timedelta(days=i)
+        date = today - timedelta(days=i)
         
         completed = db.query(func.count(Delivery.id)).filter(
-            func.date(Delivery.planned_date) == day_date,
+            func.date(Delivery.planned_date) == date,
             Delivery.status == 'delivered'
         ).scalar() or 0
         
         delayed = db.query(func.count(Delivery.id)).filter(
-            func.date(Delivery.planned_date) == day_date,
+            func.date(Delivery.planned_date) == date,
             Delivery.status.in_(['pending', 'in_progress', 'failed'])
         ).scalar() or 0
         
@@ -2077,11 +1982,12 @@ async def info_prices(
             "product_prices_by_type": {},
             "product_tannarx": {},
             "current_user": current_user,
-            "page_title": "Narxni o'rnatish",
-            "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
+            "page_title": "Narxni o'rnatish"
         })
     current_pt_id = price_type_id or (price_types[0].id if price_types else None)
-    products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
+    products = db.query(Product).options(joinedload(Product.unit)).filter(
+        Product.is_active == True
+    ).order_by(Product.name).all()
     # Mahsulot × narx turi bo'yicha sotuv narxi
     product_prices = db.query(ProductPrice).filter(ProductPrice.price_type_id == current_pt_id).all()
     product_prices_by_type = {pp.product_id: pp.sale_price for pp in product_prices}
@@ -2141,9 +2047,23 @@ async def info_prices(
         "product_prices_by_type": product_prices_by_type,
         "product_tannarx": product_tannarx,
         "current_user": current_user,
-        "page_title": "Narxni o'rnatish",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
+        "page_title": "Narxni o'rnatish"
     })
+
+
+def _next_price_history_doc_number(db: Session) -> str:
+    """Narx o'zgarishi hujjati raqami: PN-YYYYMMDD-NNN"""
+    from datetime import datetime
+    prefix = f"PN-{datetime.now().strftime('%Y%m%d')}-"
+    last = db.query(ProductPriceHistory).filter(ProductPriceHistory.doc_number.like(f"{prefix}%")).order_by(ProductPriceHistory.id.desc()).first()
+    if not last or not last.doc_number:
+        num = 1
+    else:
+        try:
+            num = int(last.doc_number.rsplit("-", 1)[-1]) + 1
+        except (ValueError, IndexError):
+            num = 1
+    return f"{prefix}{num:03d}"
 
 
 @app.post("/info/prices/edit/{product_id}")
@@ -2155,24 +2075,40 @@ async def info_prices_edit(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth)
 ):
-    """Mahsulot tannarxi va narx turi bo'yicha sotuv narxini yangilash"""
+    """Mahsulot tannarxi va narx turi bo'yicha sotuv narxini yangilash; har bir o'zgarish hujjat sifatida tarixga yoziladi."""
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Mahsulot topilmadi")
-    product.purchase_price = purchase_price
+    old_purchase = float(product.purchase_price or 0)
     if price_type_id:
         pp = db.query(ProductPrice).filter(
             ProductPrice.product_id == product_id,
             ProductPrice.price_type_id == price_type_id
         ).first()
+        old_sale = float(pp.sale_price if pp else 0)
+        product.purchase_price = purchase_price
         if pp:
             pp.sale_price = sale_price
         else:
             db.add(ProductPrice(product_id=product_id, price_type_id=price_type_id, sale_price=sale_price))
     else:
+        old_sale = float(product.sale_price or 0)
+        product.purchase_price = purchase_price
         product.sale_price = sale_price
+    # Harakat tarixi — hujjat sifatida saqlash (avvalgi va yangi narx)
+    doc_number = _next_price_history_doc_number(db)
+    db.add(ProductPriceHistory(
+        doc_number=doc_number,
+        product_id=product_id,
+        price_type_id=price_type_id,
+        old_purchase_price=old_purchase,
+        new_purchase_price=float(purchase_price or 0),
+        old_sale_price=old_sale,
+        new_sale_price=float(sale_price or 0),
+        changed_by_id=current_user.id,
+    ))
     db.commit()
     redirect_url = f"/info/prices?price_type_id={price_type_id}" if price_type_id else "/info/prices"
     return RedirectResponse(url=redirect_url, status_code=303)
@@ -2231,7 +2167,7 @@ async def info_cash_delete(cash_id: int, db: Session = Depends(get_db), current_
 async def qoldiqlar_page(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
     """Qoldiqlar sahifasi: kassa, tovar (forma spiska 1C), kontragent qoldiqlarini kiritish"""
     cash_registers = db.query(CashRegister).filter(CashRegister.is_active == True).all()
-    warehouses = get_warehouses_for_user(db, current_user)
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
     stocks = db.query(Stock).join(Warehouse).join(Product).order_by(Stock.updated_at.desc()).limit(300).all()
     partners = db.query(Partner).filter(Partner.is_active == True).order_by(Partner.name).all()
@@ -2265,40 +2201,49 @@ async def qoldiqlar_page(request: Request, db: Session = Depends(get_db), curren
         "kontragent_docs": kontragent_docs,
         "current_user": current_user,
         "page_title": "Qoldiqlar",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 
 @app.get("/qoldiqlar/tarix", response_class=HTMLResponse)
 async def qoldiqlar_tarix(
     request: Request,
-    warehouse_id: int = None,
-    product_id: int = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
+    warehouse_id: Optional[int] = None,
+    product_id: Optional[int] = None,
 ):
-    """Mahsulot harakati tarixi — qayerdan keldi / qayerga ketdi (1C uslubida). Ombor va mahsulot tanlang, keyin harakatlar jadvali ko'rinadi."""
+    """Mahsulot harakati tarixi — ombor va mahsulot tanlash; tanlansa Qoldiq manbai hisobotiga yo'naltirish."""
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
+    products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
     if warehouse_id and product_id:
-        from urllib.parse import urlencode
         return RedirectResponse(
-            url="/reports/stock/source?" + urlencode({"warehouse_id": warehouse_id, "product_id": product_id}),
+            url=f"/reports/stock/source?warehouse_id={warehouse_id}&product_id={product_id}",
             status_code=303,
         )
-    warehouses = get_warehouses_for_user(db, current_user)
-    products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
+    selected_product_id = int(product_id) if product_id else None
     return templates.TemplateResponse("qoldiqlar/tarix.html", {
         "request": request,
+        "current_user": current_user,
         "warehouses": warehouses,
         "products": products,
-        "selected_product_id": product_id,
-        "current_user": current_user,
-        "page_title": "Mahsulot harakati tarixi",
+        "selected_product_id": selected_product_id,
+        "page_title": "Qoldiqlar — Mahsulot harakati tarixi",
     })
 
 
-@app.get("/qoldiqlar/kassa/hujjat")
-async def qoldiqlar_kassa_hujjat_list_redirect(db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    """Kassa hujjatlar ro'yxati — asl ro'yxat qoldiqlar sahifasida (#kassa), shu yerga yo'naltiramiz."""
+@app.post("/qoldiqlar/kassa/{cash_id}")
+async def qoldiqlar_kassa_save(
+    cash_id: int,
+    balance: float = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Kassa qoldig'ini yangilash (eski tezkor forma uchun qolgan)"""
+    cash = db.query(CashRegister).filter(CashRegister.id == cash_id).first()
+    if not cash:
+        raise HTTPException(status_code=404, detail="Kassa topilmadi")
+    cash.balance = balance
+    db.commit()
     return RedirectResponse(url="/qoldiqlar#kassa", status_code=303)
 
 
@@ -2438,42 +2383,13 @@ async def qoldiqlar_kassa_hujjat_delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Kassa hujjatini o'chirish (faqat admin): draft -> o'chirish, confirmed -> CashRegister balansini qaytarish va o'chirish"""
+    """Kassa hujjatini o'chirish (faqat qoralama, faqat admin)"""
     doc = db.query(CashBalanceDoc).filter(CashBalanceDoc.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
-    if doc.status == "draft":
-        # Qoralama holatida: to'g'ridan-to'g'ri o'chirish
-        db.delete(doc)
-        db.commit()
-        return RedirectResponse(url="/qoldiqlar#kassa", status_code=303)
-    elif doc.status == "confirmed":
-        # Tasdiqlangan holatida: CashRegister balanslarini qaytarish va o'chirish
-        for item in doc.items:
-            cash_register = db.query(CashRegister).filter(CashRegister.id == item.cash_register_id).first()
-            if cash_register and item.previous_balance is not None:
-                # Oldingi balansni qaytarish
-                cash_register.balance = item.previous_balance
-        # Hujjatni o'chirish
-        db.delete(doc)
-        db.commit()
-        return RedirectResponse(url="/qoldiqlar#kassa?deleted=1", status_code=303)
-    else:
-        raise HTTPException(status_code=400, detail="Faqat qoralama yoki tasdiqlangan hujjatni o'chirish mumkin.")
-
-
-@app.post("/qoldiqlar/kassa/{cash_id}")
-async def qoldiqlar_kassa_save(
-    cash_id: int,
-    balance: float = Form(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Kassa qoldig'ini yangilash (eski tezkor forma uchun qolgan)"""
-    cash = db.query(CashRegister).filter(CashRegister.id == cash_id).first()
-    if not cash:
-        raise HTTPException(status_code=404, detail="Kassa topilmadi")
-    cash.balance = balance
+    if doc.status != "draft":
+        raise HTTPException(status_code=400, detail="Faqat qoralama holatidagi hujjatni o'chirish mumkin. Avval tasdiqni bekor qiling.")
+    db.delete(doc)
     db.commit()
     return RedirectResponse(url="/qoldiqlar#kassa", status_code=303)
 
@@ -2676,12 +2592,6 @@ async def cash_transfer_delete(
 
 
 # --- Kontragent qoldiq HUJJATLARI (1C uslubida) ---
-@app.get("/qoldiqlar/kontragent/hujjat")
-async def qoldiqlar_kontragent_hujjat_list_redirect(db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    """Kontragent hujjatlar ro'yxati — qoldiqlar sahifasida #kontragent."""
-    return RedirectResponse(url="/qoldiqlar#kontragent", status_code=303)
-
-
 @app.get("/qoldiqlar/kontragent/hujjat/new", response_class=HTMLResponse)
 async def qoldiqlar_kontragent_hujjat_new(
     request: Request,
@@ -2745,105 +2655,6 @@ async def qoldiqlar_kontragent_hujjat_create(
         db.add(PartnerBalanceDocItem(doc_id=doc.id, partner_id=pid, balance=bal))
     db.commit()
     return RedirectResponse(url=f"/qoldiqlar/kontragent/hujjat/{doc.id}", status_code=303)
-
-
-@app.get("/qoldiqlar/kontragent/andoza")
-async def qoldiqlar_kontragent_andoza(db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    """Kontragent qoldiqlari Excel andozasi."""
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Kontragent"
-    ws.append(["Kontragent nomi (yoki kodi)", "Balans (so'm)"])
-    for c in range(1, 3):
-        ws.cell(row=1, column=c).font = openpyxl.styles.Font(bold=True)
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return Response(
-        buf.getvalue(),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=kontragent_qoldiq_andoza.xlsx"},
-    )
-
-
-@app.post("/qoldiqlar/kontragent/import-excel")
-async def qoldiqlar_kontragent_import_excel(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Exceldan kontragent qoldiqlarini yuklash — hujjat qoralama holatida yaratiladi, tasdiqlashdan keyin balanslar yangilanadi."""
-    from urllib.parse import quote
-    form = await request.form()
-    file = form.get("file") or form.get("excel_file")
-    if not file or not getattr(file, "filename", None):
-        return RedirectResponse(url="/qoldiqlar?error=import&detail=" + quote("Excel fayl tanlang") + "#kontragent", status_code=303)
-    try:
-        contents = await file.read()
-        if not contents:
-            return RedirectResponse(url="/qoldiqlar?error=import&detail=" + quote("Fayl bo'sh") + "#kontragent", status_code=303)
-        wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=False, data_only=True)
-        ws = wb.active
-        rows = list(ws.iter_rows(min_row=2, values_only=True))
-    except Exception as e:
-        return RedirectResponse(url="/qoldiqlar?error=import&detail=" + quote(str(e)[:120]) + "#kontragent", status_code=303)
-    items_data = []
-    missing = []
-    for row in rows:
-        if not row or (row[0] is None and (len(row) < 2 or row[1] is None)):
-            continue
-        key = str(row[0] or "").strip() if len(row) > 0 else ""
-        if not key:
-            continue
-        try:
-            bal = float(row[1]) if len(row) > 1 and row[1] is not None and str(row[1]).strip() != "" else 0.0
-        except (TypeError, ValueError):
-            bal = 0.0
-        partner = (
-            db.query(Partner)
-            .filter(
-                Partner.is_active == True,
-                or_(
-                    and_(Partner.name.isnot(None), func.lower(func.trim(Partner.name)) == key.lower()),
-                    and_(Partner.code.isnot(None), func.lower(func.trim(Partner.code)) == key.lower()),
-                ),
-            )
-            .first()
-        )
-        if not partner and key:
-            partner = (
-                db.query(Partner)
-                .filter(Partner.is_active == True, Partner.name.isnot(None), func.lower(Partner.name).contains(key.lower()))
-                .first()
-            )
-        if not partner:
-            if key not in missing:
-                missing.append(key)
-            continue
-        items_data.append((partner.id, bal))
-    if not items_data:
-        detail = "Hech qanday to'g'ri qator topilmadi."
-        if missing:
-            detail += " Topilmadi: " + ", ".join(missing[:10])
-        return RedirectResponse(url="/qoldiqlar?error=import&detail=" + quote(detail) + "#kontragent", status_code=303)
-    today = datetime.now()
-    count = db.query(PartnerBalanceDoc).filter(
-        PartnerBalanceDoc.date >= today.replace(hour=0, minute=0, second=0)
-    ).count()
-    number = f"KNT-{today.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
-    doc = PartnerBalanceDoc(
-        number=number,
-        date=today,
-        user_id=current_user.id if current_user else None,
-        status="draft",
-    )
-    db.add(doc)
-    db.flush()
-    for pid, bal in items_data:
-        db.add(PartnerBalanceDocItem(doc_id=doc.id, partner_id=pid, balance=bal))
-    db.commit()
-    msg = quote("Hujjat qoralama. Balanslarni yangilash uchun «Tasdiqlash» bosing.")
-    return RedirectResponse(url=f"/qoldiqlar/kontragent/hujjat/{doc.id}?from=import&msg={msg}", status_code=303)
 
 
 @app.get("/qoldiqlar/kontragent/hujjat/{doc_id}", response_class=HTMLResponse)
@@ -2918,29 +2729,15 @@ async def qoldiqlar_kontragent_hujjat_delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Kontragent hujjatini o'chirish (faqat admin): draft -> o'chirish, confirmed -> Partner balansini qaytarish va o'chirish"""
+    """Kontragent hujjatini o'chirish (faqat qoralama, faqat admin)"""
     doc = db.query(PartnerBalanceDoc).filter(PartnerBalanceDoc.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
-    
-    if doc.status == "draft":
-        # Qoralama holatida: to'g'ridan-to'g'ri o'chirish
-        db.delete(doc)
-        db.commit()
-        return RedirectResponse(url="/qoldiqlar#kontragent", status_code=303)
-    elif doc.status == "confirmed":
-        # Tasdiqlangan holatida: Partner balansini qaytarish va o'chirish
-        if doc.partner_id:
-            partner = db.query(Partner).filter(Partner.id == doc.partner_id).first()
-            if partner and doc.previous_balance is not None:
-                # Oldingi balansni qaytarish
-                partner.balance = doc.previous_balance
-        # Hujjatni o'chirish
-        db.delete(doc)
-        db.commit()
-        return RedirectResponse(url="/qoldiqlar#kontragent?deleted=1", status_code=303)
-    else:
-        raise HTTPException(status_code=400, detail="Faqat qoralama yoki tasdiqlangan hujjatni o'chirish mumkin.")
+    if doc.status != "draft":
+        raise HTTPException(status_code=400, detail="Faqat qoralama holatidagi hujjatni o'chirish mumkin. Avval tasdiqni bekor qiling.")
+    db.delete(doc)
+    db.commit()
+    return RedirectResponse(url="/qoldiqlar#kontragent", status_code=303)
 
 
 @app.post("/qoldiqlar/tovar")
@@ -3040,7 +2837,6 @@ async def qoldiqlar_tovar_hujjat_list(
         "docs": docs,
         "current_user": current_user,
         "page_title": "Tovar qoldiqlari hujjatlari",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 
@@ -3051,7 +2847,7 @@ async def qoldiqlar_tovar_hujjat_new(
     current_user: User = Depends(require_auth),
 ):
     """Yangi tovar qoldiq hujjati (qoralama)"""
-    warehouses = get_warehouses_for_user(db, current_user)
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
     return templates.TemplateResponse("qoldiqlar/hujjat_form.html", {
         "request": request,
@@ -3060,7 +2856,6 @@ async def qoldiqlar_tovar_hujjat_new(
         "products": products,
         "current_user": current_user,
         "page_title": "Tovar qoldiqlari — yangi hujjat",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 
@@ -3142,14 +2937,6 @@ async def qoldiqlar_tovar_import_excel(
     file = form.get("file") or form.get("excel_file")
     if not file or not getattr(file, "filename", None):
         return RedirectResponse(url="/qoldiqlar?error=import&detail=" + quote("Excel fayl tanlang") + "#tovar", status_code=303)
-    doc_date_str = (form.get("doc_date") or "").strip()
-    try:
-        if doc_date_str:
-            doc_date = datetime.strptime(doc_date_str, "%Y-%m-%d").replace(hour=23, minute=59, second=0, microsecond=0)
-        else:
-            doc_date = datetime.now()
-    except ValueError:
-        doc_date = datetime.now()
     try:
         contents = await file.read()
         if not contents:
@@ -3229,18 +3016,16 @@ async def qoldiqlar_tovar_import_excel(
                 url="/qoldiqlar?error=import&detail=" + quote(detail) + "#tovar",
                 status_code=303,
             )
-        doc_date_start = doc_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        doc_date_end = doc_date_start + timedelta(days=1)
+        today = datetime.now()
         count = db.query(StockAdjustmentDoc).filter(
-            StockAdjustmentDoc.date >= doc_date_start,
-            StockAdjustmentDoc.date < doc_date_end,
+            StockAdjustmentDoc.date >= today.replace(hour=0, minute=0, second=0)
         ).count()
-        number = f"QLD-{doc_date.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
+        number = f"QLD-{today.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
         total_tannarx = sum(qty * cp for _, _, qty, cp, _ in items_data)
         total_sotuv = sum(qty * sp for _, _, qty, _, sp in items_data)
         doc = StockAdjustmentDoc(
             number=number,
-            date=doc_date,
+            date=today,
             user_id=current_user.id if current_user else None,
             status="draft",
             total_tannarx=total_tannarx,
@@ -3290,7 +3075,7 @@ async def qoldiqlar_tovar_hujjat_view(
     doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
-    warehouses = get_warehouses_for_user(db, current_user)
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
     return templates.TemplateResponse("qoldiqlar/hujjat_form.html", {
         "request": request,
@@ -3299,7 +3084,6 @@ async def qoldiqlar_tovar_hujjat_view(
         "products": products,
         "current_user": current_user,
         "page_title": f"Tovar qoldiqlari {doc.number}",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 
@@ -3362,270 +3146,6 @@ async def qoldiqlar_tovar_hujjat_delete_row(
     return RedirectResponse(url=f"/qoldiqlar/tovar/hujjat/{doc_id}", status_code=303)
 
 
-@app.post("/qoldiqlar/tovar/hujjat/{doc_id}/update-date")
-async def qoldiqlar_tovar_hujjat_update_date(
-    doc_id: int,
-    date: str = Form(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Hujjat sanasini yangilash (faqat qoralama) - hujjat raqamini ham yangilaydi"""
-    doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Hujjat topilmadi")
-    if doc.status != "draft":
-        raise HTTPException(status_code=400, detail="Faqat qoralama holatidagi hujjatning sanasini o'zgartirish mumkin")
-    
-    try:
-        # datetime-local format: "YYYY-MM-DDTHH:MM"
-        new_date = datetime.strptime(date, "%Y-%m-%dT%H:%M")
-        old_date = doc.date
-        
-        # Hujjat raqamidagi sanani tekshirish va yangilash
-        # Hujjat raqami format: QLD-YYYYMMDD-NNNN
-        current_number_date = None
-        if doc.number and len(doc.number) >= 12:
-            try:
-                # QLD-YYYYMMDD-NNNN formatidan sanani ajratish
-                parts = doc.number.split('-')
-                if len(parts) >= 2:
-                    date_str = parts[1]  # YYYYMMDD
-                    if len(date_str) == 8:
-                        current_number_date = datetime.strptime(date_str, "%Y%m%d").date()
-            except (ValueError, IndexError):
-                pass
-        
-        # Agar sana o'zgarsa yoki hujjat raqamidagi sana yangi sanadan farq qilsa, yangilash
-        should_update_number = False
-        if old_date:
-            if old_date.date() != new_date.date():
-                should_update_number = True
-        else:
-            should_update_number = True
-        
-        # Hujjat raqamidagi sana yangi sanadan farq qilsa ham yangilash
-        if current_number_date and current_number_date != new_date.date():
-            should_update_number = True
-        
-        if should_update_number:
-            # Yangi sanadan hujjatlar sonini hisoblash
-            new_date_start = new_date.replace(hour=0, minute=0, second=0, microsecond=0)
-            count = db.query(StockAdjustmentDoc).filter(
-                StockAdjustmentDoc.date >= new_date_start,
-                StockAdjustmentDoc.id != doc_id  # O'zini hisobga olmaslik
-            ).count()
-            # Yangi hujjat raqamini yaratish
-            new_number = f"QLD-{new_date.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
-            
-            # Hujjat raqami unique bo'lishi kerak, tekshirish
-            existing = db.query(StockAdjustmentDoc).filter(
-                StockAdjustmentDoc.number == new_number,
-                StockAdjustmentDoc.id != doc_id
-            ).first()
-            if existing:
-                # Agar raqam band bo'lsa, keyingi raqamni topish
-                same_date_docs = db.query(StockAdjustmentDoc).filter(
-                    StockAdjustmentDoc.number.like(f"QLD-{new_date.strftime('%Y%m%d')}-%"),
-                    StockAdjustmentDoc.id != doc_id
-                ).all()
-                max_num = 0
-                for d in same_date_docs:
-                    try:
-                        num_part = int(d.number.split('-')[-1])
-                        if num_part > max_num:
-                            max_num = num_part
-                    except (ValueError, IndexError):
-                        pass
-                new_number = f"QLD-{new_date.strftime('%Y%m%d')}-{str(max_num + 1).zfill(4)}"
-            
-            doc.number = new_number
-        
-        doc.date = new_date
-        db.commit()
-    except (ValueError, TypeError) as e:
-        raise HTTPException(status_code=400, detail=f"Noto'g'ri sana formati: {str(e)}")
-    
-    return RedirectResponse(url=f"/qoldiqlar/tovar/hujjat/{doc_id}", status_code=303)
-
-
-# ==========================================
-# INVENTARIZATSIYA
-# ==========================================
-
-@app.get("/inventory", response_class=HTMLResponse)
-async def inventory_index(
-    request: Request,
-    warehouse_id: int = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Inventarizatsiya sahifasi - ombordagi tovarlarni ko'rsatish"""
-    warehouses = get_warehouses_for_user(db, current_user)
-    wh_ids = [w.id for w in warehouses]
-    # Agar ombor tanlangan bo'lsa, tovarlarni ko'rsatish (faqat ruxsat etilgan ombor)
-    products_data = []
-    if warehouse_id:
-        if wh_ids and warehouse_id not in wh_ids:
-            warehouse_id = None  # Foydalanuvchiga tegishli emas — filterni tozalash
-        warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first() if warehouse_id else None
-        if warehouse:
-            # Ombordagi barcha tovarlarni olish; bir mahsulot bir marta (product_id bo'yicha qoldiqlarni yig'amiz)
-            stocks = db.query(Stock).filter(
-                Stock.warehouse_id == warehouse_id
-            ).options(
-                joinedload(Stock.product)
-            ).all()
-            
-            # Bir xil product_id uchun bitta qator, qoldiqlar yig'indisi
-            qty_by_product = {}
-            product_info = {}
-            for stock in stocks:
-                if not stock.product or not stock.product.is_active:
-                    continue
-                pid = stock.product.id
-                qty = float(stock.quantity or 0)
-                qty_by_product[pid] = qty_by_product.get(pid, 0) + qty
-                product_info[pid] = {
-                    'product_id': pid,
-                    'product_name': stock.product.name,
-                    'product_code': stock.product.code or '',
-                    'cost_price': stock.product.purchase_price or 0,
-                    'sale_price': stock.product.sale_price or 0,
-                }
-            
-            for pid, qty in qty_by_product.items():
-                info = product_info.get(pid)
-                if info:
-                    products_data.append({
-                        'product_id': info['product_id'],
-                        'product_name': info['product_name'],
-                        'product_code': info['product_code'],
-                        'current_quantity': qty,
-                        'cost_price': info['cost_price'],
-                        'sale_price': info['sale_price'],
-                    })
-            
-            # Qoldiq bo'lmagan, lekin aktiv bo'lgan tovarlarni ham qo'shish
-            all_products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
-            existing_product_ids = set(qty_by_product.keys())
-            for product in all_products:
-                if product.id not in existing_product_ids:
-                    products_data.append({
-                        'product_id': product.id,
-                        'product_name': product.name,
-                        'product_code': product.code or '',
-                        'current_quantity': 0,
-                        'cost_price': product.purchase_price or 0,
-                        'sale_price': product.sale_price or 0,
-                    })
-            
-            # Nom bo'yicha tartiblash
-            products_data.sort(key=lambda x: (x['product_name'] or '').lower())
-    
-    return templates.TemplateResponse("inventory/index.html", {
-        "request": request,
-        "warehouses": warehouses,
-        "selected_warehouse_id": warehouse_id,
-        "products_data": products_data,
-        "current_user": current_user,
-        "page_title": "Inventarizatsiya",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
-    })
-
-
-@app.post("/inventory/confirm")
-async def inventory_confirm(
-    request: Request,
-    warehouse_id: int = Form(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Inventarizatsiya natijalarini tasdiqlash va StockAdjustmentDoc yaratish"""
-    form = await request.form()
-    
-    # Formadan tovarlar ma'lumotlarini olish
-    product_ids = form.getlist("product_id")
-    actual_quantities = form.getlist("actual_quantity")
-    
-    warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
-    if not warehouse:
-        raise HTTPException(status_code=404, detail="Ombor topilmadi")
-    
-    items_data = []
-    for i, pid_str in enumerate(product_ids):
-        if not pid_str:
-            continue
-        try:
-            pid = int(pid_str)
-            actual_qty_str = actual_quantities[i] if i < len(actual_quantities) else ""
-            if not actual_qty_str or actual_qty_str.strip() == "":
-                continue
-            actual_qty = float(actual_qty_str)
-            if actual_qty < 0:
-                continue
-            
-            # Joriy qoldiqni olish
-            stock = db.query(Stock).filter(
-                Stock.warehouse_id == warehouse_id,
-                Stock.product_id == pid
-            ).first()
-            current_qty = stock.quantity if stock else 0
-            
-            # Agar haqiqiy qoldiq joriy qoldiqdan farq qilsa, qo'shish
-            if abs(actual_qty - current_qty) > 0.001:  # Kichik farqlarni e'tiborsiz qoldirish
-                product = db.query(Product).filter(Product.id == pid).first()
-                if product:
-                    cost_price = product.purchase_price or 0
-                    sale_price = product.sale_price or 0
-                    items_data.append((pid, actual_qty, cost_price, sale_price))
-        except (ValueError, TypeError):
-            continue
-    
-    if not items_data:
-        return RedirectResponse(
-            url=f"/inventory?warehouse_id={warehouse_id}&message=Farq+topilmadi",
-            status_code=303
-        )
-    
-    # StockAdjustmentDoc yaratish
-    today = datetime.now()
-    count = db.query(StockAdjustmentDoc).filter(
-        StockAdjustmentDoc.date >= today.replace(hour=0, minute=0, second=0)
-    ).count()
-    number = f"QLD-{today.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
-    
-    total_tannarx = sum(qty * cp for _, qty, cp, _ in items_data)
-    total_sotuv = sum(qty * sp for _, qty, _, sp in items_data)
-    
-    doc = StockAdjustmentDoc(
-        number=number,
-        date=today,
-        user_id=current_user.id if current_user else None,
-        status="draft",
-        total_tannarx=total_tannarx,
-        total_sotuv=total_sotuv,
-    )
-    db.add(doc)
-    db.flush()
-    
-    for pid, qty, cp, sp in items_data:
-        db.add(StockAdjustmentDocItem(
-            doc_id=doc.id,
-            product_id=pid,
-            warehouse_id=warehouse_id,
-            quantity=qty,
-            cost_price=cp,
-            sale_price=sp,
-        ))
-    
-    db.commit()
-    
-    return RedirectResponse(
-        url=f"/qoldiqlar/tovar/hujjat/{doc.id}?from=inventory",
-        status_code=303
-    )
-
-
 @app.post("/qoldiqlar/tovar/hujjat/{doc_id}/edit-row/{item_id}")
 async def qoldiqlar_tovar_hujjat_edit_row(
     doc_id: int,
@@ -3668,7 +3188,7 @@ async def qoldiqlar_tovar_hujjat_tasdiqlash(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Hujjatni tasdiqlash — ombor qoldig'i hujjatdagi miqdorga o'rnatiladi (qo'shilmaydi). Bir (ombor, mahsulot) uchun bitta harakat yoziladi — manbai sahifasida hujjat takrorlanmasligi uchun."""
+    """Hujjatni tasdiqlash — ombor qoldiqlariga qo'shiladi"""
     doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
@@ -3677,49 +3197,43 @@ async def qoldiqlar_tovar_hujjat_tasdiqlash(
     if not doc.items:
         raise HTTPException(status_code=400, detail="Kamida bitta qator bo'lishi kerak")
 
-    # Bir xil (ombor, mahsulot) uchun bitta qator — dublikat qatorlar bitta harakatga birlashtiriladi
-    seen = set()  # (warehouse_id, product_id)
     for item in doc.items:
-        key = (item.warehouse_id, item.product_id)
-        if key in seen:
-            continue
-        seen.add(key)
-
-        stocks = db.query(Stock).filter(
+        # Eski qoldiqni olish
+        stock = db.query(Stock).filter(
             Stock.warehouse_id == item.warehouse_id,
             Stock.product_id == item.product_id,
-        ).all()
-        old_quantity = sum(float(s.quantity or 0) for s in stocks)
+        ).first()
+        old_quantity = stock.quantity if stock else 0
+        
+        # Yangi qoldiqni hisoblash
         new_quantity = item.quantity
         quantity_change = new_quantity - old_quantity
-
-        if stocks:
-            keep = stocks[0]
-            keep.quantity = new_quantity
-            keep.updated_at = datetime.now()
-            for s in stocks[1:]:
-                db.delete(s)
+        
+        if stock:
+            stock.quantity = new_quantity
+            stock.updated_at = datetime.now()
         else:
             db.add(Stock(
                 warehouse_id=item.warehouse_id,
                 product_id=item.product_id,
                 quantity=item.quantity,
             ))
-
+        
+        # StockMovement yozuvini yaratish (adjustment)
         if quantity_change != 0:
             create_stock_movement(
                 db=db,
                 warehouse_id=item.warehouse_id,
                 product_id=item.product_id,
-                quantity_change=quantity_change,
+                quantity_change=quantity_change,  # O'zgarish (+ yoki -)
                 operation_type="adjustment",
                 document_type="StockAdjustmentDoc",
                 document_id=doc.id,
                 document_number=doc.number,
                 user_id=current_user.id if current_user else None,
-                note=f"Qoldiq tuzatish: {doc.number}",
-                update_stock=False,
+                note=f"Qoldiq tuzatish: {doc.number}"
             )
+        # Tannarxni mahsulotga yozish — Narxni o'rnatish sahifasida ko'rinsin
         if (item.cost_price or 0) > 0:
             prod = db.query(Product).filter(Product.id == item.product_id).first()
             if prod:
@@ -3735,40 +3249,22 @@ async def qoldiqlar_tovar_hujjat_revert(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Tovar qoldiq hujjati tasdiqini bekor qilish (faqat admin) — qoldiq hujjat tasdiqlanishidan oldingi holatga qaytariladi. Bir (ombor, mahsulot) uchun bir marta qaytariladi."""
+    """Tovar qoldiq hujjati tasdiqini bekor qilish (faqat admin) — ombor qoldig'ini kamaytirish"""
     doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
     if doc.status != "confirmed":
         raise HTTPException(status_code=400, detail="Faqat tasdiqlangan hujjatning tasdiqini bekor qilish mumkin")
-    seen = set()
     for item in doc.items:
-        key = (item.warehouse_id, item.product_id)
-        if key in seen:
-            continue
-        seen.add(key)
         stock = db.query(Stock).filter(
             Stock.warehouse_id == item.warehouse_id,
             Stock.product_id == item.product_id,
         ).first()
-        if not stock:
-            continue
-        mov = db.query(StockMovement).filter(
-            StockMovement.document_type == "StockAdjustmentDoc",
-            StockMovement.document_id == doc_id,
-            StockMovement.warehouse_id == item.warehouse_id,
-            StockMovement.product_id == item.product_id,
-        ).first()
-        if mov is not None:
-            prev_qty = float(mov.quantity_after or 0) - float(mov.quantity_change or 0)
-            if prev_qty < 0:
-                prev_qty = 0
-            stock.quantity = prev_qty
-        else:
+        if stock:
             stock.quantity = (stock.quantity or 0) - item.quantity
             if stock.quantity < 0:
                 stock.quantity = 0
-        stock.updated_at = datetime.now()
+            stock.updated_at = datetime.now()
     doc.status = "draft"
     db.commit()
     return RedirectResponse(url=f"/qoldiqlar/tovar/hujjat/{doc_id}", status_code=303)
@@ -3780,42 +3276,21 @@ async def qoldiqlar_tovar_hujjat_delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Tovar qoldiq hujjatini o'chirish (faqat admin): draft -> o'chirish, confirmed -> avval revert qilish kerak"""
-    from urllib.parse import quote
+    """Tovar qoldiq hujjatini o'chirish (faqat qoralama, faqat admin)"""
     doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
-    
-    if doc.status == "draft":
-        # Qoralama holatida: to'g'ridan-to'g'ri o'chirish
-        db.delete(doc)
-        db.commit()
-        return RedirectResponse(url="/qoldiqlar#tovar", status_code=303)
-    elif doc.status == "confirmed":
-        # Tasdiqlangan holatida: Stock yozuvlarini qaytarish va o'chirish
-        for item in doc.items:
-            stock = db.query(Stock).filter(
-                Stock.warehouse_id == item.warehouse_id,
-                Stock.product_id == item.product_id,
-            ).first()
-            if stock:
-                # Qoldiq o'zgarishini teskari qilish
-                stock.quantity = (stock.quantity or 0) - item.quantity
-                if stock.quantity < 0:
-                    stock.quantity = 0
-                stock.updated_at = datetime.now()
-        # Hujjatni o'chirish
-        db.delete(doc)
-        db.commit()
-        return RedirectResponse(url="/qoldiqlar#tovar?deleted=1", status_code=303)
-    else:
-        raise HTTPException(status_code=400, detail="Faqat qoralama yoki tasdiqlangan hujjatni o'chirish mumkin.")
+    if doc.status != "draft":
+        raise HTTPException(status_code=400, detail="Faqat qoralama holatidagi hujjatni o'chirish mumkin. Avval tasdiqni bekor qiling.")
+    db.delete(doc)
+    db.commit()
+    return RedirectResponse(url="/qoldiqlar#tovar", status_code=303)
 
 
 # Bo'limlar bo'limi
 @app.get("/info/departments", response_class=HTMLResponse)
 async def info_departments(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    departments = get_departments_for_user(db, current_user)
+    departments = db.query(Department).all()
     return templates.TemplateResponse("info/departments.html", {"request": request, "departments": departments, "current_user": current_user, "page_title": "Bo'limlar"})
 
 @app.post("/info/departments/add")
@@ -3870,7 +3345,7 @@ async def info_departments_delete(department_id: int, db: Session = Depends(get_
 # --- DEPARTMENTS EXCEL OPERATIONS ---
 @app.get("/info/departments/export")
 async def export_departments(db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    departments = get_departments_for_user(db, current_user)
+    departments = db.query(Department).all()
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Departments"
@@ -4019,14 +3494,9 @@ async def import_directions(file: UploadFile = File(...), db: Session = Depends(
 async def info_users(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """Foydalanuvchilar ro'yxati"""
     users = db.query(User).all()
-    # Barcha xodimlar (faol + faol emas) — foydalanuvchi yaratishda tanlash uchun
-    employees = db.query(Employee).order_by(Employee.full_name).all()
-    user_to_employee = {e.user_id: e for e in employees if getattr(e, "user_id", None)}
     return templates.TemplateResponse("info/users.html", {
         "request": request,
         "users": users,
-        "employees": employees,
-        "user_to_employee": user_to_employee,
         "current_user": current_user,
         "page_title": "Foydalanuvchilar"
     })
@@ -4039,14 +3509,16 @@ async def info_users_add(
     full_name: str = Form(...),
     role: str = Form("user"),
     is_active: bool = Form(True),
-    employee_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """Yangi foydalanuvchi qo'shish (faqat admin). employee_id bo'lsa xodimga foydalanuvchi bog'lanadi."""
+    """Yangi foydalanuvchi qo'shish (faqat admin)"""
+    # Username dublikat tekshiruvi
     existing = db.query(User).filter(User.username == username).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"'{username}' login bilan foydalanuvchi allaqachon mavjud!")
+    
+    # Yangi foydalanuvchi yaratish
     user = User(
         username=username,
         password_hash=hash_password(password),
@@ -4056,12 +3528,6 @@ async def info_users_add(
     )
     db.add(user)
     db.commit()
-    db.refresh(user)
-    if employee_id:
-        emp = db.query(Employee).filter(Employee.id == employee_id).first()
-        if emp:
-            emp.user_id = user.id
-            db.commit()
     return RedirectResponse(url="/info/users", status_code=303)
 
 @app.post("/info/users/edit/{user_id}")
@@ -4071,30 +3537,26 @@ async def info_users_edit(
     full_name: str = Form(...),
     role: str = Form("user"),
     is_active: bool = Form(True),
-    employee_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """Foydalanuvchini tahrirlash (faqat admin). employee_id bo'lsa shu xodimga bog'lanadi."""
+    """Foydalanuvchini tahrirlash (faqat admin)"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
+    
+    # Username dublikat tekshiruvi (o'zidan boshqa)
     existing = db.query(User).filter(
         User.username == username,
         User.id != user_id
     ).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"'{username}' login bilan foydalanuvchi allaqachon mavjud!")
+    
     user.username = username
     user.full_name = full_name
     user.role = role
     user.is_active = is_active
-    for emp in db.query(Employee).filter(Employee.user_id == user_id).all():
-        emp.user_id = None
-    if employee_id:
-        emp = db.query(Employee).filter(Employee.id == employee_id).first()
-        if emp:
-            emp.user_id = user_id
     db.commit()
     return RedirectResponse(url="/info/users", status_code=303)
 
@@ -4271,6 +3733,34 @@ async def product_import_template(current_user: User = Depends(require_auth)):
     wb.save(stream)
     stream.seek(0)
     return StreamingResponse(stream, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=tovar_andoza.xlsx"})
+
+
+def _products_check_duplicates_data(db: Session):
+    """Tovarlar tekshiruvi ma'lumotlari (dublikatlar)."""
+    by_name: dict = {}
+    for p in db.query(Product).filter(Product.is_active == True, Product.name.isnot(None)).all():
+        key = (p.name or "").strip().lower()
+        if key:
+            by_name.setdefault(key, []).append(p)
+    return [prods for prods in by_name.values() if len(prods) > 1]
+
+
+@app.get("/products/check", response_class=HTMLResponse)
+@app.get("/product-check", response_class=HTMLResponse)  # konfliktsiz alternativ (422 oldini olish)
+async def products_check_duplicates(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tovarlar tekshiruvi: bir xil nomdagi tovarlar (dublikatlar) ro'yxati."""
+    duplicate_groups = _products_check_duplicates_data(db)
+    return templates.TemplateResponse("products/check.html", {
+        "request": request,
+        "current_user": current_user,
+        "page_title": "Tovarlar tekshiruvi",
+        "duplicate_groups": duplicate_groups,
+    })
+
 
 @app.get("/products/{product_id}", response_class=HTMLResponse)
 async def product_detail(request: Request, product_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
@@ -4466,7 +3956,6 @@ async def products_list(request: Request, type: str = "all", db: Session = Depen
         "import_skipped": import_skipped,
         "import_error": import_error,
         "import_detail": import_detail,
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 
@@ -4581,27 +4070,6 @@ async def product_edit(
     return RedirectResponse(url="/products", status_code=303)
 
 
-@app.get("/products/check", response_class=HTMLResponse)
-async def products_check_duplicates(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Tovarlar tekshiruvi: bir xil nomdagi tovarlar (dublikatlar) ro'yxati."""
-    by_name: dict = {}
-    for p in db.query(Product).filter(Product.is_active == True, Product.name.isnot(None)).all():
-        key = (p.name or "").strip().lower()
-        if key:
-            by_name.setdefault(key, []).append(p)
-    duplicate_groups = [prods for prods in by_name.values() if len(prods) > 1]
-    return templates.TemplateResponse("products/check.html", {
-        "request": request,
-        "current_user": current_user,
-        "page_title": "Tovarlar tekshiruvi",
-        "duplicate_groups": duplicate_groups,
-    })
-
-
 @app.post("/products/delete/{product_id}")
 async def product_delete(
     product_id: int,
@@ -4686,42 +4154,36 @@ def create_stock_movement(
     document_id: int,
     document_number: str = None,
     user_id: int = None,
-    note: str = None,
-    update_stock: bool = True,
+    note: str = None
 ):
-    """Har bir operatsiya uchun StockMovement yozuvini yaratish. update_stock=False bo'lsa faqat yozuv yoziladi, Stock o'zgartirilmaydi (masalan qoldiq tuzatishda Stock allaqachon o'rnatilgan bo'ladi)."""
+    """Har bir operatsiya uchun StockMovement yozuvini yaratish"""
+    # Stock ni topish yoki yaratish
     stock = db.query(Stock).filter(
         Stock.warehouse_id == warehouse_id,
         Stock.product_id == product_id
     ).first()
-
-    if update_stock:
-        if stock:
-            stock.quantity = (stock.quantity or 0) + quantity_change
-            if stock.quantity < 0:
-                stock.quantity = 0
-            stock.updated_at = datetime.now()
-            stock_id = stock.id
-            quantity_after = stock.quantity
-        else:
-            quantity_after = quantity_change if quantity_change > 0 else 0
-            stock = Stock(
-                warehouse_id=warehouse_id,
-                product_id=product_id,
-                quantity=quantity_after
-            )
-            db.add(stock)
-            db.flush()
-            stock_id = stock.id
+    
+    # Qoldiqni yangilash
+    if stock:
+        stock.quantity = (stock.quantity or 0) + quantity_change
+        if stock.quantity < 0:
+            stock.quantity = 0
+        stock.updated_at = datetime.now()
+        stock_id = stock.id
+        quantity_after = stock.quantity
     else:
-        # Faqat yozuv: Stock ni tegmang, hozirgi qoldiqdan quantity_after olamiz
-        if stock:
-            stock_id = stock.id
-            quantity_after = float(stock.quantity or 0)
-        else:
-            stock_id = None
-            quantity_after = quantity_change if quantity_change > 0 else 0
-
+        # Yangi stock yaratish
+        quantity_after = quantity_change if quantity_change > 0 else 0
+        stock = Stock(
+            warehouse_id=warehouse_id,
+            product_id=product_id,
+            quantity=quantity_after
+        )
+        db.add(stock)
+        db.flush()  # ID olish uchun
+        stock_id = stock.id
+    
+    # StockMovement yozuvini yaratish
     movement = StockMovement(
         stock_id=stock_id,
         warehouse_id=warehouse_id,
@@ -4739,23 +4201,14 @@ def create_stock_movement(
     return movement
 
 
-def _warehouses_for_user_manager(db: Session, user) -> list:
-    """Foydalanuvchi uchun ko'rinadigan omborlar: sozlamada belgilangan yoki admin/raxbar uchun barcha."""
-    return get_warehouses_for_user(db, user)
-
-
 @app.get("/warehouse", response_class=HTMLResponse)
 async def warehouse_list(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    """Qaysi omborda nima bor — ombor qoldiqlari. Foydalanuvchi faqat o'ziga belgilangan omborlarni ko'radi."""
+    """Qaysi omborda nima bor — ombor qoldiqlari"""
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
-    warehouses = get_warehouses_for_user(db, current_user)
-    wh_ids = [w.id for w in warehouses]
-    # Faqat qoldiq > 0 bo'lgan yozuvlarni ko'rsatamiz; faqat foydalanuvchiga ruxsat etilgan omborlar
-    stocks = db.query(Stock).join(Product).join(Warehouse).filter(Stock.quantity > 0)
-    if wh_ids:
-        stocks = stocks.filter(Stock.warehouse_id.in_(wh_ids))
-    stocks = stocks.all()
+    warehouses = db.query(Warehouse).all()
+    # Faqat qoldiq > 0 bo'lgan yozuvlarni ko'rsatamiz (0 qoldiqlar ro'yxatda chiqmasin)
+    stocks = db.query(Stock).join(Product).join(Warehouse).filter(Stock.quantity > 0).all()
     
     # Har bir qoldiq uchun oxirgi hujjatni StockMovement dan olish
     stock_sources = {}
@@ -4853,8 +4306,7 @@ async def warehouse_list(request: Request, db: Session = Depends(get_db), curren
         "stocks": stocks,
         "stock_sources": stock_sources,
         "current_user": current_user,
-        "page_title": "Ombor qoldiqlari",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
+        "page_title": "Ombor qoldiqlari"
     })
 
 
@@ -4884,8 +4336,7 @@ async def warehouse_export(db: Session = Depends(get_db), current_user: User = D
     for s in stocks:
         pr = s.product
         wh = s.warehouse
-        sc = getattr(s, "cost_price", None)
-        tannarx = (sc if sc and sc > 0 else None) or (pr.purchase_price if pr else 0) or 0
+        tannarx = (pr.purchase_price or 0) if pr else 0
         summa = s.quantity * tannarx
         ws.append([
             wh.name if wh else "",
@@ -5137,10 +4588,6 @@ async def warehouse_transfers_list(request: Request, db: Session = Depends(get_d
         return RedirectResponse(url="/login", status_code=303)
     from urllib.parse import unquote
     transfers = db.query(WarehouseTransfer).order_by(WarehouseTransfer.date.desc()).limit(200).all()
-    if getattr(current_user, "role", None) == "manager":
-        wh_ids = [w.id for w in _warehouses_for_user_manager(db, current_user)]
-        if wh_ids:
-            transfers = [t for t in transfers if (t.from_warehouse_id in wh_ids or t.to_warehouse_id in wh_ids)]
     error = request.query_params.get("error")
     return templates.TemplateResponse("warehouse/transfers_list.html", {
         "request": request,
@@ -5156,20 +4603,15 @@ async def warehouse_transfer_new(request: Request, db: Session = Depends(get_db)
     """Yangi o'tkazish hujjati"""
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
-    from sqlalchemy.orm import joinedload
-    warehouses = _warehouses_for_user_manager(db, current_user)
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
-    stocks = db.query(Stock).options(joinedload(Stock.product)).filter(Stock.quantity > 0).all()
+    stocks = db.query(Stock).filter(Stock.quantity > 0).all()
     stock_by_warehouse_product = {}
-    stock_cost_by_warehouse_product = {}
     for s in stocks:
         wid, pid = str(s.warehouse_id), str(s.product_id)
         if wid not in stock_by_warehouse_product:
             stock_by_warehouse_product[wid] = {}
-            stock_cost_by_warehouse_product[wid] = {}
         stock_by_warehouse_product[wid][pid] = s.quantity
-        cost = (getattr(s, "cost_price", None) or 0) or (s.product.purchase_price if s.product else 0)
-        stock_cost_by_warehouse_product[wid][pid] = float(cost or 0)
     products_list = [{"id": p.id, "name": (p.name or ""), "code": (p.code or "")} for p in products]
     return templates.TemplateResponse("warehouse/transfer_form.html", {
         "request": request,
@@ -5179,11 +4621,8 @@ async def warehouse_transfer_new(request: Request, db: Session = Depends(get_db)
         "products": products,
         "products_list": products_list,
         "stock_by_warehouse_product": stock_by_warehouse_product,
-        "stock_cost_by_warehouse_product": stock_cost_by_warehouse_product,
-        "source_costs": {},
         "now": datetime.now(),
-        "page_title": "Ombordan omborga o'tkazish (yaratish)",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
+        "page_title": "Ombordan omborga o'tkazish (yaratish)"
     })
 
 
@@ -5192,27 +4631,18 @@ async def warehouse_transfer_edit(request: Request, transfer_id: int, db: Sessio
     """O'tkazish hujjatini tahrirlash"""
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
-    from sqlalchemy.orm import joinedload
     transfer = db.query(WarehouseTransfer).filter(WarehouseTransfer.id == transfer_id).first()
     if not transfer:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
-    warehouses = _warehouses_for_user_manager(db, current_user)
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
-    stocks = db.query(Stock).options(joinedload(Stock.product)).filter(Stock.quantity > 0).all()
+    stocks = db.query(Stock).filter(Stock.quantity > 0).all()
     stock_by_warehouse_product = {}
-    stock_cost_by_warehouse_product = {}
     for s in stocks:
         wid, pid = str(s.warehouse_id), str(s.product_id)
         if wid not in stock_by_warehouse_product:
             stock_by_warehouse_product[wid] = {}
-            stock_cost_by_warehouse_product[wid] = {}
         stock_by_warehouse_product[wid][pid] = s.quantity
-        cost = (getattr(s, "cost_price", None) or 0) or (s.product.purchase_price if s.product else 0)
-        stock_cost_by_warehouse_product[wid][pid] = float(cost or 0)
-    source_costs = {}
-    from_wh = str(transfer.from_warehouse_id) if transfer.from_warehouse_id else None
-    if from_wh and from_wh in stock_cost_by_warehouse_product:
-        source_costs = {int(pid): cost for pid, cost in stock_cost_by_warehouse_product[from_wh].items()}
     products_list = [{"id": p.id, "name": (p.name or ""), "code": (p.code or "")} for p in products]
     return templates.TemplateResponse("warehouse/transfer_form.html", {
         "request": request,
@@ -5222,11 +4652,8 @@ async def warehouse_transfer_edit(request: Request, transfer_id: int, db: Sessio
         "products": products,
         "products_list": products_list,
         "stock_by_warehouse_product": stock_by_warehouse_product,
-        "stock_cost_by_warehouse_product": stock_cost_by_warehouse_product,
-        "source_costs": source_costs,
         "now": transfer.date or datetime.now(),
-        "page_title": f"O'tkazish {transfer.number}",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
+        "page_title": f"O'tkazish {transfer.number}"
     })
 
 
@@ -5356,20 +4783,8 @@ async def warehouse_transfer_confirm(
                 url=f"/warehouse/transfers/{transfer_id}?error=" + quote(f"Qayerdan omborda «{name}» yetarli emas (kerak: {item.quantity}, mavjud: {avail_display})"),
                 status_code=303
             )
-    # Qoldiqlarni yangilash - faqat tasdiqlanganda (miqdor + tannarx/summa o'tadi)
+    # Qoldiqlarni yangilash - faqat tasdiqlanganda
     for item in items:
-        # Manba ombor tannarxi (qoldiq bo'yicha yoki mahsulot tannarxi)
-        src_stock = db.query(Stock).filter(
-            Stock.warehouse_id == transfer.from_warehouse_id,
-            Stock.product_id == item.product_id
-        ).first()
-        prod = db.query(Product).filter(Product.id == item.product_id).first()
-        source_cost = 0.0
-        if src_stock and getattr(src_stock, "cost_price", None) and (src_stock.cost_price or 0) > 0:
-            source_cost = float(src_stock.cost_price)
-        elif prod and (prod.purchase_price or 0) > 0:
-            source_cost = float(prod.purchase_price)
-
         # Qayerdan ombordan ayirish - StockMovement yozuvini yaratish
         create_stock_movement(
             db=db,
@@ -5397,19 +4812,6 @@ async def warehouse_transfer_confirm(
             user_id=current_user.id if current_user else None,
             note=f"O'tkazish (kirim): {transfer.number}"
         )
-
-        # Qabul qiluvchi omborda tannarx: yangi qoldiq bo'lsa source_cost, mavjud bo'lsa o'rtacha tannarx
-        dest_stock = db.query(Stock).filter(
-            Stock.warehouse_id == transfer.to_warehouse_id,
-            Stock.product_id == item.product_id
-        ).first()
-        if dest_stock:
-            qty_old = (dest_stock.quantity or 0) - float(item.quantity or 0)
-            cost_old = getattr(dest_stock, "cost_price", None) or 0
-            if qty_old <= 0 or (cost_old or 0) <= 0:
-                dest_stock.cost_price = source_cost
-            else:
-                dest_stock.cost_price = (qty_old * cost_old + float(item.quantity or 0) * source_cost) / (dest_stock.quantity or 1)
     
     # Tasdiqlash ma'lumotlarini saqlash
     transfer.status = "confirmed"
@@ -5536,27 +4938,17 @@ async def purchases_list(request: Request, db: Session = Depends(get_db), curren
     from urllib.parse import unquote
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
-    try:
-        purchases = (
-            db.query(Purchase)
-            .options(joinedload(Purchase.partner), joinedload(Purchase.warehouse))
-            .order_by(Purchase.date.desc())
-            .limit(100)
-            .all()
-        )
-        error = request.query_params.get("error")
-        error_detail = unquote(request.query_params.get("detail", "") or "")
-        return templates.TemplateResponse("purchases/list.html", {
-            "request": request,
-            "purchases": purchases,
-            "current_user": current_user,
-            "page_title": "Tovar kirimlari",
-            "error": error,
-            "error_detail": error_detail,
-        })
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Xatolik: {str(e)}")
+    purchases = db.query(Purchase).order_by(Purchase.date.desc()).limit(100).all()
+    error = request.query_params.get("error")
+    error_detail = unquote(request.query_params.get("detail", "") or "")
+    return templates.TemplateResponse("purchases/list.html", {
+        "request": request,
+        "purchases": purchases,
+        "current_user": current_user,
+        "page_title": "Tovar kirimlari",
+        "error": error,
+        "error_detail": error_detail,
+    })
 
 
 @app.get("/purchases/new", response_class=HTMLResponse)
@@ -5565,7 +4957,7 @@ async def purchase_new(request: Request, db: Session = Depends(get_db), current_
     products = db.query(Product).filter(Product.is_active == True).all()
     # Barcha faol kontragentlar (ta'minotchi qidiruvida topilsin)
     partners = db.query(Partner).filter(Partner.is_active == True).order_by(Partner.name).all()
-    warehouses = get_warehouses_for_user(db, current_user)
+    warehouses = db.query(Warehouse).all()
     return templates.TemplateResponse("purchases/new.html", {
         "request": request,
         "products": products,
@@ -6138,12 +5530,12 @@ async def sales_new(
     current_user: User = Depends(require_auth)
 ):
     """Yangi sotuv — narx turini tanlang, shu bo'yicha mahsulot narxlari ko'rsatiladi. Barcha turlar (tayyor, yarim_tayyor, xom ashyo) ombor qoldig'ida ko'rinadi."""
-    products = db.query(Product).options(joinedload(Product.unit)).filter(
+    products = db.query(Product).filter(
         Product.type.in_(["tayyor", "yarim_tayyor", "hom_ashyo", "material"]),
         Product.is_active == True
     ).order_by(Product.name).all()
     partners = db.query(Partner).filter(Partner.is_active == True).order_by(Partner.name).all()
-    warehouses = get_warehouses_for_user(db, current_user)
+    warehouses = db.query(Warehouse).all()
     price_types = db.query(PriceType).filter(PriceType.is_active == True).order_by(PriceType.name).all()
     current_pt_id = price_type_id or (price_types[0].id if price_types else None)
     product_prices_by_type = {}
@@ -6152,24 +5544,12 @@ async def sales_new(
         product_prices_by_type = {pp.product_id: pp.sale_price for pp in pps}
     # Ombor bo'yicha qoldiq bor mahsulotlar: warehouse_id -> [product_id, ...]
     warehouse_products = {}
-    # Ombor bo'yicha mahsulot qoldiq miqdori: warehouse_id -> { product_id: quantity }
-    warehouse_stock_quantities = {}
     for wh in warehouses:
-        rows = (
-            db.query(Stock.product_id)
-            .filter(Stock.warehouse_id == wh.id)
-            .group_by(Stock.product_id)
-            .having(func.sum(Stock.quantity) > 0)
-            .all()
-        )
+        rows = db.query(Stock.product_id).filter(
+            Stock.warehouse_id == wh.id,
+            Stock.quantity > 0
+        ).distinct().all()
         warehouse_products[str(wh.id)] = [r[0] for r in rows]
-        qty_rows = (
-            db.query(Stock.product_id, func.coalesce(func.sum(Stock.quantity), 0).label("total"))
-            .filter(Stock.warehouse_id == wh.id)
-            .group_by(Stock.product_id)
-            .all()
-        )
-        warehouse_stock_quantities[str(wh.id)] = {str(r[0]): float(r[1] or 0) for r in qty_rows}
     return templates.TemplateResponse("sales/new.html", {
         "request": request,
         "products": products,
@@ -6179,7 +5559,6 @@ async def sales_new(
         "current_price_type_id": current_pt_id,
         "product_prices_by_type": product_prices_by_type,
         "warehouse_products": warehouse_products,
-        "warehouse_stock_quantities": warehouse_stock_quantities,
         "current_user": current_user,
         "page_title": "Yangi sotuv"
     })
@@ -6234,7 +5613,7 @@ async def sales_create(
                     price = pp.sale_price or 0
                 else:
                     prod = db.query(Product).filter(Product.id == pid).first()
-                    price = (prod.sale_price or 0) if prod else 0
+                    price = (prod.sale_price or prod.purchase_price or 0) if prod else 0
             total_row = qty * price
             item = OrderItem(order_id=order.id, product_id=pid, quantity=qty, price=price, total=total_row)
             db.add(item)
@@ -6253,7 +5632,7 @@ async def sales_edit(
 ):
     """Sotuv tafsiloti — ko'rish va qoralama holatida tahrirlash"""
     from urllib.parse import unquote
-    order = db.query(Order).options(joinedload(Order.items).joinedload(OrderItem.product)).filter(Order.id == order_id, Order.type == "sale").first()
+    order = db.query(Order).filter(Order.id == order_id, Order.type == "sale").first()
     if not order:
         raise HTTPException(status_code=404, detail="Sotuv topilmadi")
     products = db.query(Product).filter(Product.type.in_(["tayyor", "yarim_tayyor"]), Product.is_active == True).order_by(Product.name).all()
@@ -6263,11 +5642,6 @@ async def sales_edit(
         product_prices_by_type = {pp.product_id: pp.sale_price for pp in pps}
     error = request.query_params.get("error")
     error_detail = unquote(request.query_params.get("detail", "") or "")
-    foyda_zarar = 0
-    for item in order.items:
-        cost = (item.product.purchase_price or 0) if item.product else 0
-        foyda_zarar += (item.quantity or 0) * ((item.price or 0) - cost)
-    show_foyda_zarar = current_user and getattr(current_user, "role", None) in ("admin", "rahbar", "raxbar")
     return templates.TemplateResponse("sales/edit.html", {
         "request": request,
         "order": order,
@@ -6277,8 +5651,6 @@ async def sales_edit(
         "page_title": f"Sotuv: {order.number}",
         "error": error,
         "error_detail": error_detail,
-        "foyda_zarar": foyda_zarar,
-        "show_foyda_zarar": show_foyda_zarar,
     })
 
 
@@ -6429,7 +5801,7 @@ async def sales_revert(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Sotuv tasdiqini bekor qilish (faqat admin): ombor qoldig'ini qaytarish, kassa balansini qaytarish, holatni qoralamaga o'tkazish"""
+    """Sotuv tasdiqini bekor qilish (faqat admin): ombor qoldig'ini qaytarish, holatni qoralamaga o'tkazish"""
     from urllib.parse import quote
     order = db.query(Order).filter(Order.id == order_id, Order.type == "sale").first()
     if not order:
@@ -6439,15 +5811,6 @@ async def sales_revert(
             url=f"/sales/edit/{order_id}?error=revert&detail=" + quote("Faqat bajarilgan sotuvning tasdiqini bekor qilish mumkin."),
             status_code=303
         )
-    # Payment yozuvlarini topib, CashRegister balansini qaytarish
-    payments = db.query(Payment).filter(Payment.order_id == order_id).all()
-    for payment in payments:
-        if payment.cash_register_id and payment.amount:
-            cash_register = db.query(CashRegister).filter(CashRegister.id == payment.cash_register_id).first()
-            if cash_register:
-                # To'lov summasini kassa balansidan ayirish
-                cash_register.balance = (cash_register.balance or 0) - (payment.amount or 0)
-    # Ombor qoldig'ini qaytarish
     for item in order.items:
         stock = db.query(Stock).filter(
             Stock.warehouse_id == order.warehouse_id,
@@ -6466,39 +5829,19 @@ async def sales_delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """Sotuvni o'chirish (faqat admin): draft -> cancelled, cancelled -> DB dan o'chirish"""
-    from urllib.parse import quote
+    """Sotuvni o'chirish (faqat qoralama, faqat admin)"""
     order = db.query(Order).filter(Order.id == order_id, Order.type == "sale").first()
     if not order:
         raise HTTPException(status_code=404, detail="Sotuv topilmadi")
-    
-    if order.status == "draft":
-        # Qoralama holatida: faqat cancelled holatiga o'tkazish
-        order.status = "cancelled"
-        db.commit()
-        return RedirectResponse(url="/sales", status_code=303)
-    elif order.status == "cancelled":
-        # Bekor qilingan holatida: DB dan to'liq o'chirish
-        # Payment yozuvlarini o'chirishdan oldin CashRegister balansini qaytarish
-        payments = db.query(Payment).filter(Payment.order_id == order_id).all()
-        for payment in payments:
-            if payment.cash_register_id and payment.amount:
-                cash_register = db.query(CashRegister).filter(CashRegister.id == payment.cash_register_id).first()
-                if cash_register:
-                    # To'lov summasini kassa balansidan ayirish
-                    cash_register.balance = (cash_register.balance or 0) - (payment.amount or 0)
-        # OrderItem va Payment bilan birga o'chirish
-        db.query(OrderItem).filter(OrderItem.order_id == order_id).delete()
-        db.query(Payment).filter(Payment.order_id == order_id).delete()
-        db.delete(order)
-        db.commit()
-        return RedirectResponse(url="/sales?deleted=1", status_code=303)
-    else:
-        # Boshqa holatlar: xatolik
+    if order.status != "draft":
+        from urllib.parse import quote
         return RedirectResponse(
-            url="/sales?error=delete&detail=" + quote("Faqat qoralama yoki bekor qilingan sotuvni o'chirish mumkin."),
+            url="/sales?error=delete&detail=" + quote("Faqat qoralama holatidagi sotuvni o'chirish mumkin. Avval tasdiqni bekor qiling."),
             status_code=303
         )
+    order.status = "cancelled"
+    db.commit()
+    return RedirectResponse(url="/sales", status_code=303)
 
 
 # ---------- Sotuvchi uchun POS (Sotuv oynasi) ----------
@@ -6514,19 +5857,97 @@ def _get_sales_warehouse(db: Session):
 
 
 def _get_pos_warehouses_for_user(db: Session, current_user: User):
-    """Foydalanuvchiga tegishli omborlar ro'yxati (POS va sotuv oynasida — faqat sozlamada belgilangan)."""
-    return get_warehouses_for_user(db, current_user)
+    """Foydalanuvchiga tegishli omborlar ro'yxati (POS tepada ko'rsatish va tanlash uchun)."""
+    if not current_user:
+        return []
+    role = (current_user.role or "").strip()
+    if role == "admin" or role == "manager":
+        return db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
+    if role != "sotuvchi":
+        return []
+    from sqlalchemy.orm import joinedload
+    user = db.query(User).options(
+        joinedload(User.warehouses_list),
+        joinedload(User.departments_list),
+    ).filter(User.id == current_user.id).first()
+    if not user:
+        return []
+    seen = set()
+    result = []
+    for w in (user.warehouses_list or []):
+        if w and w.id not in seen and (getattr(w, "is_active", True)):
+            seen.add(w.id)
+            result.append(w)
+    for dept in (user.departments_list or []):
+        if not dept:
+            continue
+        for w in db.query(Warehouse).filter(
+            Warehouse.department_id == dept.id,
+            Warehouse.is_active == True
+        ).order_by(Warehouse.name).all():
+            if w.id not in seen:
+                seen.add(w.id)
+                result.append(w)
+    if user.warehouse_id and user.warehouse_id not in seen:
+        wh = db.query(Warehouse).filter(Warehouse.id == user.warehouse_id, Warehouse.is_active == True).first()
+        if wh:
+            seen.add(wh.id)
+            result.append(wh)
+    if user.department_id and user.department_id not in (getattr(d, "id", None) for d in (user.departments_list or [])):
+        for w in db.query(Warehouse).filter(
+            Warehouse.department_id == user.department_id,
+            Warehouse.is_active == True
+        ).order_by(Warehouse.name).all():
+            if w.id not in seen:
+                seen.add(w.id)
+                result.append(w)
+    return result
 
 
 def _get_pos_warehouse_for_user(db: Session, current_user: User):
-    """POS uchun default ombor: admin/raxbar uchun umumiy, qolganlar uchun faqat sozlamada belgilanganlarning birinchisi."""
+    """
+    Sotuvchi uchun ombor: foydalanuvchining warehouses_list (yoki departments_list) bo'yicha.
+    Admin/menejer: _get_sales_warehouse (umumiy).
+    """
     if not current_user:
         return None
-    role = (getattr(current_user, "role", None) or "").strip().lower()
-    if role in ("admin", "rahbar", "raxbar"):
+    role = (current_user.role or "").strip()
+    if role == "admin" or role == "manager":
         return _get_sales_warehouse(db)
-    whs = get_warehouses_for_user(db, current_user)
-    return whs[0] if whs else None
+    if role != "sotuvchi":
+        return None
+    from sqlalchemy.orm import joinedload
+    user = db.query(User).options(
+        joinedload(User.warehouses_list),
+        joinedload(User.departments_list),
+    ).filter(User.id == current_user.id).first()
+    if not user:
+        return None
+    if user.warehouses_list:
+        return user.warehouses_list[0]
+    if user.departments_list:
+        dept = user.departments_list[0]
+        wh = db.query(Warehouse).filter(
+            Warehouse.department_id == dept.id,
+            Warehouse.is_active == True
+        ).order_by(Warehouse.id).first()
+        if wh:
+            return wh
+    if user.warehouse_id:
+        wh = db.query(Warehouse).filter(
+            Warehouse.id == user.warehouse_id,
+            Warehouse.is_active == True
+        ).first()
+        if wh:
+            return wh
+    if user.department_id:
+        wh = db.query(Warehouse).filter(
+            Warehouse.department_id == user.department_id,
+            Warehouse.is_active == True
+        ).order_by(Warehouse.id).first()
+        if wh:
+            return wh
+    return None
 
 
 def _get_pos_partner(db: Session):
@@ -6584,7 +6005,6 @@ async def sales_pos(
             "error": err,
             "error_detail": detail_msg,
             "number": request.query_params.get("number", ""),
-            "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
         })
     product_ids_in_warehouse = [
         r[0] for r in db.query(Stock.product_id).filter(
@@ -6606,9 +6026,7 @@ async def sales_pos(
         product_prices = {pp.product_id: (pp.sale_price or 0) for pp in pps}
     for p in products:
         if p.id not in product_prices or product_prices[p.id] == 0:
-            _role = getattr(current_user, "role", None) if current_user else None
-            _show_tannarx = _role in ("admin", "rahbar", "raxbar")
-            product_prices[p.id] = float(p.sale_price or (p.purchase_price if _show_tannarx else 0) or 0)
+            product_prices[p.id] = float(p.sale_price or p.purchase_price or 0)
     stock_by_product = {}
     if sales_warehouse and product_ids_in_warehouse:
         for row in db.query(Stock.product_id, Stock.quantity).filter(
@@ -6648,7 +6066,6 @@ async def sales_pos(
         "error": error,
         "error_detail": error_detail,
         "number": number,
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
     })
 
 
@@ -7607,9 +7024,8 @@ async def employment_doc_create_page(
     employees = db.query(Employee).order_by(Employee.full_name).all()
     emp = db.query(Employee).filter(Employee.id == employee_id).first() if employee_id else None
     today_str = date.today().isoformat()
-    departments = get_departments_for_user(db, current_user)
+    departments = db.query(Department).filter(Department.is_active == True).order_by(Department.name).all()
     positions = db.query(Position).filter(Position.is_active == True).order_by(Position.name).all()
-    piecework_tasks = db.query(PieceworkTask).filter(PieceworkTask.is_active == True).order_by(PieceworkTask.name).all()
     return templates.TemplateResponse("employees/hiring_doc_form.html", {
         "request": request,
         "employees": employees,
@@ -7617,7 +7033,6 @@ async def employment_doc_create_page(
         "today_str": today_str,
         "departments": departments,
         "positions": positions,
-        "piecework_tasks": piecework_tasks,
         "current_user": current_user,
         "page_title": "Ishga qabul hujjati yaratish"
     })
@@ -7630,109 +7045,43 @@ async def employment_doc_create(
     hire_date: str = Form(None),
     position: str = Form(""),
     department: str = Form(""),
-    salary: str = Form("0"),
-    salary_type: str = Form(""),
-    piecework_task_id: Optional[int] = Form(None),
-    days_off_per_month: str = Form("0"),
-    work_hours_per_day: str = Form("10"),
+    salary: float = Form(0),
     note: str = Form(""),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
     """Ishga qabul hujjati yaratish"""
-    import traceback
     from urllib.parse import quote
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:
         return RedirectResponse(url="/employees/hiring-docs?error=" + quote("Xodim topilmadi"), status_code=303)
-    doc_date_str = (doc_date or "").strip()
-    if not doc_date_str:
-        return RedirectResponse(url="/employees/hiring-doc/create?employee_id=" + str(employee_id) + "&error=" + quote("Hujjat sanasini kiriting"), status_code=303)
     try:
-        doc_d = datetime.strptime(doc_date_str[:10], "%Y-%m-%d").date()
+        doc_d = datetime.strptime(doc_date.strip(), "%Y-%m-%d").date()
     except (ValueError, TypeError):
         return RedirectResponse(url="/employees/hiring-doc/create?employee_id=" + str(employee_id) + "&error=" + quote("Noto'g'ri sana"), status_code=303)
     hire_d = None
     if hire_date and hire_date.strip():
         try:
-            hire_d = datetime.strptime(hire_date.strip()[:10], "%Y-%m-%d").date()
+            hire_d = datetime.strptime(hire_date.strip(), "%Y-%m-%d").date()
         except (ValueError, TypeError):
             pass
-    try:
-        salary_type_val = (salary_type or "").strip().lower()
-        if salary_type_val and hasattr(emp, "salary_type"):
-            emp.salary_type = salary_type_val
-        if piecework_task_id and hasattr(emp, "piecework_task_id"):
-            emp.piecework_task_id = int(piecework_task_id)
-        elif salary_type_val != "bo'lak" and hasattr(emp, "piecework_task_id"):
-            emp.piecework_task_id = None
-        if hire_d:
-            emp.hire_date = hire_d
-        if position is not None and str(position).strip():
-            emp.position = position.strip()
-        if department is not None and str(department).strip():
-            emp.department = department.strip()
-        sal_val = float(emp.salary) if emp.salary is not None else 0
-        try:
-            if salary is not None and str(salary).strip():
-                sal_val = float(str(salary).strip())
-                if sal_val >= 0:
-                    emp.salary = sal_val
-        except (ValueError, TypeError):
-            pass
-        try:
-            days_off = max(0, min(31, int(days_off_per_month))) if (days_off_per_month not in (None, "")) else 0
-        except (ValueError, TypeError):
-            days_off = 0
-        try:
-            work_hrs = max(0.5, min(24, float(work_hours_per_day or 10)))
-        except (ValueError, TypeError):
-            work_hrs = 10.0
-        if hasattr(emp, "days_off_per_month"):
-            emp.days_off_per_month = days_off
-        if hasattr(emp, "work_hours_per_day"):
-            emp.work_hours_per_day = work_hrs
-        from sqlalchemy.exc import IntegrityError
-        prefix = f"IQ-{doc_d.strftime('%Y%m%d')}-"
-        for attempt in range(5):
-            existing_count = db.query(EmploymentDoc).filter(EmploymentDoc.number.like(prefix + "%")).count()
-            number = f"{prefix}{existing_count + 1 + attempt:04d}"
-            doc = EmploymentDoc(
-                number=number,
-                employee_id=emp.id,
-                doc_date=doc_d,
-                hire_date=hire_d,
-                position=(position or getattr(emp, "position", None) or "").strip() or None,
-                department=(department or getattr(emp, "department", None) or "").strip() or None,
-                salary=sal_val,
-                salary_type=salary_type_val or None,
-                days_off_per_month=days_off,
-                work_hours_per_day=work_hrs,
-                note=(note or "").strip() or None,
-                user_id=current_user.id,
-                confirmed_at=datetime.now(),
-            )
-            try:
-                db.add(doc)
-                db.commit()
-                return RedirectResponse(url="/employees/hiring-docs?created=1&msg=" + quote(f"Hujjat {doc.number} yaratildi va tasdiqlandi."), status_code=303)
-            except IntegrityError:
-                db.rollback()
-                if attempt >= 4:
-                    raise
-        return RedirectResponse(url="/employees/hiring-doc/create?employee_id=" + str(employee_id) + "&error=" + quote("Hujjat raqami band. Qayta urinib ko‘ring."), status_code=303)
-    except Exception as e:
-        import logging
-        logging.exception("employment_doc_create: %s", e)
-        try:
-            db.rollback()
-        except Exception:
-            pass
-        err_msg = quote(str(e)[:200] if str(e) else "Noma'lum xato")
-        return RedirectResponse(
-            url="/employees/hiring-doc/create?employee_id=" + str(employee_id) + "&error=" + err_msg,
-            status_code=303,
-        )
+    count = db.query(EmploymentDoc).filter(EmploymentDoc.doc_date >= doc_d.replace(day=1)).count()
+    number = f"IQ-{doc_d.strftime('%Y%m%d')}-{count + 1:04d}"
+    doc = EmploymentDoc(
+        number=number,
+        employee_id=emp.id,
+        doc_date=doc_d,
+        hire_date=hire_d,
+        position=position or emp.position,
+        department=department or emp.department,
+        salary=salary if salary else emp.salary,
+        note=note or None,
+        user_id=current_user.id,
+        confirmed_at=datetime.now(),  # Hujjat yaratilganda avtomatik tasdiqlanadi
+    )
+    db.add(doc)
+    db.commit()
+    return RedirectResponse(url="/employees/hiring-docs?created=1&msg=" + quote(f"Hujjat {doc.number} yaratildi va tasdiqlandi."), status_code=303)
 
 
 @app.get("/employees/hiring-doc/{doc_id}", response_class=HTMLResponse)
@@ -7760,59 +7109,13 @@ async def employment_doc_confirm(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Ishga qabul hujjatini tasdiqlash — xodim kartasiga hire_date va boshqalarni yozadi (oylik ro'yxatida chiqishi uchun)"""
+    """Ishga qabul hujjatini tasdiqlash"""
     doc = db.query(EmploymentDoc).filter(EmploymentDoc.id == doc_id).first()
     if not doc:
         return RedirectResponse(url="/employees/hiring-docs?error=Hujjat topilmadi", status_code=303)
     doc.confirmed_at = datetime.now()
-    emp = doc.employee
-    if emp:
-        if doc.hire_date:
-            emp.hire_date = doc.hire_date
-        if getattr(doc, "position", None):
-            emp.position = doc.position
-        if getattr(doc, "department", None):
-            emp.department = doc.department
-        if getattr(doc, "salary", None) is not None and float(doc.salary) >= 0:
-            emp.salary = float(doc.salary)
-        if getattr(doc, "salary_type", None):
-            emp.salary_type = doc.salary_type
-        if getattr(doc, "days_off_per_month", None) is not None:
-            emp.days_off_per_month = doc.days_off_per_month
-        if getattr(doc, "work_hours_per_day", None) is not None:
-            emp.work_hours_per_day = doc.work_hours_per_day
     db.commit()
     return RedirectResponse(url="/employees/hiring-docs?confirmed=1", status_code=303)
-
-
-@app.post("/employees/hiring-doc/{doc_id}/sync-to-employee")
-async def employment_doc_sync_to_employee(
-    doc_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Hujjat ma'lumotlarini xodim kartasiga yozish (oylik ro'yxatida chiqishi uchun) — tasdiqlangan hujjatlar uchun."""
-    doc = db.query(EmploymentDoc).filter(EmploymentDoc.id == doc_id).first()
-    if not doc:
-        return RedirectResponse(url="/employees/hiring-docs?error=Hujjat topilmadi", status_code=303)
-    emp = doc.employee
-    if emp:
-        if doc.hire_date:
-            emp.hire_date = doc.hire_date
-        if getattr(doc, "position", None):
-            emp.position = doc.position
-        if getattr(doc, "department", None):
-            emp.department = doc.department
-        if getattr(doc, "salary", None) is not None and float(doc.salary) >= 0:
-            emp.salary = float(doc.salary)
-        if getattr(doc, "salary_type", None):
-            emp.salary_type = doc.salary_type
-        if getattr(doc, "days_off_per_month", None) is not None:
-            emp.days_off_per_month = doc.days_off_per_month
-        if getattr(doc, "work_hours_per_day", None) is not None:
-            emp.work_hours_per_day = doc.work_hours_per_day
-        db.commit()
-    return RedirectResponse(url="/employees/hiring-docs?synced=1", status_code=303)
 
 
 @app.post("/employees/hiring-doc/{doc_id}/cancel-confirm")
@@ -8040,38 +7343,30 @@ async def attendance_docs_list(
 @app.get("/employees/attendance/form", response_class=HTMLResponse)
 async def attendance_form(
     request: Request,
-    date_param: Optional[str] = Query(None, alias="date"),
+    date_param: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Tabel formasi — sana tanlash, barcha xodimlar (davomat bor/yo'q), Hikvision yuklash"""
+    """Tabel formasi — sana tanlash, shu kundagi yozuvlar, Hikvision yuklash"""
     today = date.today()
-    form_date_str = (date_param or "").strip() or today.strftime("%Y-%m-%d")
+    form_date_str = date_param or today.strftime("%Y-%m-%d")
     try:
         form_date = datetime.strptime(form_date_str, "%Y-%m-%d").date()
     except ValueError:
         form_date = today
         form_date_str = form_date.strftime("%Y-%m-%d")
-    # Shu kundagi davomat yozuvlari (employee_id -> Attendance)
-    attendance_by_emp = {
-        a.employee_id: a
-        for a in db.query(Attendance)
+    attendances = (
+        db.query(Attendance)
         .filter(Attendance.date == form_date)
+        .order_by(Attendance.employee_id)
         .all()
-    }
-    # Barcha faol xodimlar — har biri uchun bir qator (davomat bo'lsa to'ldirilgan, bo'lmasa —)
-    all_employees = db.query(Employee).filter(Employee.is_active == True).order_by(Employee.full_name).all()
-    rows = []
-    for emp in all_employees:
-        att = attendance_by_emp.get(emp.id)
-        rows.append({"employee": emp, "attendance": att})
+    )
     doc = db.query(AttendanceDoc).filter(AttendanceDoc.date == form_date).first()
     return templates.TemplateResponse("employees/attendance_form.html", {
         "request": request,
         "form_date": form_date,
         "form_date_str": form_date_str,
-        "attendance_rows": rows,
-        "attendances": [r["attendance"] for r in rows if r["attendance"]],  # tasdiqlash uchun bor yozuvlar
+        "attendances": attendances,
         "doc": doc,
         "current_user": current_user,
         "page_title": "Tabel formasi",
@@ -8126,47 +7421,6 @@ async def attendance_sync_hikvision(
         err_msg = str(e)[:200] if e else "Noma'lum xato"
         traceback.print_exc()
         return RedirectResponse(url=base_redirect + sep + "error=" + quote("Hikvision yuklash: " + err_msg), status_code=303)
-
-
-@app.post("/employees/attendance/auto-sync")
-async def attendance_auto_sync(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Hikvision'dan avtomatik yuklash (doimiy aloqa) — JSON body: date, hikvision_host, hikvision_port, hikvision_username, hikvision_password"""
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse(status_code=400, content={"success": False, "error": "JSON kerak"})
-    date_str = (body.get("date") or "").strip()
-    if not date_str:
-        return JSONResponse(status_code=400, content={"success": False, "error": "date kerak"})
-    try:
-        start_d = datetime.strptime(date_str, "%Y-%m-%d").date()
-        end_d = start_d
-    except (ValueError, TypeError):
-        return JSONResponse(status_code=400, content={"success": False, "error": "Noto'g'ri sana"})
-    host = (body.get("hikvision_host") or "").strip()
-    if not host:
-        return JSONResponse(status_code=400, content={"success": False, "error": "hikvision_host kerak"})
-    try:
-        port = int((body.get("hikvision_port") or "443").strip() or "443")
-    except (ValueError, TypeError):
-        port = 443
-    username = (body.get("hikvision_username") or "admin").strip() or "admin"
-    password = body.get("hikvision_password") or ""
-    try:
-        from app.utils.hikvision import sync_hikvision_attendance
-        result = sync_hikvision_attendance(host, port, username, password, start_d, end_d, db)
-        return JSONResponse(content={
-            "success": result.get("success", False),
-            "imported": result.get("imported", 0),
-            "events_count": result.get("events_count", 0),
-            "errors": result.get("errors") or [],
-        })
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"success": False, "error": str(e)[:200]})
 
 
 @app.post("/employees/attendance/form/confirm")
@@ -8305,16 +7559,12 @@ async def attendance_record_add(
             check_out_dt = datetime.strptime(f"{att_date} {check_out}", "%Y-%m-%d %H:%M")
         except ValueError:
             pass
-    # Soat kiritilmagan bo'lsa, kelgan/ketgan vaqtdan hisobla (oylik hisobda ishlatiladi)
-    hrs = float(hours_worked or 0)
-    if hrs <= 0 and check_in_dt and check_out_dt and check_out_dt > check_in_dt:
-        hrs = round((check_out_dt - check_in_dt).total_seconds() / 3600.0, 2)
     att = Attendance(
         employee_id=employee_id,
         date=att_d,
         check_in=check_in_dt,
         check_out=check_out_dt,
-        hours_worked=hrs,
+        hours_worked=hours_worked or 0,
         status="present",
         note=note or None,
     )
@@ -8401,41 +7651,11 @@ async def employee_salary_page(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Oylik hisoblash — hujjat ro'yxati yoki tanlangan oy uchun forma (faqat ishga qabul qilingan xodimlar)"""
-    from sqlalchemy.orm import joinedload
-    # Hujjat ro'yxati: year va month berilmagan bo'lsa
-    if year is None and month is None:
-        # Mavjud (year, month) uchun SalaryDoc yaratish (eski yozuvlar uchun)
-        for row in db.query(Salary.year, Salary.month).distinct().all():
-            y, m = row[0], row[1]
-            num = f"OY-{y}-{m:02d}"
-            if not db.query(SalaryDoc).filter(SalaryDoc.year == y, SalaryDoc.month == m).first():
-                db.add(SalaryDoc(number=num, year=y, month=m, status="draft"))
-        db.commit()
-        docs = db.query(SalaryDoc).order_by(SalaryDoc.year.desc(), SalaryDoc.month.desc()).all()
-        return templates.TemplateResponse("employees/salary_docs_list.html", {
-            "request": request,
-            "documents": docs,
-            "current_user": current_user,
-            "page_title": "Oylik hisoblash",
-        })
+    """Oylik hisoblash — oy tanlash, xodimlar ro'yxati (base, bonus, deduction, avans, total)"""
     today = date.today()
     year = year or today.year
     month = month or today.month
-    # Hujjat (SalaryDoc) mavjudligini ta'minlash
-    salary_doc = db.query(SalaryDoc).filter(SalaryDoc.year == year, SalaryDoc.month == month).first()
-    if not salary_doc:
-        salary_doc = SalaryDoc(number=f"OY-{year}-{month:02d}", year=year, month=month, status="draft")
-        db.add(salary_doc)
-        db.commit()
-    # Faqat ishga qabul qilingan va ishdan bo'shatilmagan xodimlar
-    employees = (
-        db.query(Employee)
-        .options(joinedload(Employee.piecework_task))
-        .filter(Employee.is_active == True, Employee.hire_date.isnot(None))
-        .order_by(Employee.full_name)
-        .all()
-    )
+    employees = db.query(Employee).filter(Employee.is_active == True).order_by(Employee.full_name).all()
     salaries = {s.employee_id: s for s in db.query(Salary).filter(Salary.year == year, Salary.month == month).all()}
     # Avanslar (shu oy berilgan) — hisoblash uchun
     advance_sums = {}
@@ -8448,131 +7668,18 @@ async def employee_salary_page(
         EmployeeAdvance.advance_date <= end_d,
     ).all():
         advance_sums[a.employee_id] = advance_sums.get(a.employee_id, 0) + a.amount
-    # Bo'lak xodimlar uchun: shu oyda operator sifatida ishlab chiqarilgan jami kg/dona (Production)
-    from app.utils.production_order import recipe_kg_per_unit
-    from datetime import datetime as dt
-    start_dt = dt.combine(start_d, dt.min.time())
-    end_dt = dt.combine(end_d, dt.max.time())
-    user_id_to_employee_id = {e.user_id: e.id for e in employees if getattr(e, "user_id", None)}
-    operator_produced = {}  # employee_id -> {"kg": float, "dona": float}
-    prods = db.query(Production).options(
-        joinedload(Production.recipe),
-        joinedload(Production.stages),
-    ).filter(
-        Production.status == "completed",
-        Production.date >= start_dt,
-        Production.date <= end_dt,
-    ).all()
-    # Operator bo'sh bo'lib user_id bor buyurtmalarda operatorni avtomatik belgilash (oylikda kg chiqishi uchun)
-    _need = False
-    for _p in prods:
-        if not _p.operator_id and getattr(_p, "user_id", None):
-            _eid = user_id_to_employee_id.get(_p.user_id)
-            if _eid:
-                _p.operator_id = _eid
-                _need = True
-    if _need:
-        db.commit()
-    for prod in prods:
-        eid = prod.operator_id
-        if eid is None and getattr(prod, "stages", None):
-            last_stage = max(prod.stages, key=lambda st: st.stage_number or 0)
-            eid = getattr(last_stage, "operator_id", None)
-        if eid is None and getattr(prod, "user_id", None):
-            eid = user_id_to_employee_id.get(prod.user_id)
-        if eid is None:
-            continue
-        if eid not in operator_produced:
-            operator_produced[eid] = {"kg": 0.0, "dona": 0.0}
-        kg_per = recipe_kg_per_unit(prod.recipe)
-        qty = float(prod.quantity or 0)
-        operator_produced[eid]["kg"] += qty * kg_per
-        operator_produced[eid]["dona"] += qty
-    # Oylik turi «Oylik» bo'lgan xodimlar uchun: shu oyda tabel (kelgan kun + soat)
-    att_list = db.query(Attendance.employee_id, Attendance.date).filter(
-        Attendance.date >= start_d,
-        Attendance.date <= end_d,
-        or_(Attendance.status == "present", Attendance.hours_worked > 0),
-    ).all()
-    attendance_worked_days = {}
-    for eid, d in att_list:
-        attendance_worked_days.setdefault(eid, set()).add(d)
-    attendance_worked_days = {eid: len(days) for eid, days in attendance_worked_days.items()}
-    # Har bir xodim uchun har kuni: tabeldagi soat (bo'sh bo'lsa keyin kunlik ish soati bilan hisoblanadi)
-    attendances_full = db.query(Attendance).filter(
-        Attendance.date >= start_d,
-        Attendance.date <= end_d,
-        or_(Attendance.status == "present", Attendance.hours_worked > 0),
-    ).all()
-    att_hours_by_emp = {}  # employee_id -> [har kundagi soat (float yoki None)]
-    for a in attendances_full:
-        h = (float(a.hours_worked) if a.hours_worked and a.hours_worked > 0 else None)
-        att_hours_by_emp.setdefault(a.employee_id, []).append(h)
     rows = []
     for emp in employees:
         s = salaries.get(emp.id)
-        base = (s.base_salary if s else 0) or (0 if (getattr(emp, "salary_type", None) or "").strip() == "bo'lak" else emp.salary)
+        base = (s.base_salary if s else 0) or emp.salary
         bonus = (s.bonus if s else 0) or 0
         deduction = (s.deduction if s else 0) or 0
         adv_ded = (s.advance_deduction if s and getattr(s, "advance_deduction", None) is not None else None)
         if adv_ded is None:
             adv_ded = advance_sums.get(emp.id, 0)
         total = base + bonus - deduction - adv_ded
-        piecework_task = getattr(emp, "piecework_task", None)
-        emp_salary_type = (getattr(emp, "salary_type", None) or "").strip().lower()
-        attendance_info = None
-        if piecework_task and (emp_salary_type == "bo'lak" or emp_salary_type == "bolak"):
-            unit_name = (piecework_task.unit_name or "kg").strip().lower()
-            use_kg = "kg" in unit_name
-            produced = operator_produced.get(emp.id, {"kg": 0.0, "dona": 0.0})
-            produced_units = produced["kg"] if use_kg else produced["dona"]
-            price = float(piecework_task.price_per_unit or 0)
-            auto_base = round(produced_units * price, 0)
-            if not (s and (s.base_salary or 0) > 0):
-                base = auto_base
-                total = base + bonus - deduction - adv_ded
-            piecework_info = {
-                "name": piecework_task.name or piecework_task.code,
-                "price_per_unit": price,
-                "unit_name": piecework_task.unit_name or "kg",
-                "produced_units": produced_units,
-                "produced_label": f'{produced_units:,.2f} kg' if use_kg else f'{produced_units:,.0f} dona',
-                "auto_base": auto_base,
-            }
-        elif emp_salary_type == "oylik":
-            # Soat bo'yicha hisob: norm_soat = (30 - dam olish) * kunlik_ish_soati; asos = oylik * (ishlagan_soat / norm_soat)
-            days_off = max(0, getattr(emp, "days_off_per_month", None) or 0)
-            working_days_in_month = max(1, 30 - days_off)
-            work_hrs_per_day = max(0.1, float(getattr(emp, "work_hours_per_day", None) or 10))
-            norm_hours = working_days_in_month * work_hrs_per_day  # oyda me'yoriy ish soati
-            monthly_salary = float(emp.salary or 0)
-            # Tabeldagi har kun: soat kiritilgan bo'lsa shu, yo'q bo'lsa kunlik ish soati
-            hours_list = att_hours_by_emp.get(emp.id, [])
-            worked_hours = sum((h if (h is not None and h > 0) else work_hrs_per_day) for h in hours_list)
-            worked_days = attendance_worked_days.get(emp.id, 0)
-            if not (s and (s.base_salary or 0) > 0):
-                if norm_hours > 0 and worked_hours > 0:
-                    base = round(monthly_salary * (worked_hours / norm_hours), 0)
-                elif worked_days > 0:
-                    # Soatlar yo'q, faqat kun bor — kunlik * kun (oldingi mantiq)
-                    daily_rate = round(monthly_salary / working_days_in_month, 0)
-                    base = round(daily_rate * worked_days, 0)
-                else:
-                    base = monthly_salary  # Tabel yo'q bo'lsa to'liq oylik
-                total = base + bonus - deduction - adv_ded
-            daily_rate = round(monthly_salary / working_days_in_month, 0) if working_days_in_month else 0
-            attendance_info = {
-                "worked_days": worked_days,
-                "worked_hours": round(worked_hours, 1),
-                "norm_hours": round(norm_hours, 1),
-                "work_hours_per_day": work_hrs_per_day,
-                "daily_rate": daily_rate,
-                "working_days_in_month": working_days_in_month,
-                "monthly_salary": monthly_salary,
-            }
-            piecework_info = None
-        else:
-            piecework_info = None
+        if total < 0:
+            total = 0
         rows.append({
             "employee": emp,
             "salary_row": s,
@@ -8583,14 +7690,11 @@ async def employee_salary_page(
             "total": total,
             "paid": (s.paid if s else 0) or 0,
             "status": (s.status if s else "pending") or "pending",
-            "piecework_info": piecework_info,
-            "attendance_info": attendance_info,
         })
     return templates.TemplateResponse("employees/salary_list.html", {
         "request": request,
         "year": year,
         "month": month,
-        "salary_doc": salary_doc,
         "rows": rows,
         "current_user": current_user,
         "page_title": "Oylik hisoblash",
@@ -8605,15 +7709,17 @@ async def employee_salary_save(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Oylik yozuvlarini saqlash (faqat ishga qabul qilingan xodimlar)"""
+    """Oylik yozuvlarini saqlash (barcha qatorlar)"""
     form = await request.form()
-    employees = db.query(Employee).filter(Employee.is_active == True, Employee.hire_date.isnot(None)).all()
+    employees = db.query(Employee).filter(Employee.is_active == True).all()
     for emp in employees:
         base = float(form.get(f"base_{emp.id}", 0) or 0)
         bonus = float(form.get(f"bonus_{emp.id}", 0) or 0)
         deduction = float(form.get(f"deduction_{emp.id}", 0) or 0)
         advance_deduction = float(form.get(f"advance_{emp.id}", 0) or 0)
         total = base + bonus - deduction - advance_deduction
+        if total < 0:
+            total = 0
         s = db.query(Salary).filter(Salary.employee_id == emp.id, Salary.year == year, Salary.month == month).first()
         if not s:
             s = Salary(employee_id=emp.id, year=year, month=month)
@@ -8650,73 +7756,9 @@ async def employee_salary_mark_paid(
         db.add(s)
         db.commit()
     s.paid = paid_amount
-    tot = s.total if s.total is not None else 0
-    s.status = "paid" if tot > 0 and paid_amount >= tot else "pending"
+    s.status = "paid" if paid_amount >= (s.total or 0) else "pending"
     db.commit()
     return RedirectResponse(url=f"/employees/salary?year={year}&month={month}", status_code=303)
-
-
-@app.post("/employees/salary/confirm")
-async def employee_salary_confirm(
-    year: int = Form(...),
-    month: int = Form(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Oylik hujjatini tasdiqlash"""
-    doc = db.query(SalaryDoc).filter(SalaryDoc.year == year, SalaryDoc.month == month).first()
-    if doc:
-        doc.status = "confirmed"
-        db.commit()
-    return RedirectResponse(url="/employees/salary", status_code=303)
-
-
-@app.post("/employees/salary/cancel")
-async def employee_salary_cancel(
-    year: int = Form(...),
-    month: int = Form(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Oylik hujjatini bekor qilish"""
-    doc = db.query(SalaryDoc).filter(SalaryDoc.year == year, SalaryDoc.month == month).first()
-    if doc:
-        doc.status = "cancelled"
-        db.commit()
-    return RedirectResponse(url="/employees/salary", status_code=303)
-
-
-@app.post("/employees/salary/delete-doc")
-async def employee_salary_delete_doc(
-    year: int = Form(...),
-    month: int = Form(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Oylik hujjatini o'chirish (hujjat va shu oy uchun barcha oylik yozuvlari)"""
-    doc = db.query(SalaryDoc).filter(SalaryDoc.year == year, SalaryDoc.month == month).first()
-    if doc:
-        db.query(Salary).filter(Salary.year == year, Salary.month == month).delete()
-        db.delete(doc)
-        db.commit()
-    return RedirectResponse(url="/employees/salary", status_code=303)
-
-
-@app.get("/employees/salary/new", response_class=HTMLResponse)
-async def employee_salary_new(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Yangi oylik hujjati — oy va yil tanlash, keyin hujjat formasiga o'tish"""
-    today = date.today()
-    return templates.TemplateResponse("employees/salary_new.html", {
-        "request": request,
-        "current_user": current_user,
-        "page_title": "Oylik hujjati yaratish",
-        "current_year": today.year,
-        "current_month": today.month,
-    })
 
 
 # ==========================================
@@ -8725,113 +7767,36 @@ async def employee_salary_new(
 
 @app.get("/production", response_class=HTMLResponse)
 async def production_index_page(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    """Ishlab chiqarish bosh sahifasi"""
-    from app.models.database import Warehouse
-    from sqlalchemy import or_, func
-    warehouses = get_warehouses_for_user(db, current_user)
-    recipes = db.query(Recipe).filter(Recipe.is_active == True).all()
+    """Ishlab chiqarish bosh sahifasi — retseptni yozib qidirish va tanlash uchun to'liq ro'yxat."""
+    warehouses = db.query(Warehouse).all()
+    recipes = (
+        db.query(Recipe)
+        .options(
+            joinedload(Recipe.product).joinedload(Product.unit),
+        )
+        .filter(Recipe.is_active == True)
+        .all()
+    )
 
     today = datetime.now().date()
     total_recipes = db.query(Recipe).filter(Recipe.is_active == True).count()
-    is_admin_or_rahbar = current_user and (getattr(current_user, "role", None) or "").strip().lower() in ("admin", "rahbar", "raxbar")
-    # Bugungi ishlab chiqarishlar — faqat bugun yakunlangan, yarim tayyor va tayyor omborlarga yozilganlar
-    try:
-        q_today = (
-            db.query(Production)
-            .options(
-                joinedload(Production.recipe).joinedload(Recipe.product),
-                joinedload(Production.recipe).joinedload(Recipe.stages),
-            )
-            .join(
-                Warehouse, Production.output_warehouse_id == Warehouse.id
-            )
-            .filter(
-                func.date(Production.date) == today,
-                Production.status == "completed",
-                Production.output_warehouse_id.isnot(None),
-                or_(
-                    func.lower(func.coalesce(Warehouse.name, '')).like('%yarim%'),
-                    func.lower(func.coalesce(Warehouse.name, '')).like('%semi%'),
-                    func.lower(func.coalesce(Warehouse.name, '')).like('%tayyor%'),
-                    func.lower(func.coalesce(Warehouse.name, '')).like('%finished%'),
-                    func.lower(func.coalesce(Warehouse.code, '')).like('%yarim%'),
-                    func.lower(func.coalesce(Warehouse.code, '')).like('%semi%'),
-                    func.lower(func.coalesce(Warehouse.code, '')).like('%tayyor%'),
-                    func.lower(func.coalesce(Warehouse.code, '')).like('%finished%')
-                )
-            )
-        )
-        if not is_admin_or_rahbar and current_user:
-            q_today = q_today.filter(Production.user_id == current_user.id)
-        today_productions = q_today.all()
-
-        def _is_qiyom_only_recipe(recipe):
-            """Faqat bitta bosqich (1‑bosqich = Qiyom tayyorlash) bo'lgan retsept — qiyom; yarim tayyor hisobiga kiritilmasin. 2+ bosqichli retseptlar yarim tayyor hisoblanadi."""
-            if not recipe or not getattr(recipe, "stages", None):
-                return False
-            stages = list(recipe.stages) if hasattr(recipe.stages, "__iter__") else []
-            if len(stages) != 1:
-                return False
-            return getattr(stages[0], "stage_number", 0) == 1
-
-        today_quantity = sum((p.quantity or 0) for p in today_productions)
-        today_quantity_yarim = sum(
-            (p.quantity or 0) for p in today_productions
-            if p.recipe
-            and getattr(p.recipe.product, "type", None) == "yarim_tayyor"
-            and not _is_qiyom_only_recipe(p.recipe)
-        )
-        today_quantity_tayyor = sum(
-            (p.quantity or 0) for p in today_productions
-            if p.recipe and getattr(p.recipe.product, "type", None) == "tayyor"
-        )
-    except Exception as e:
-        print(f"Today productions query error: {e}")
-        import traceback
-        traceback.print_exc()
-        today_quantity = 0
-        today_quantity_yarim = 0
-        today_quantity_tayyor = 0
-        today_productions = []
+    # Faqat joriy foydalanuvchi ishlab chiqargani: bugun va oxirgi ro'yxat
+    user_id_filter = Production.user_id == current_user.id if current_user and getattr(current_user, "id", None) else None
+    today_productions = db.query(Production).filter(
+        Production.date >= today,
+        Production.status == "completed"
+    )
+    if user_id_filter is not None:
+        today_productions = today_productions.filter(user_id_filter)
+    today_productions = today_productions.all()
+    today_quantity = sum((p.quantity or 0) for p in today_productions)
     pending_productions = db.query(Production).filter(Production.status == "draft")
-    if not is_admin_or_rahbar and current_user:
-        pending_productions = pending_productions.filter(Production.user_id == current_user.id)
+    if user_id_filter is not None:
+        pending_productions = pending_productions.filter(user_id_filter)
     pending_productions = pending_productions.count()
-    # Oxirgi ishlab chiqarishlar — faqat bugun yakunlangan, yarim tayyor va tayyor omborlar
-    try:
-        q_recent = (
-            db.query(Production)
-            .options(
-                joinedload(Production.recipe).joinedload(Recipe.product).joinedload(Product.unit),
-                joinedload(Production.recipe).joinedload(Recipe.stages),
-            )
-            .join(
-                Warehouse, Production.output_warehouse_id == Warehouse.id
-            )
-            .filter(
-                func.date(Production.date) == today,
-                Production.status == "completed",
-                Production.output_warehouse_id.isnot(None),
-                or_(
-                    func.lower(func.coalesce(Warehouse.name, '')).like('%yarim%'),
-                    func.lower(func.coalesce(Warehouse.name, '')).like('%semi%'),
-                    func.lower(func.coalesce(Warehouse.name, '')).like('%tayyor%'),
-                    func.lower(func.coalesce(Warehouse.name, '')).like('%finished%'),
-                    func.lower(func.coalesce(Warehouse.code, '')).like('%yarim%'),
-                    func.lower(func.coalesce(Warehouse.code, '')).like('%semi%'),
-                    func.lower(func.coalesce(Warehouse.code, '')).like('%tayyor%'),
-                    func.lower(func.coalesce(Warehouse.code, '')).like('%finished%')
-                )
-            )
-        )
-        if not is_admin_or_rahbar and current_user:
-            q_recent = q_recent.filter(Production.user_id == current_user.id)
-        recent_productions = q_recent.order_by(Production.date.desc()).limit(10).all()
-    except Exception as e:
-        print(f"Recent productions query error: {e}")
-        import traceback
-        traceback.print_exc()
-        recent_productions = []
+    recent_productions = db.query(Production).filter(user_id_filter).order_by(
+        Production.date.desc()
+    ).limit(10).all() if user_id_filter is not None else []
 
     now = datetime.now()
     resp = templates.TemplateResponse("production/index.html", {
@@ -8839,8 +7804,6 @@ async def production_index_page(request: Request, db: Session = Depends(get_db),
         "current_user": current_user,
         "total_recipes": total_recipes,
         "today_quantity": today_quantity,
-        "today_quantity_yarim": today_quantity_yarim,
-        "today_quantity_tayyor": today_quantity_tayyor,
         "pending_productions": pending_productions,
         "recent_productions": recent_productions,
         "recipes": recipes,
@@ -8852,23 +7815,46 @@ async def production_index_page(request: Request, db: Session = Depends(get_db),
     return resp
 
 
-@app.get("/production/recipes", response_class=HTMLResponse)
-async def production_recipes(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    """Retseptlar ro'yxati — chiqish va tarkib o'lchov birligi Tovarlardan."""
-    import json
-    warehouses = get_warehouses_for_user(db, current_user)
+@app.get("/production/api/quick-recipes")
+async def production_api_quick_recipes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tezkor ishlab chiqarish uchun retseptlar ro'yxati (JSON). Sahifada quickRecipes bo'sh bo'lsa brauzer shu API orqali yuklaydi."""
     recipes = (
         db.query(Recipe)
         .options(
             joinedload(Recipe.product).joinedload(Product.unit),
-            joinedload(Recipe.items).joinedload(RecipeItem.product).joinedload(Product.unit),
         )
+        .filter(Recipe.is_active == True)
         .all()
     )
+    out = []
+    for r in recipes:
+        unit = "kg"
+        if r.product and getattr(r.product, "unit", None):
+            u = r.product.unit
+            unit = (getattr(u, "name", None) or getattr(u, "code", None) or "kg") or "kg"
+        out.append({
+            "id": r.id,
+            "name": r.name or "",
+            "unit": unit,
+            "wh": str(r.default_warehouse_id) if r.default_warehouse_id else "",
+            "whOut": str(r.default_output_warehouse_id) if r.default_output_warehouse_id else "",
+        })
+    return out
+
+
+@app.get("/production/recipes", response_class=HTMLResponse)
+async def production_recipes(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
+    """Retseptlar ro'yxati"""
+    import json
+    warehouses = db.query(Warehouse).all()
+    recipes = db.query(Recipe).all()
     products = db.query(Product).filter(Product.type.in_(["tayyor", "yarim_tayyor"])).all()
     materials = db.query(Product).filter(Product.type == "hom_ashyo").all()
     recipe_products_json = json.dumps([
-        {"id": p.id, "name": (p.name or ""), "unit": (p.unit.name or p.unit.code if p.unit else "kg")}
+        {"id": p.id, "name": (p.name or ""), "unit": (p.unit.name if p.unit else "kg")}
         for p in products
     ]).replace("<", "\\u003c")
 
@@ -8886,17 +7872,8 @@ async def production_recipes(request: Request, db: Session = Depends(get_db), cu
 
 @app.get("/production/recipes/{recipe_id}", response_class=HTMLResponse)
 async def production_recipe_detail(request: Request, recipe_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Retsept tafsilotlari — mahsulot va xom ashyo o'lchov birliklari Tovarlardan."""
-    from app.routes.production import _calculate_recipe_cost_per_kg
-    recipe = (
-        db.query(Recipe)
-        .options(
-            joinedload(Recipe.product).joinedload(Product.unit),
-            joinedload(Recipe.items).joinedload(RecipeItem.product).joinedload(Product.unit),
-        )
-        .filter(Recipe.id == recipe_id)
-        .first()
-    )
+    """Retsept tafsilotlari — omborlar ro'yxati «Ishlab chiqarishda ishlatiladigan omborlar» uchun."""
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=404, detail="Retsept topilmadi")
     
@@ -8905,19 +7882,7 @@ async def production_recipe_detail(request: Request, recipe_id: int, db: Session
         recipe_stages = sorted(recipe.stages, key=lambda s: s.stage_number) if recipe.stages else []
     except Exception:
         recipe_stages = []
-    
-    warehouses = get_warehouses_for_user(db, current_user)
-    
-    # Yarim tayyor mahsulotlar uchun retsept tannarxini hisoblash (ko'rsatish uchun)
-    item_recipe_costs = {}
-    for item in recipe.items or []:
-        if not item.product_id:
-            continue
-        product = db.query(Product).filter(Product.id == item.product_id).first()
-        if product and getattr(product, "type", None) == "yarim_tayyor":
-            semi_recipe = db.query(Recipe).filter(Recipe.product_id == product.id, Recipe.is_active == True).first()
-            if semi_recipe:
-                item_recipe_costs[item.product_id] = _calculate_recipe_cost_per_kg(db, semi_recipe.id)
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
     
     return templates.TemplateResponse("production/recipe_detail.html", {
         "request": request,
@@ -8926,7 +7891,6 @@ async def production_recipe_detail(request: Request, recipe_id: int, db: Session
         "materials": materials,
         "recipe_stages": recipe_stages,
         "warehouses": warehouses,
-        "item_recipe_costs": item_recipe_costs,
         "page_title": f"Retsept: {recipe.name}"
     })
 
@@ -9053,52 +8017,6 @@ async def delete_recipe_item(
     return RedirectResponse(url=f"/production/recipes/{recipe_id}", status_code=303)
 
 
-@app.post("/production/recipes/{recipe_id}/set-warehouses")
-async def set_recipe_warehouses(
-    recipe_id: int,
-    default_warehouse_id: Optional[int] = Form(None),
-    default_output_warehouse_id: Optional[int] = Form(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Retseptga default omborlarni biriktirish"""
-    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
-    if not recipe:
-        raise HTTPException(status_code=404, detail="Retsept topilmadi")
-    recipe.default_warehouse_id = default_warehouse_id
-    recipe.default_output_warehouse_id = default_output_warehouse_id
-    db.commit()
-    return RedirectResponse(url=f"/production/recipes/{recipe_id}", status_code=303)
-
-
-@app.post("/production/recipes/{recipe_id}/delete")
-async def delete_recipe(
-    recipe_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
-):
-    """Retseptni o'chirish (faqat admin)"""
-    from urllib.parse import quote
-    
-    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
-    if not recipe:
-        raise HTTPException(status_code=404, detail="Retsept topilmadi")
-    
-    # Retsept ishlatilganmi tekshirish (Production'da)
-    production_count = db.query(Production).filter(Production.recipe_id == recipe_id).count()
-    if production_count > 0:
-        return RedirectResponse(
-            url=f"/production/recipes?error=delete&detail=" + quote(f"Bu retsept {production_count} ta ishlab chiqarishda ishlatilgan. O'chirish mumkin emas."),
-            status_code=303
-        )
-    
-    # Retseptni o'chirish (cascade orqali items va stages ham o'chadi)
-    db.delete(recipe)
-    db.commit()
-    
-    return RedirectResponse(url="/production/recipes?success=deleted", status_code=303)
-
-
 @app.get("/production/{prod_id}/materials", response_class=HTMLResponse)
 async def production_edit_materials(
     prod_id: int,
@@ -9109,26 +8027,14 @@ async def production_edit_materials(
     """Kutilmoqdagi buyurtma uchun xom ashyo miqdorlarini tahrirlash. Yakunlangan buyurtmani faqat admin ko'ra oladi (faqat ko'rish)."""
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
-    production = (
-        db.query(Production)
-        .options(
-            joinedload(Production.production_items).joinedload(ProductionItem.product).joinedload(Product.unit),
-        )
-        .filter(Production.id == prod_id)
-        .first()
-    )
+    production = db.query(Production).filter(Production.id == prod_id).first()
     if not production:
         raise HTTPException(status_code=404, detail="Buyurtma topilmadi")
     if production.status == "completed" and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Yakunlangan buyurtmani faqat administrator ko'ra oladi")
     if production.status not in ("draft", "completed"):
         raise HTTPException(status_code=400, detail="Faqat kutilmoqdagi yoki yakunlangan buyurtmani ko'rish mumkin")
-    recipe = (
-        db.query(Recipe)
-        .options(joinedload(Recipe.items).joinedload(RecipeItem.product).joinedload(Product.unit))
-        .filter(Recipe.id == production.recipe_id)
-        .first()
-    )
+    recipe = db.query(Recipe).filter(Recipe.id == production.recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=404, detail="Retsept topilmadi")
     # Agar production_items bo'sh bo'lsa, retseptdan yaratib olaylik
@@ -9183,128 +8089,130 @@ async def production_save_materials(
 
 
 @app.get("/production/orders", response_class=HTMLResponse)
-async def production_orders(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), q: str = None, number: str = None, date_from: str = None, date_to: str = None, recipe: str = None, operator_id: int = None):
-    """Ishlab chiqarish buyurtmalari. Sanadan-sanagacha filtr, operator bo'yicha filtr, sukut bo'yicha bugun."""
+async def production_orders(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    q: Optional[str] = None,
+):
+    """Ishlab chiqarish buyurtmalari. Sana sukutda bugun; faqat joriy foydalanuvchi o'zi ishlab chiqarganlari ko'rinadi."""
     from sqlalchemy.orm import joinedload
-    from sqlalchemy import func, or_
-    from datetime import datetime, date
-    # Sukut: parametrlar berilmasa — bugungi kun
-    today = date.today()
-    if not (date_from or "").strip() and not (date_to or "").strip():
-        date_from = today.strftime("%Y-%m-%d")
-        date_to = today.strftime("%Y-%m-%d")
-    query = (
-        db.query(Production)
-        .options(
-            joinedload(Production.recipe).joinedload(Recipe.stages),
-            joinedload(Production.recipe).joinedload(Recipe.product).joinedload(Product.unit),
-            joinedload(Production.user),
-            joinedload(Production.operator),
-        )
-        .order_by(Production.date.desc())
-    )
-    # Admin bo'lmaganlar faqat o'zi yaratgan buyurtmalarni ko'radi
-    if current_user and (getattr(current_user, "role", None) or "").strip().lower() != "admin":
-        query = query.filter(Production.user_id == current_user.id)
-    # Operator bo'yicha filtr (tanlansa faqat shu operatorning buyurtmalari)
-    if operator_id is not None and int(operator_id) > 0:
-        query = query.filter(Production.operator_id == int(operator_id))
-    search_term = (q or "").strip()
-    if search_term:
-        term_like = "%" + search_term + "%"
-        query = (
-            query.outerjoin(Recipe, Production.recipe_id == Recipe.id)
-            .outerjoin(Employee, Production.operator_id == Employee.id)
-            .outerjoin(User, Production.user_id == User.id)
-        )
-        conditions = [
-            func.lower(Production.number).like(func.lower(term_like)),
-            func.lower(Recipe.name).like(func.lower(term_like)),
-            func.lower(Employee.full_name).like(func.lower(term_like)),
-            func.lower(Employee.code).like(func.lower(term_like)),
-            func.lower(User.full_name).like(func.lower(term_like)),
-            func.lower(User.username).like(func.lower(term_like)),
-        ]
-        for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d.%m.%y", "%Y%m%d"):
+    from sqlalchemy import func
+    from urllib.parse import unquote, quote
+
+    if not current_user:
+        return RedirectResponse(url="/login?next=/production/orders", status_code=303)
+    try:
+        today = date.today()
+        if not (date_from or "").strip():
+            date_from = today.strftime("%Y-%m-%d")
+        if not (date_to or "").strip():
+            date_to = today.strftime("%Y-%m-%d")
+        operator_id_raw = request.query_params.get("operator_id")
+        operator_id = None
+        if operator_id_raw is not None and str(operator_id_raw).strip():
             try:
-                parsed = datetime.strptime(search_term[:10] if len(search_term) >= 10 else search_term, fmt).date()
-                if len(search_term) >= 10 or fmt == "%Y%m%d":
-                    conditions.append(func.date(Production.date) == parsed)
-                break
+                operator_id = int(operator_id_raw)
             except (ValueError, TypeError):
-                continue
-        conditions = [c for c in conditions if c is not False]
-        if conditions:
-            query = query.filter(or_(*conditions)).distinct()
-        if date_from and str(date_from).strip():
+                operator_id = None
+
+        qry = (
+            db.query(Production)
+            .options(
+                joinedload(Production.recipe).joinedload(Recipe.stages),
+                joinedload(Production.recipe).joinedload(Recipe.product).joinedload(Product.unit),
+                joinedload(Production.operator),
+                joinedload(Production.user),
+            )
+            .order_by(Production.date.desc())
+        )
+        role = (getattr(current_user, "role", None) or "").strip().lower()
+        if role in ("admin", "rahbar", "raxbar") and operator_id and operator_id > 0:
+            qry = qry.filter(Production.operator_id == operator_id)
+        else:
+            qry = qry.filter(Production.user_id == current_user.id)
+
+        if (date_from or "").strip():
             try:
                 d_from = datetime.strptime(str(date_from).strip()[:10], "%Y-%m-%d").date()
-                query = query.filter(func.date(Production.date) >= d_from)
+                qry = qry.filter(func.date(Production.date) >= d_from)
             except (ValueError, TypeError):
                 pass
-        if date_to and str(date_to).strip():
+        if (date_to or "").strip():
             try:
                 d_to = datetime.strptime(str(date_to).strip()[:10], "%Y-%m-%d").date()
-                query = query.filter(func.date(Production.date) <= d_to)
+                qry = qry.filter(func.date(Production.date) <= d_to)
             except (ValueError, TypeError):
                 pass
-    else:
-        if number and str(number).strip():
-            num_filter = "%" + str(number).strip() + "%"
-            query = query.filter(func.lower(Production.number).like(func.lower(num_filter)))
-        if recipe and str(recipe).strip():
-            query = query.join(Recipe, Production.recipe_id == Recipe.id)
-            recipe_filter = "%" + str(recipe).strip() + "%"
-            query = query.filter(func.lower(Recipe.name).like(func.lower(recipe_filter)))
-        if date_from and str(date_from).strip():
+        if (q or "").strip():
+            search = "%" + str(q).strip().lower() + "%"
             try:
-                d_from = datetime.strptime(str(date_from).strip()[:10], "%Y-%m-%d").date()
-                query = query.filter(func.date(Production.date) >= d_from)
-            except (ValueError, TypeError):
-                pass
-        if date_to and str(date_to).strip():
-            try:
-                d_to = datetime.strptime(str(date_to).strip()[:10], "%Y-%m-%d").date()
-                query = query.filter(func.date(Production.date) <= d_to)
-            except (ValueError, TypeError):
-                pass
-    productions = query.all()
-    employees = db.query(Employee).filter(Employee.is_active == True).all()
-    # Yakunlangan buyurtmalarda operator bo'sh bo'lsa, foydalanuvchiga bog'langan xodimni avtomatik operator qilib saqlash (oylik hisobda kg chiqishi uchun)
-    user_id_to_employee_id = {e.user_id: e.id for e in employees if getattr(e, "user_id", None)}
-    need_commit = False
-    for prod in productions:
-        if prod.status == "completed" and (not prod.operator_id) and getattr(prod, "user_id", None):
-            eid = user_id_to_employee_id.get(prod.user_id)
-            if eid:
-                prod.operator_id = eid
-                need_commit = True
-    if need_commit:
-        db.commit()
-    machines = db.query(Machine).filter(Machine.is_active == True).all()
-    current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first() if current_user else None
-    from urllib.parse import unquote
-    error = request.query_params.get("error")
-    detail = unquote(request.query_params.get("detail", "") or "")
-    return templates.TemplateResponse("production/orders.html", {
-        "request": request,
-        "current_user": current_user,
-        "productions": productions,
-        "machines": machines,
-        "employees": employees,
-        "current_user_employee_id": current_user_employee.id if current_user_employee else None,
-        "page_title": "Ishlab chiqarish buyurtmalari",
-        "error": error,
-        "error_detail": detail,
-        "stage_names": PRODUCTION_STAGE_NAMES,
-        "filter_q": search_term,
-        "filter_number": (number or "").strip(),
-        "filter_recipe": (recipe or "").strip(),
-        "filter_date_from": (date_from or "").strip()[:10] if date_from else "",
-        "filter_date_to": (date_to or "").strip()[:10] if date_to else "",
-        "filter_operator_id": int(operator_id) if (operator_id is not None and int(operator_id) > 0) else None,
-        "user_id_to_employee_id": user_id_to_employee_id,
-    })
+                ids_num = [r[0] for r in db.query(Production.id).filter(func.lower(Production.number).like(search)).all()]
+                ids_recipe = [r[0] for r in db.query(Production.id).join(Recipe, Production.recipe_id == Recipe.id).filter(func.lower(Recipe.name).like(search)).all()]
+                match_ids = list(set(ids_num) | set(ids_recipe))
+                if match_ids:
+                    qry = qry.filter(Production.id.in_(match_ids))
+                else:
+                    qry = qry.filter(Production.id == -1)
+            except Exception:
+                qry = qry.filter(func.lower(Production.number).like(search))
+        productions = qry.all()
+        machines = db.query(Machine).filter(Machine.is_active == True).all()
+        employees = db.query(Employee).filter(Employee.is_active == True).all()
+        error = request.query_params.get("error")
+        detail = unquote(request.query_params.get("detail", "") or "")
+        return templates.TemplateResponse("production/orders.html", {
+            "request": request,
+            "current_user": current_user,
+            "productions": productions,
+            "machines": machines,
+            "employees": employees,
+            "page_title": "Ishlab chiqarish buyurtmalari",
+            "error": error,
+            "error_detail": detail,
+            "stage_names": PRODUCTION_STAGE_NAMES,
+            "filter_date_from": (date_from or "").strip()[:10] if date_from else today.strftime("%Y-%m-%d"),
+            "filter_date_to": (date_to or "").strip()[:10] if date_to else today.strftime("%Y-%m-%d"),
+            "filter_operator_id": operator_id if (operator_id and operator_id > 0) else None,
+            "filter_q": (q or "").strip(),
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return RedirectResponse(url=f"/production?error=orders&detail={quote(str(e)[:80])}", status_code=303)
+
+
+def _is_qiyom_recipe(recipe) -> bool:
+    """Retsept 'qiyom' (oralama mahsulot) bo'lsa — jamida hisoblanmasin (shablon: qiyom hisobga olinmaydi)."""
+    if not recipe or not getattr(recipe, "name", None):
+        return False
+    return "qiyom" in (recipe.name or "").lower()
+
+
+def _kg_per_unit_from_recipe(recipe) -> float:
+    """Recipe nomi yoki output_quantity dan kg per birlik (dona) ni hisoblaydi."""
+    if not recipe:
+        return 1.0
+    name = (recipe.name or "").lower()
+    if "250gr" in name or "250 gr" in name:
+        return 0.25
+    if "400gr" in name or "400 gr" in name:
+        return 0.4
+    if "5kg" in name or "5 kg" in name:
+        return 5.0
+    if "4kg" in name or "4 kg" in name:
+        return 4.0
+    if "3kg" in name or "3 kg" in name:
+        return 3.0
+    if "2kg" in name or "2 kg" in name:
+        return 2.0
+    if "1kg" in name or "1 kg" in name:
+        return 1.0
+    if getattr(recipe, "output_quantity", None) and recipe.output_quantity:
+        return float(recipe.output_quantity)
+    return 1.0
 
 
 @app.get("/production/by-operator", response_class=HTMLResponse)
@@ -9312,103 +8220,68 @@ async def production_by_operator(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
-    date_from: str = None,
-    date_to: str = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ):
-    """Operator bo'yicha ishlab chiqarilgan mahsulotlar: operator nomi, mahsulot (retsept), miqdor (dona/kg)."""
+    """Operator bo'yicha ishlab chiqarish (yakunlanganlar, sana bo'yicha)."""
     from sqlalchemy.orm import joinedload
     from sqlalchemy import func
-    from datetime import date, datetime
+    from collections import defaultdict
+
+    if not current_user:
+        return RedirectResponse(url="/login?next=/production/by-operator", status_code=303)
     today = date.today()
     if not (date_from or "").strip():
-        date_from = today.strftime("%Y-%m-%d")
+        date_from = today.replace(day=1).strftime("%Y-%m-%d")  # oy boshi
     if not (date_to or "").strip():
         date_to = today.strftime("%Y-%m-%d")
+    d_from = d_to = None
     try:
         d_from = datetime.strptime(str(date_from).strip()[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        d_from = today.replace(day=1)
+    try:
         d_to = datetime.strptime(str(date_to).strip()[:10], "%Y-%m-%d").date()
     except (ValueError, TypeError):
-        d_from = today
         d_to = today
-    productions = (
+
+    qry = (
         db.query(Production)
         .options(
+            joinedload(Production.recipe).joinedload(Recipe.product).joinedload(Product.unit),
             joinedload(Production.operator),
             joinedload(Production.user),
-            joinedload(Production.recipe).joinedload(Recipe.product).joinedload(Product.unit),
-            joinedload(Production.recipe).joinedload(Recipe.stages),
         )
-        .filter(
-            Production.status == "completed",
-            func.date(Production.date) >= d_from,
-            func.date(Production.date) <= d_to,
-        )
+        .filter(Production.status == "completed")
+        .filter(func.date(Production.date) >= d_from)
+        .filter(func.date(Production.date) <= d_to)
+        .order_by(Production.date.desc())
     )
-    if current_user and (getattr(current_user, "role", None) or "").strip().lower() != "admin":
-        productions = productions.filter(Production.user_id == current_user.id)
-    productions = productions.order_by(Production.date.desc(), Production.id.desc()).all()
+    # joinedload bilan ba'zi driverlarda bir xil qator takrorlanishi mumkin — id bo'yicha bitta qoldiramiz
+    seen = {}
+    for p in qry.all():
+        if p.id not in seen:
+            seen[p.id] = p
+    productions = list(seen.values())
+    productions.sort(key=lambda x: (x.date or datetime.min), reverse=True)
 
-    def _is_qiyom_only_recipe(recipe):
-        """Faqat qiyom tayyorlash (1-bosqich) — QIMMAT HOLVA BRAVO va sh.k.; jamlanmada hisobga olinmaydi."""
-        if not recipe or not getattr(recipe, "stages", None):
-            return False
-        stages = list(recipe.stages) if hasattr(recipe.stages, "__iter__") else []
-        if len(stages) != 1:
-            return False
-        return getattr(stages[0], "stage_number", 0) == 1
-
-    def _kg_per_unit(recipe):
-        if not recipe or not getattr(recipe, "name", None):
-            return 1.0
-        rname = (recipe.name or "").lower()
-        if "250gr" in rname or "250 gr" in rname:
-            return 0.25
-        if "400gr" in rname or "400 gr" in rname:
-            return 0.4
-        if "5kg" in rname or "5 kg" in rname:
-            return 5.0
-        if "4kg" in rname or "4 kg" in rname:
-            return 4.0
-        if "3kg" in rname or "3 kg" in rname:
-            return 3.0
-        if "2kg" in rname or "2 kg" in rname:
-            return 2.0
-        if "1kg" in rname or "1 kg" in rname:
-            return 1.0
-        return float(recipe.output_quantity) if getattr(recipe, "output_quantity", None) else 1.0
-
-    operator_total_kg = {}
-    all_operator_names = set()
+    # Operator bo'yicha jami (kg) — har bir buyurtma faqat bir marta, qiyom hisobga olinmaydi
+    totals_by_name = defaultdict(float)
     name_to_employee_id = {}
     for p in productions:
-        name = None
-        if p.operator:
-            name = p.operator.full_name
-            name_to_employee_id[name] = p.operator.id
-        elif p.user:
-            name = p.user.full_name or "—"
-        else:
-            name = "—"
-        all_operator_names.add(name)
-        # Qiyom (faqat 1-bosqich: QIMMAT HOLVA BRAVO va sh.k.) hisobga olinmaydi; faqat yarim tayyor / tayyor
-        if _is_qiyom_only_recipe(p.recipe):
+        # Qiyom (oralama mahsulot) — jamida ko'rsatilmasin (yarim tayyor / tayyor / dona hisoblanadi)
+        if _is_qiyom_recipe(p.recipe):
             continue
-        qty = float(p.quantity or 0)
-        # Barcha mahsulotlar (yarim tayyor, tayyor, dona): birligi kg bo'lsa qty, dona bo'lsa qty * kg_per_unit
-        if p.recipe and getattr(p.recipe, "product", None):
-            prod_unit = getattr(p.recipe.product, "unit", None)
-            unit_code = (getattr(prod_unit, "code", None) or "").strip().lower() if prod_unit else ""
-            unit_name = (getattr(prod_unit, "name", None) or "").strip().lower() if prod_unit else ""
-            if unit_code == "kg" or unit_name == "kg":
-                kg = qty
-            else:
-                kg = qty * _kg_per_unit(p.recipe)
-        else:
-            kg = qty
-        operator_total_kg[name] = operator_total_kg.get(name, 0) + kg
-    # Har bir operator uchun qator
-    operator_totals = [(name, operator_total_kg.get(name, 0)) for name in sorted(all_operator_names)]
-    operator_totals.sort(key=lambda x: -x[1])
+        op_name = "—"
+        if p.operator:
+            op_name = getattr(p.operator, "full_name", None) or str(p.operator_id)
+            if p.operator_id and op_name != "—":
+                name_to_employee_id[op_name] = p.operator_id
+        elif p.user:
+            op_name = getattr(p.user, "full_name", None) or str(p.user_id)
+        kg = (p.quantity or 0) * _kg_per_unit_from_recipe(p.recipe)
+        totals_by_name[op_name] += kg
+    operator_totals = sorted(totals_by_name.items(), key=lambda x: -x[1])
 
     return templates.TemplateResponse("production/by_operator.html", {
         "request": request,
@@ -9416,21 +8289,20 @@ async def production_by_operator(
         "productions": productions,
         "operator_totals": operator_totals,
         "name_to_employee_id": name_to_employee_id,
+        "filter_date_from": (date_from or "").strip()[:10],
+        "filter_date_to": (date_to or "").strip()[:10],
         "page_title": "Operator bo'yicha ishlab chiqarish",
-        "filter_date_from": (date_from or "")[:10],
-        "filter_date_to": (date_to or "")[:10],
     })
 
 
 @app.get("/production/new", response_class=HTMLResponse)
 async def production_new(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
     """Yangi ishlab chiqarish"""
-    warehouses = get_warehouses_for_user(db, current_user)
+    warehouses = db.query(Warehouse).all()
     recipes = db.query(Recipe).filter(Recipe.is_active == True).all()
     machines = db.query(Machine).filter(Machine.is_active == True).all()
     employees = db.query(Employee).filter(Employee.is_active == True).all()
-    current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first() if current_user else None
-    error = request.query_params.get("error", "").strip()
+
     return templates.TemplateResponse("production/new_order.html", {
         "request": request,
         "current_user": current_user,
@@ -9438,14 +8310,60 @@ async def production_new(request: Request, db: Session = Depends(get_db), curren
         "warehouses": warehouses,
         "machines": machines,
         "employees": employees,
-        "current_user_employee_id": current_user_employee.id if current_user_employee else None,
-        "page_title": "Yangi ishlab chiqarish",
-        "error": error,
+        "page_title": "Yangi ishlab chiqarish"
     })
 
 
 
 from typing import List
+
+@app.get("/production/create", response_class=HTMLResponse)
+async def production_create_get(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """GET /production/create — yangi ishlab chiqarish formasi (production/new bilan bir xil)."""
+    if not current_user:
+        return RedirectResponse(url="/login?next=/production/create", status_code=303)
+    try:
+        warehouses = db.query(Warehouse).all()
+        recipes = (
+            db.query(Recipe)
+            .options(
+                joinedload(Recipe.product).joinedload(Product.unit),
+                joinedload(Recipe.items),
+            )
+            .filter(Recipe.is_active == True)
+            .all()
+        )
+        machines = db.query(Machine).filter(Machine.is_active == True).all()
+        employees = db.query(Employee).filter(Employee.is_active == True).all()
+        current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first() if current_user else None
+        return templates.TemplateResponse("production/new_order.html", {
+            "request": request,
+            "current_user": current_user,
+            "recipes": recipes,
+            "warehouses": warehouses,
+            "machines": machines,
+            "employees": employees,
+            "current_user_employee_id": current_user_employee.id if current_user_employee else None,
+            "page_title": "Yangi ishlab chiqarish",
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return RedirectResponse(url="/production/new", status_code=303)
+
+
+def _safe_int(val, default=None):
+    if val is None or (isinstance(val, str) and not val.strip()):
+        return default
+    try:
+        return int(float(val)) if isinstance(val, str) else int(val)
+    except (ValueError, TypeError):
+        return default
+
 
 @app.post("/production/create")
 async def create_production(
@@ -9466,172 +8384,157 @@ async def create_production(
         if output_warehouse_id is None:
             output_warehouse_id = warehouse_id
         from sqlalchemy.orm import joinedload
-        recipe = db.query(Recipe).options(joinedload(Recipe.stages)).filter(Recipe.id == recipe_id).first()
+        recipe = db.query(Recipe).options(joinedload(Recipe.stages), joinedload(Recipe.items)).filter(Recipe.id == recipe_id).first()
         if not recipe:
             raise HTTPException(status_code=404, detail="Retsept topilmadi")
-        try:
-            effective_operator_id = int(operator_id) if (operator_id and str(operator_id).strip()) else None
-        except (ValueError, TypeError):
-            effective_operator_id = None
-        if effective_operator_id is None and current_user:
-            current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first()
-            effective_operator_id = current_user_employee.id if current_user_employee else None
-        try:
-            machine_id_int = int(machine_id) if (machine_id and str(machine_id).strip()) else None
-        except (ValueError, TypeError):
-            machine_id_int = None
         max_stage = _recipe_max_stage(recipe)
         today = datetime.now()
-        today_start = today.replace(hour=0, minute=0, second=0, microsecond=0)
-        production = None
-        for attempt in range(5):
-            try:
-                count = db.query(Production).filter(Production.date >= today_start).count()
-                number = f"PR-{today.strftime('%Y%m%d')}-{str(count + 1 + attempt).zfill(3)}"
-                production = Production(
-                    number=number,
-                    recipe_id=recipe_id,
-                    warehouse_id=warehouse_id,
-                    output_warehouse_id=output_warehouse_id,
-                    quantity=float(quantity),
-                    note=note or None,
-                    status="draft",
-                    current_stage=1,
-                    max_stage=max_stage,
-                    user_id=current_user.id if current_user else None,
-                    machine_id=machine_id_int,
-                    operator_id=effective_operator_id,
-                )
-                db.add(production)
-                db.commit()
-                db.refresh(production)
-                break
-            except IntegrityError as ie:
-                db.rollback()
-                msg = str(ie).lower()
-                if "unique" in msg and ("number" in msg or "productions" in msg):
-                    continue
-                raise
-        if production is None:
-            raise RuntimeError("Ishlab chiqarish raqami takrorlandi; qayta urinib ko'ring")
+        prefix = f"PR-{today.strftime('%Y%m%d')}-"
+        last = db.query(Production.number).filter(Production.number.like(prefix + "%")).all()
+        next_n = 1
+        for (num,) in last:
+            if num and num.startswith(prefix):
+                try:
+                    n = int(num[len(prefix):].strip())
+                    if n >= next_n:
+                        next_n = n + 1
+                except ValueError:
+                    pass
+        number = f"{prefix}{str(next_n).zfill(3)}"
+        mid = _safe_int(machine_id)
+        oid = _safe_int(operator_id)
+        production = Production(
+            number=number,
+            recipe_id=recipe_id,
+            warehouse_id=warehouse_id,
+            output_warehouse_id=output_warehouse_id,
+            quantity=quantity,
+            note=note or "",
+            status="draft",
+            current_stage=1,
+            max_stage=max_stage,
+            user_id=current_user.id if current_user else None,
+            machine_id=mid,
+            operator_id=oid,
+        )
+        db.add(production)
+        db.commit()
+        db.refresh(production)
         for stage_num in range(1, max_stage + 1):
             stage = ProductionStage(production_id=production.id, stage_number=stage_num)
             db.add(stage)
         db.commit()
-        recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
-        if recipe:
+        if recipe.items:
             for item in recipe.items:
                 pi = ProductionItem(
                     production_id=production.id,
                     product_id=item.product_id,
-                    quantity=item.quantity * float(quantity)
+                    quantity=item.quantity * quantity
                 )
                 db.add(pi)
             db.commit()
         return RedirectResponse(url="/production/orders", status_code=303)
     except HTTPException:
         raise
+    except IntegrityError as e:
+        if "productions.number" in str(e.orig) if getattr(e, "orig", None) else "number" in str(e):
+            try:
+                prefix = f"PR-{datetime.now().strftime('%Y%m%d')}-"
+                last = db.query(Production.number).filter(Production.number.like(prefix + "%")).all()
+                next_n = 1
+                for (num,) in last:
+                    if num and num.startswith(prefix):
+                        try:
+                            n = int(num[len(prefix):].strip())
+                            if n >= next_n:
+                                next_n = n + 1
+                        except ValueError:
+                            pass
+                number = f"{prefix}{str(next_n).zfill(3)}"
+                production = Production(
+                    number=number,
+                    recipe_id=recipe_id,
+                    warehouse_id=warehouse_id,
+                    output_warehouse_id=output_warehouse_id,
+                    quantity=quantity,
+                    note=note or "",
+                    status="draft",
+                    current_stage=1,
+                    max_stage=max_stage,
+                    user_id=current_user.id if current_user else None,
+                    machine_id=mid,
+                    operator_id=oid,
+                )
+                db.add(production)
+                db.commit()
+                db.refresh(production)
+                for stage_num in range(1, max_stage + 1):
+                    stage = ProductionStage(production_id=production.id, stage_number=stage_num)
+                    db.add(stage)
+                db.commit()
+                if recipe.items:
+                    for item in recipe.items:
+                        pi = ProductionItem(production_id=production.id, product_id=item.product_id, quantity=item.quantity * quantity)
+                        db.add(pi)
+                    db.commit()
+                return RedirectResponse(url="/production/orders", status_code=303)
+            except Exception:
+                pass
+        import traceback
+        traceback.print_exc()
+        msg = quote(str(e)[:120], safe="")
+        return RedirectResponse(url=f"/production/new?error=create&detail={msg}", status_code=303)
     except Exception as e:
-        import logging
-        logging.exception("production/create: %s", e)
-        try:
-            db.rollback()
-        except Exception:
-            pass
-        return RedirectResponse(
-            url="/production/new?error=" + quote(str(e)[:150] if str(e) else "Xatolik"),
-            status_code=303,
-        )
-
-
-def _warehouse_id_for_ingredient(db, product_id, production):
-    """Yarim tayyor mahsulot bo'lsa — nomida 'yarim'/'semi' bor ombordan, aks holda 1-ombor (xom ashyo)."""
-    product = db.query(Product).filter(Product.id == product_id).first()
-    if not product or getattr(product, "type", None) != "yarim_tayyor":
-        return production.warehouse_id
-    stocks = db.query(Stock).filter(Stock.product_id == product_id, Stock.quantity > 0).all()
-    for st in stocks:
-        wh = db.query(Warehouse).filter(Warehouse.id == st.warehouse_id).first()
-        if wh and st.warehouse_id:
-            name = (wh.name or "").lower()
-            code = (getattr(wh, "code", None) or "").lower()
-            if "yarim" in name or "semi" in name or "yarim" in code or "semi" in code:
-                return st.warehouse_id
-    if stocks:
-        return stocks[0].warehouse_id
-    return production.warehouse_id
+        import traceback
+        traceback.print_exc()
+        msg = quote(str(e)[:120], safe="")
+        return RedirectResponse(url=f"/production/new?error=create&detail={msg}", status_code=303)
 
 
 def _do_complete_production_stock(db, production, recipe):
-    """Xom ashyo ayirish, tayyor mahsulot qo'shish. Kerak=0 bo'lsa o'tkazib yuboriladi; yetmasa borini tortadi (min(kerak, mavjud)).
-    Xom ashyo 1-ombordan, yarim tayyor mahsulotlar nomida 'yarim'/'semi' bor ombordan chiqariladi."""
+    """Xom ashyo ayirish, tayyor mahsulot qo'shish. RedirectResponse qaytaradi xato bo'lsa."""
     from urllib.parse import quote
     if production.production_items:
         items_to_use = [(pi.product_id, pi.quantity) for pi in production.production_items]
     else:
         items_to_use = [(item.product_id, item.quantity * production.quantity) for item in recipe.items]
-    items_actual = []
     for product_id, required in items_to_use:
-        if required is None or required <= 0:
-            items_actual.append((product_id, 0.0))
-            continue
-        wh_id = _warehouse_id_for_ingredient(db, product_id, production)
         stock = db.query(Stock).filter(
-            Stock.warehouse_id == wh_id,
+            Stock.warehouse_id == production.warehouse_id,
             Stock.product_id == product_id
         ).first()
-        available = (stock.quantity if stock else 0) or 0
-        actual_use = min(required, available)
-        items_actual.append((product_id, actual_use))
-    for product_id, actual_use in items_actual:
-        if actual_use <= 0:
-            continue
-        wh_id = _warehouse_id_for_ingredient(db, product_id, production)
+        if not stock or stock.quantity < required:
+            product_name = db.query(Product).filter(Product.id == product_id).first()
+            name = product_name.name if product_name else f"#{product_id}"
+            msg = quote(f"Yetarli yo'q: {name} (kerak: {required}, mavjud: {stock.quantity if stock else 0})", safe="")
+            return RedirectResponse(url=f"/production/orders?error=insufficient_stock&detail={msg}", status_code=303)
+    # Xom ashyolarni ayirish va StockMovement yozuvlarini yaratish
+    for product_id, required in items_to_use:
         stock = db.query(Stock).filter(
-            Stock.warehouse_id == wh_id,
+            Stock.warehouse_id == production.warehouse_id,
             Stock.product_id == product_id
         ).first()
         if stock:
-            stock.quantity -= actual_use
+            # StockMovement yozuvini yaratish (chiqim)
             create_stock_movement(
                 db=db,
-                warehouse_id=wh_id,
+                warehouse_id=production.warehouse_id,
                 product_id=product_id,
-                quantity_change=-actual_use,
+                quantity_change=-required,  # Chiqim
                 operation_type="production_consumption",
                 document_type="Production",
                 document_id=production.id,
                 document_number=production.number,
                 user_id=production.user_id,
-                note=f"Ishlab chiqarish (xom ashyo): {production.number}",
-                update_stock=False,
+                note=f"Ishlab chiqarish (xom ashyo): {production.number}"
             )
     
-    # Tannarx: yarim tayyor uchun retsept tannarxi, qolganlari uchun purchase_price yoki Stock.cost_price
-    from app.routes.production import _calculate_recipe_cost_per_kg
     total_material_cost = 0.0
-    for product_id, actual_use in items_actual:
+    for product_id, required in items_to_use:
         product = db.query(Product).filter(Product.id == product_id).first()
-        if not product:
-            continue
-        if getattr(product, "type", None) == "yarim_tayyor":
-            semi_recipe = db.query(Recipe).filter(Recipe.product_id == product.id, Recipe.is_active == True).first()
-            if semi_recipe:
-                cost_per_kg = _calculate_recipe_cost_per_kg(db, semi_recipe.id)
-                total_material_cost += actual_use * cost_per_kg
-            else:
-                cost = product.purchase_price or 0
-                st = db.query(Stock).filter(Stock.product_id == product_id).first()
-                if st and getattr(st, "cost_price", None) and st.cost_price > 0:
-                    cost = st.cost_price
-                total_material_cost += actual_use * cost
-        else:
-            cost = product.purchase_price or 0
-            st = db.query(Stock).filter(Stock.product_id == product_id).first()
-            if st and getattr(st, "cost_price", None) and st.cost_price > 0:
-                cost = st.cost_price
-            total_material_cost += actual_use * cost
-    output_units = production.quantity * recipe_kg_per_unit(recipe)
+        if product and getattr(product, "purchase_price", None) is not None:
+            total_material_cost += required * (product.purchase_price or 0)
+    output_units = production.quantity * (recipe.output_quantity or 1)
     cost_per_unit = (total_material_cost / output_units) if output_units > 0 else 0
     out_wh_id = production.output_warehouse_id if production.output_warehouse_id else production.warehouse_id
     
@@ -9642,20 +8545,10 @@ def _do_complete_production_stock(db, production, recipe):
     ).first()
     if product_stock:
         product_stock.quantity += output_units
-        # Ombor qoldig'ida tannarxni yangilash (o'rtacha yoki yangi)
-        qty_old = (product_stock.quantity or 0) - output_units
-        cost_old = getattr(product_stock, "cost_price", None) or 0
-        if qty_old <= 0 or cost_old <= 0:
-            product_stock.cost_price = cost_per_unit
-        else:
-            product_stock.cost_price = (qty_old * cost_old + output_units * cost_per_unit) / (product_stock.quantity or 1)
     else:
-        new_stock = Stock(warehouse_id=out_wh_id, product_id=recipe.product_id, quantity=output_units)
-        if hasattr(Stock, "cost_price"):
-            new_stock.cost_price = cost_per_unit
-        db.add(new_stock)
+        db.add(Stock(warehouse_id=out_wh_id, product_id=recipe.product_id, quantity=output_units))
     
-    # StockMovement yozuvini yaratish (kirim - tayyor mahsulot). Stock allaqachon yuqorida yangilangan, faqat yozuv
+    # StockMovement yozuvini yaratish (kirim - tayyor mahsulot)
     create_stock_movement(
         db=db,
         warehouse_id=out_wh_id,
@@ -9666,8 +8559,7 @@ def _do_complete_production_stock(db, production, recipe):
         document_id=production.id,
         document_number=production.number,
         user_id=production.user_id,
-        note=f"Ishlab chiqarish (tayyor mahsulot): {production.number}",
-        update_stock=False,
+        note=f"Ishlab chiqarish (tayyor mahsulot): {production.number}"
     )
     output_product = db.query(Product).filter(Product.id == recipe.product_id).first()
     if output_product:
@@ -9715,33 +8607,23 @@ async def complete_production_stage(
     if stage_number < 1 or stage_number > max_stage:
         raise HTTPException(status_code=400, detail=f"Bosqich 1–{max_stage} oralig'ida bo'lishi kerak")
     if production.status == "completed":
-        return RedirectResponse(url="/production", status_code=303)
+        return RedirectResponse(url="/production/orders", status_code=303)
     current = getattr(production, "current_stage", None) or 1
     # Eski buyurtma 4 bosqichda qolgan, retsept endi 2 bosqich — bosqichni bosganda darhol yakunlash
     if current > max_stage:
         err = _do_complete_production_stock(db, production, recipe)
         if err:
             return err
-        now = datetime.now()
         production.status = "completed"
         production.current_stage = max_stage
-        production.date = now
         db.commit()
         check_low_stock_and_notify(db)
-        notify_managers_production_ready(db, production)
-        return RedirectResponse(url="/production", status_code=303)
+        return RedirectResponse(url="/production/orders", status_code=303)
     if stage_number != current:
         return RedirectResponse(
             url=f"/production/orders?error=stage&detail=Keyingi bosqich {current}",
             status_code=303,
         )
-    # Operator: forma orqali tanlangan yoki joriy foydalanuvchi (xodim) avtomatik
-    effective_operator_id = int(operator_id) if operator_id else None
-    if effective_operator_id is None and current_user:
-        current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first()
-        effective_operator_id = current_user_employee.id if current_user_employee else None
-    if current_user and effective_operator_id is None:
-        production.user_id = current_user.id  # Ustunda foydalanuvchi nomi ko'rinsin
     stage_row = db.query(ProductionStage).filter(
         ProductionStage.production_id == prod_id,
         ProductionStage.stage_number == stage_number,
@@ -9752,8 +8634,7 @@ async def complete_production_stage(
             stage_row.started_at = now
         stage_row.completed_at = now
         stage_row.machine_id = int(machine_id) if machine_id else None
-        stage_row.operator_id = effective_operator_id
-    production.operator_id = effective_operator_id
+        stage_row.operator_id = int(operator_id) if operator_id else None
     if stage_number < max_stage:
         production.current_stage = stage_number + 1
         production.status = "in_progress"
@@ -9764,63 +8645,28 @@ async def complete_production_stage(
         return err
     production.status = "completed"
     production.current_stage = max_stage
-    production.date = now
     db.commit()
     check_low_stock_and_notify(db)
-    notify_managers_production_ready(db, production)
-    return RedirectResponse(url="/production", status_code=303)
+    return RedirectResponse(url="/production/orders", status_code=303)
 
 
 @app.post("/production/{prod_id}/complete")
-async def complete_production(
-    prod_id: int,
-    operator_id: Optional[int] = Form(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Ishlab chiqarishni bir martada yakunlash (barcha bosqichlarsiz). Operator oylik hisobiga yoziladi."""
+async def complete_production(prod_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
+    """Ishlab chiqarishni bir martada yakunlash (barcha bosqichlarsiz)"""
     production = db.query(Production).filter(Production.id == prod_id).first()
     if not production:
         raise HTTPException(status_code=404, detail="Topilmadi")
     recipe = db.query(Recipe).filter(Recipe.id == production.recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=404, detail="Retsept topilmadi")
-    effective_operator_id = int(operator_id) if operator_id else None
-    if current_user and getattr(production, "user_id", None) is None:
-        production.user_id = current_user.id
-    if effective_operator_id is None and current_user:
-        current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first()
-        effective_operator_id = current_user_employee.id if current_user_employee else None
     err = _do_complete_production_stock(db, production, recipe)
     if err:
         return err
-    now = datetime.now()
     production.status = "completed"
     production.current_stage = _recipe_max_stage(recipe)
-    production.operator_id = effective_operator_id
-    production.date = now
     db.commit()
     check_low_stock_and_notify(db)
-    notify_managers_production_ready(db, production)
-    return RedirectResponse(url="/production", status_code=303)
-
-
-@app.post("/production/{prod_id}/set-operator")
-async def production_set_operator(
-    prod_id: int,
-    operator_id: Optional[int] = Form(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Yakunlangan ishlab chiqarishda operatorni belgilash (oylik hisobda kg chiqishi uchun)"""
-    production = db.query(Production).filter(Production.id == prod_id).first()
-    if not production:
-        raise HTTPException(status_code=404, detail="Topilmadi")
-    if production.status != "completed":
-        return RedirectResponse(url="/production/orders", status_code=303)
-    production.operator_id = int(operator_id) if operator_id else None
-    db.commit()
-    return RedirectResponse(url="/production/orders?operator_set=1", status_code=303)
+    return RedirectResponse(url="/production/orders", status_code=303)
 
 
 @app.post("/production/{prod_id}/revert")
@@ -9846,7 +8692,7 @@ async def production_revert(
             status_code=303
         )
     items_to_use = [(pi.product_id, pi.quantity) for pi in production.production_items] if production.production_items else [(item.product_id, item.quantity * production.quantity) for item in recipe.items]
-    output_units = production.quantity * recipe_kg_per_unit(recipe)
+    output_units = production.quantity * (recipe.output_quantity or 1)
     out_wh_id = production.output_warehouse_id if production.output_warehouse_id else production.warehouse_id
     # Tayyor mahsulotni 2-ombordan ayirish
     product_stock = db.query(Stock).filter(
@@ -9940,86 +8786,26 @@ async def api_partners(db: Session = Depends(get_db)):
     return [{"id": p.id, "name": p.name, "balance": p.balance} for p in partners]
 
 
-@app.get("/api/sales/warehouse-products")
-async def api_sales_warehouse_products(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Yangi sotuv sahifasida ombor bo'yicha qoldiqlar — warehouse_products va warehouse_stock_quantities."""
-    warehouses = get_warehouses_for_user(db, current_user)
-    warehouse_products = {}
-    warehouse_stock_quantities = {}
-    for wh in warehouses:
-        rows = (
-            db.query(Stock.product_id)
-            .filter(Stock.warehouse_id == wh.id)
-            .group_by(Stock.product_id)
-            .having(func.sum(Stock.quantity) > 0)
-            .all()
-        )
-        warehouse_products[str(wh.id)] = [r[0] for r in rows]
-        qty_rows = (
-            db.query(Stock.product_id, func.coalesce(func.sum(Stock.quantity), 0).label("total"))
-            .filter(Stock.warehouse_id == wh.id)
-            .group_by(Stock.product_id)
-            .all()
-        )
-        warehouse_stock_quantities[str(wh.id)] = {str(r[0]): float(r[1] or 0) for r in qty_rows}
-    return {
-        "warehouse_products": warehouse_products,
-        "warehouse_stock_quantities": warehouse_stock_quantities,
-    }
-
-
-@app.get("/api/partners/search")
-async def api_partners_search(
-    q: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
-):
-    """Mijoz qidiruv — Yangi sotuv sahifasida autocomplete uchun. Nomi, telefon, kod bo'yicha qidiradi."""
-    term = (q or "").strip()
-    query = db.query(Partner).filter(Partner.is_active == True)
-    if term:
-        term_like = "%" + term + "%"
-        conds = [
-            func.coalesce(Partner.name, "").ilike(term_like),
-            func.coalesce(Partner.phone, "").ilike(term_like),
-            func.coalesce(Partner.code, "").ilike(term_like),
-        ]
-        if term.isdigit():
-            conds.append(Partner.id == int(term))
-        query = query.filter(or_(*conds))
-    partners = query.order_by(Partner.name).limit(50).all()
-    return [
-        {"id": p.id, "name": p.name or "", "phone": p.phone or "", "code": p.code or ""}
-        for p in partners
-    ]
-
-
 @app.get("/api/notifications/unread")
 async def api_notifications_unread(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_auth),
+    current_user: Optional[User] = Depends(require_auth),
 ):
-    """Ovozli push uchun: foydalanuvchining o'qilmagan bildirishnomalari soni va oxirgisi."""
-    from datetime import datetime as dt
-    q = db.query(Notification).filter(
-        (Notification.user_id == current_user.id) | (Notification.user_id == None),
-        Notification.is_read == False,
-        (Notification.expires_at == None) | (Notification.expires_at > dt.now()),
-    ).order_by(Notification.created_at.desc())
-    count = q.count()
-    last = q.limit(1).first()
-    result = {"unread_count": count}
-    if last:
-        result["last"] = {
-            "id": last.id,
-            "title": last.title or "",
-            "message": last.message or "",
-            "priority": last.priority or "normal",
+    """O'qilmagan bildirishnomalar soni va oxirgisi (ovozli push / UI uchun)."""
+    if not current_user:
+        return {"unread_count": 0, "last": None}
+    count = get_unread_count(db, current_user.id)
+    last_list = get_user_notifications(db, current_user.id, unread_only=True, limit=1)
+    last = None
+    if last_list:
+        n = last_list[0]
+        last = {
+            "id": n.id,
+            "title": n.title or "",
+            "message": n.message or "",
+            "priority": n.priority or "normal",
         }
-    return result
+    return {"unread_count": count, "last": last}
 
 
 # ==========================================
@@ -10050,6 +8836,27 @@ async def agents_list(request: Request, db: Session = Depends(get_db)):
         "agents": agents,
         "page_title": "Agentlar"
     })
+
+
+@app.post("/agents/add")
+async def agent_add(
+    request: Request,
+    full_name: str = Form(...),
+    phone: str = Form(""),
+    region: str = Form(""),
+    telegram_id: str = Form(""),
+    db: Session = Depends(get_db)
+):
+    """Agent qo'shish"""
+    agent = Agent(
+        full_name=full_name,
+        phone=phone,
+        region=region,
+        telegram_id=telegram_id
+    )
+    db.add(agent)
+    db.commit()
+    return RedirectResponse(url="/agents", status_code=303)
 
 
 @app.get("/agents/{agent_id}", response_class=HTMLResponse)
@@ -10430,6 +9237,32 @@ async def add_delivery_order(
 # ==========================================
 
 # OLD API REMOVED - See PWA API section below for new implementation
+
+
+
+
+@app.post("/api/driver/location")
+async def update_driver_location(
+    driver_code: str = Form(...),
+    latitude: float = Form(...),
+    longitude: float = Form(...),
+    speed: float = Form(0),
+    db: Session = Depends(get_db)
+):
+    """Haydovchi lokatsiyasini yangilash"""
+    driver = db.query(Driver).filter(Driver.code == driver_code).first()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Haydovchi topilmadi")
+    
+    location = DriverLocation(
+        driver_id=driver.id,
+        latitude=latitude,
+        longitude=longitude,
+        speed=speed
+    )
+    db.add(location)
+    db.commit()
+    return {"status": "ok", "message": "Lokatsiya saqlandi"}
 
 
 @app.get("/api/agents/locations")
@@ -10920,7 +9753,7 @@ async def info_machines(request: Request, db: Session = Depends(get_db), current
         return RedirectResponse(url="/login", status_code=303)
     machines = db.query(Machine).filter(Machine.is_active == True).order_by(Machine.created_at.desc()).all()
     employees = db.query(Employee).filter(Employee.is_active == True).all()
-    warehouses = get_warehouses_for_user(db, current_user)
+    warehouses = db.query(Warehouse).all()
     return templates.TemplateResponse("info/machines.html", {
         "request": request,
         "current_user": current_user,
@@ -11012,15 +9845,8 @@ async def startup():
     """Dastur ishga tushganda"""
     init_db()
     try:
-        from app.models.database import ensure_attendance_advance_tables, ensure_purchase_expenses, ensure_order_production_columns, ensure_recipe_warehouse_columns, ensure_user_allowed_sections_column, ensure_stock_cost_column, ensure_employee_salary_columns, ensure_salary_docs_table
+        from app.models.database import ensure_attendance_advance_tables
         ensure_attendance_advance_tables()
-        ensure_salary_docs_table()
-        ensure_purchase_expenses()
-        ensure_order_production_columns()
-        ensure_recipe_warehouse_columns()
-        ensure_user_allowed_sections_column()
-        ensure_stock_cost_column()
-        ensure_employee_salary_columns()
     except Exception as e:
         print("[Startup] ensure_attendance_advance_tables:", e)
     try:

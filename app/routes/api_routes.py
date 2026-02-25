@@ -109,14 +109,16 @@ async def get_drivers_locations(db: Session = Depends(get_db)):
 
 
 def _role_dashboard_url(role: str) -> str:
-    """Rolga mos dashboard URL"""
+    """Rolga mos dashboard URL. Faqat admin bosh sahifaga; ishlab chiqarish foydalanuvchilari /production/orders da qoladi."""
     role_map = {
         "admin": "/",
-        "manager": "/",
-        "production": "/production",
-        "qadoqlash": "/production",
+        "manager": "/sales",
+        "production": "/production/orders",
+        "qadoqlash": "/production/orders",
+        "rahbar": "/production/orders",
+        "raxbar": "/production/orders",
     }
-    return role_map.get(role, "/")
+    return role_map.get((role or "").strip().lower(), "/production/orders")
 
 
 def _normalize_phone(phone: str) -> str:

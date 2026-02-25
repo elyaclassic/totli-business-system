@@ -150,11 +150,21 @@
                                 <div class="combo-drop" id="comboDrop{{ loop.index }}" style="display:none;"></div>
                                 {% endif %}
                             </td>
+                            {% set _uc = (row.product.unit.code or '')|lower if (row.product and row.product.unit) else '' %}
+                            {% set _is_dona = _uc in ['dona', 'pc', 'pcs', 'ta', 'шт'] %}
+                            {% set qty_val = (row.quantity|round(0)|int) if (row.quantity is not none and _is_dona) else (row.quantity if row.quantity is not none else "") %}
+                            {% set qty_fmt = "%.0f"|format(row.quantity|round(0)|int) if (row.quantity is not none and _is_dona) else ("%.3f"|format(row.quantity) if row.quantity is not none else "") %}
                             <td>
                                 {% if transfer.status == 'confirmed' %}
+<<<<<<< Current (Your changes)
                                 <input type="text" class="form-control qty-input" value="{{ "%.3f"|format(row.quantity) if row.quantity is not none else "" }}" readonly>
                                 {% else %}
                                 <input type="text" name="quantity_{{ loop.index }}" class="form-control qty-input" value="{{ "%.3f"|format(row.quantity) if row.quantity is not none else "" }}" inputmode="decimal">
+=======
+                                <input type="text" class="form-control qty-input" value="{{ qty_fmt }}" readonly>
+                                {% else %}
+                                <input type="text" name="quantity_{{ loop.index }}" class="form-control qty-input" value="{{ qty_fmt }}" inputmode="{{ 'numeric' if _is_dona else 'decimal' }}">
+>>>>>>> Incoming (Background Agent changes)
                                 {% endif %}
                             </td>
                             {% if show_tannarx %}

@@ -95,9 +95,12 @@
     <div class="dotted"></div>
 
     {% for item in order.items %}
+    {% set _uc = (item.product.unit.code or '')|lower if (item.product and item.product.unit) else '' %}
+    {% set _is_dona = _uc in ['dona', 'pc', 'pcs', 'ta', 'шт'] %}
+    {% set qty_fmt = "%.0f"|format((item.quantity or 0)|round(0)|int) if _is_dona else "%.3f"|format(item.quantity or 0) %}
     <div class="item-block">
         <div class="name">{{ loop.index }}. {{ item.product.name if item.product else '—' }}</div>
-        <div class="row2">{{ "%.3f"|format(item.quantity or 0) }} x {{ "{:,.0f}".format(item.price or 0) }} = {{ "{:,.0f}".format(item.total or 0) }}</div>
+        <div class="row2">{{ qty_fmt }} x {{ "{:,.0f}".format(item.price or 0) }} = {{ "{:,.0f}".format(item.total or 0) }}</div>
     </div>
     {% endfor %}
 

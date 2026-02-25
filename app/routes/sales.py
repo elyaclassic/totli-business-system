@@ -7,7 +7,13 @@ from typing import Optional
 
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
+<<<<<<< Current (Your changes)
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import joinedload
+=======
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
+>>>>>>> Incoming (Background Agent changes)
 
 from app.core import templates
 from app.models.database import (
@@ -22,9 +28,16 @@ from app.models.database import (
     ProductPrice,
     PriceType,
 )
+from sqlalchemy import func
 from app.deps import require_auth, require_admin
 from app.utils.notifications import check_low_stock_and_notify
-from app.utils.production_order import create_production_from_order
+from app.utils.user_scope import get_warehouses_for_user
+from app.utils.production_order import (
+    create_production_from_order,
+    get_semi_finished_warehouse,
+    get_product_stock_in_warehouse,
+    notify_operator_semi_finished_available,
+)
 
 router = APIRouter(prefix="/sales", tags=["sales"])
 
@@ -56,12 +69,14 @@ async def sales_new(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    products = db.query(Product).filter(
+    products = db.query(Product).options(
+        joinedload(Product.unit),
+    ).filter(
         Product.type.in_(["tayyor", "yarim_tayyor", "hom_ashyo", "material"]),
         Product.is_active == True,
-    ).order_by(Product.name).all()
+    ).options(joinedload(Product.unit)).order_by(Product.name).all()
     partners = db.query(Partner).filter(Partner.is_active == True).order_by(Partner.name).all()
-    warehouses = db.query(Warehouse).all()
+    warehouses = get_warehouses_for_user(db, current_user)
     price_types = db.query(PriceType).filter(PriceType.is_active == True).order_by(PriceType.name).all()
     current_pt_id = price_type_id or (price_types[0].id if price_types else None)
     product_prices_by_type = {}
@@ -69,12 +84,23 @@ async def sales_new(
         pps = db.query(ProductPrice).filter(ProductPrice.price_type_id == current_pt_id).all()
         product_prices_by_type = {pp.product_id: pp.sale_price for pp in pps}
     warehouse_products = {}
+    warehouse_stock_quantities = {}
     for wh in warehouses:
-        rows = db.query(Stock.product_id).filter(
-            Stock.warehouse_id == wh.id,
-            Stock.quantity > 0,
-        ).distinct().all()
+        rows = (
+            db.query(Stock.product_id)
+            .filter(Stock.warehouse_id == wh.id)
+            .group_by(Stock.product_id)
+            .having(func.sum(Stock.quantity) > 0)
+            .all()
+        )
         warehouse_products[str(wh.id)] = [r[0] for r in rows]
+        qty_rows = (
+            db.query(Stock.product_id, func.coalesce(func.sum(Stock.quantity), 0).label("total"))
+            .filter(Stock.warehouse_id == wh.id)
+            .group_by(Stock.product_id)
+            .all()
+        )
+        warehouse_stock_quantities[str(wh.id)] = {str(r[0]): float(r[1] or 0) for r in qty_rows}
     return templates.TemplateResponse("sales/new.html", {
         "request": request,
         "products": products,
@@ -84,6 +110,7 @@ async def sales_new(
         "current_price_type_id": current_pt_id,
         "product_prices_by_type": product_prices_by_type,
         "warehouse_products": warehouse_products,
+        "warehouse_stock_quantities": warehouse_stock_quantities,
         "current_user": current_user,
         "page_title": "Yangi sotuv",
     })
@@ -156,7 +183,9 @@ async def sales_edit(
     current_user: User = Depends(require_auth),
 ):
     from urllib.parse import unquote
-    order = db.query(Order).filter(Order.id == order_id, Order.type == "sale").first()
+    order = db.query(Order).options(
+        joinedload(Order.items).joinedload(OrderItem.product),
+    ).filter(Order.id == order_id, Order.type == "sale").first()
     if not order:
         raise HTTPException(status_code=404, detail="Sotuv topilmadi")
     products = db.query(Product).filter(
@@ -169,6 +198,11 @@ async def sales_edit(
         product_prices_by_type = {pp.product_id: pp.sale_price for pp in pps}
     error = request.query_params.get("error")
     error_detail = unquote(request.query_params.get("detail", "") or "")
+    foyda_zarar = 0
+    for item in order.items:
+        cost = (item.product.purchase_price or 0) if item.product else 0
+        foyda_zarar += (item.quantity or 0) * ((item.price or 0) - cost)
+    show_foyda_zarar = current_user and getattr(current_user, "role", None) in ("admin", "rahbar", "raxbar")
     return templates.TemplateResponse("sales/edit.html", {
         "request": request,
         "order": order,
@@ -178,6 +212,8 @@ async def sales_edit(
         "page_title": f"Sotuv: {order.number}",
         "error": error,
         "error_detail": error_detail,
+        "foyda_zarar": foyda_zarar,
+        "show_foyda_zarar": show_foyda_zarar,
     })
 
 
@@ -268,7 +304,9 @@ async def sales_confirm(
         return RedirectResponse(url=f"/sales/edit/{order_id}", status_code=303)
     
     # Qoldiq tekshiruvi va yetarli bo'lmagan mahsulotlarni yig'ish
+    # Agar tanlangan omborda qoldiq 0 yoki <1 bo'lsa, avval yarim tayyor omborni tekshiramiz
     insufficient_items = []
+    semi_warehouse = get_semi_finished_warehouse(db)
     for item in order.items:
         stock = db.query(Stock).filter(
             Stock.warehouse_id == order.warehouse_id,
@@ -276,6 +314,20 @@ async def sales_confirm(
         ).first()
         available = stock.quantity if stock else 0.0
         if available < item.quantity:
+            # Yarim tayyor omborda shu mahsulot bormi?
+            semi_available = 0.0
+            if semi_warehouse:
+                semi_available = get_product_stock_in_warehouse(db, semi_warehouse.id, item.product_id)
+            if semi_available >= 1 and semi_available >= item.quantity:
+                # Yarim tayyor omborda bor — operatorga ovozli push (high priority bildirishnoma)
+                notify_operator_semi_finished_available(
+                    db=db,
+                    order_number=order.number,
+                    order_id=order.id,
+                    product_name=(item.product.name if item.product else "Mahsulot"),
+                )
+                continue
+            # Yarim tayyor omborda ham yo'q — buyurtma (ishlab chiqarish) ga kiritamiz
             insufficient_items.append({
                 "product": item.product,
                 "required": item.quantity,

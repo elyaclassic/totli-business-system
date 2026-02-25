@@ -154,7 +154,7 @@
                         {% if products %}
                         <div class="row g-3" id="posProductGrid">
                             {% for product in products %}
-                            {% set display_price = (product_prices.get(product.id) if product_prices else none) or (product.sale_price or product.purchase_price or 0) %}
+                            {% set display_price = (product_prices.get(product.id) if product_prices else none) or (product.sale_price or (product.purchase_price if show_tannarx else 0) or 0) %}
                             {% set stock_qty = stock_by_product.get(product.id) if stock_by_product is defined else None %}
                             <div class="col-6 col-md-4 col-lg-3 pos-product-item" data-product-id="{{ product.id }}" data-name="{{ (product.name or '')|lower }}" data-barcode="{{ (product.barcode or '')|lower }}" data-category-id="{{ product.category_id or '' }}">
                                 <div class="card h-100 pos-product-card" style="cursor: pointer;" data-product-id="{{ product.id }}" data-name="{{ product.name|e }}" data-price="{{ display_price }}" data-barcode="{{ product.barcode or '' }}" data-stock="{{ stock_qty if stock_qty is not none else 0 }}">
@@ -172,7 +172,9 @@
                                             <small class="text-muted">so'm</small>
                                         </p>
                                         {% if stock_by_product is defined and stock_qty is not none %}
-                                        <small class="pos-product-stock">Qoldiq: {{ "{:,.3f}".format(stock_qty) }}</small>
+                                        {% set _uc = (product.unit.code or '')|lower if product.unit else '' %}
+                                        {% set _is_dona = _uc in ['dona', 'pc', 'pcs', 'ta', 'шт'] %}
+                                        <small class="pos-product-stock">Qoldiq: {{ "{:,.0f}".format((stock_qty or 0)|round(0)|int) if _is_dona else "{:,.3f}".format(stock_qty) }}</small>
                                         {% endif %}
                                     </div>
                                 </div>

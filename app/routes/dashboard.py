@@ -4,7 +4,7 @@ Dashboard sahifalari: rahbariyat, savdo, agent, ishlab chiqarish, ombor, yetkazi
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
 from app.core import templates
@@ -28,6 +28,7 @@ from app.models.database import (
     Driver,
     DriverLocation,
     Visit,
+    Warehouse,
 )
 from app.deps import require_auth, require_admin
 from app.utils.dashboard_export import export_executive_dashboard
@@ -1029,11 +1030,20 @@ async def warehouse_dashboard(request: Request, db: Session = Depends(get_db), c
     }
     
     # Low stock items
-    low_stock_items = db.query(Stock, Product).join(
+    low_stock_q = db.query(Stock, Product).join(
         Product, Stock.product_id == Product.id
     ).filter(
         Stock.quantity < 20
-    ).order_by(Stock.quantity).limit(10).all()
+    )
+    if getattr(current_user, "role", None) == "manager":
+        u = db.query(User).options(joinedload(User.warehouses_list)).filter(User.id == current_user.id).first()
+        if u and (u.warehouses_list or getattr(u, "warehouse_id", None)):
+            wh_ids = [w.id for w in (u.warehouses_list or [])]
+            if getattr(u, "warehouse_id", None) and u.warehouse_id not in wh_ids:
+                wh_ids.append(u.warehouse_id)
+            if wh_ids:
+                low_stock_q = low_stock_q.filter(Stock.warehouse_id.in_(wh_ids))
+    low_stock_items = low_stock_q.order_by(Stock.quantity).limit(10).all()
     
     low_stock = []
     for stock, product in low_stock_items:
