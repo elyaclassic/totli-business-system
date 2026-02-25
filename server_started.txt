@@ -1,2 +1,2 @@
-main.py: C:\Users\ELYOR\.cursor\worktrees\business_system\daj\main.py
-cwd: C:\Users\ELYOR\.cursor\worktrees\business_system\daj
+main.py: /workspace/main.py
+cwd: /workspace
