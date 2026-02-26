@@ -165,11 +165,11 @@
                     </thead>
                     <tbody>
                         {% for prod in recent_productions %}
-                        <tr>
-                            <td><strong>{{ prod.number }}</strong></td>
+                        <tr style="cursor: pointer;" onclick="window.location.href='/production/{{ prod.id }}/materials';">
+                            <td><a href="/production/{{ prod.id }}/materials" class="text-decoration-none fw-bold" onclick="event.stopPropagation();">{{ prod.number }}</a></td>
                             <td>
                                 {% if prod.recipe %}
-                                <a href="/production/recipes/{{ prod.recipe_id }}">{{ prod.recipe.name }}</a>
+                                <a href="/production/{{ prod.id }}/materials" onclick="event.stopPropagation();">{{ prod.recipe.name }}</a>
                                 {% else %}
                                 -
                                 {% endif %}

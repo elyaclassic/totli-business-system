@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role in ('admin', 'raxbar')) %}
 <div class="pos-premium">
 <!-- To'liq ekran taklifi (sahifa ochilganda bir marta ko'rsatiladi) -->
 <div id="posFullscreenPrompt" class="pos-fullscreen-prompt" style="display: none;">

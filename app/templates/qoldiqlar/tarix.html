@@ -13,22 +13,25 @@
     </div>
     <div class="card-body">
         <p class="text-muted small mb-3">1C dagi qoldiqlar bo'limidagi kabi: tanlangan ombor va mahsulot uchun barcha kirim/chiqim harakatlari (hujjat turi, raqam, sana, o'zgarish, qoldiq) ko'rinadi.</p>
-        <form method="get" action="/qoldiqlar/tarix" class="row g-3 align-items-end">
+        <form method="get" action="/qoldiqlar/tarix" class="row g-3 align-items-end" id="tarixForm">
             <div class="col-md-4">
                 <label class="form-label">Ombor</label>
-                <select name="warehouse_id" class="form-select" required>
+                <select name="warehouse_id" class="form-select" required id="tarix_warehouse_select">
                     <option value="">Tanlang</option>
                     {% for wh in warehouses or [] %}
-                    <option value="{{ wh.id }}">{{ wh.name }}</option>
+                    <option value="{{ wh.id }}" {% if selected_warehouse_id and selected_warehouse_id == wh.id %}selected{% endif %}>{{ wh.name }}</option>
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-4 position-relative">
                 <label class="form-label">Mahsulot</label>
-                <select name="product_id" class="form-select" required>
-                    <option value="">Tanlang</option>
+                <input type="text" class="form-control" id="tarix_product_input" placeholder="Nomi yoki kod bo'yicha yozib qidiring..." autocomplete="off" value="">
+                <input type="hidden" name="product_id" id="tarix_product_id_hidden" value="{{ selected_product_id or '' }}">
+                <div id="tarix_product_results" class="list-group position-absolute bg-white border" style="z-index: 1000; max-height: 280px; overflow-y: auto; display: none; left: 0; right: 0; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border-radius: 0.25rem; margin-top: 2px;"></div>
+                <select id="tarix_product_select" style="display: none;" aria-hidden="true">
+                    <option value="">Tanlang...</option>
                     {% for p in products or [] %}
-                    <option value="{{ p.id }}" {% if selected_product_id and selected_product_id == p.id %}selected{% endif %}>{{ p.name }}{% if p.code or p.barcode %} ({{ p.code or p.barcode }}){% endif %}</option>
+                    <option value="{{ p.id }}" data-name="{{ p.name or '' }}" data-code="{{ p.code or '' }}" data-barcode="{{ p.barcode or '' }}">{{ p.name }}{% if p.code or p.barcode %} ({{ p.code or p.barcode }}){% endif %}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -38,4 +41,89 @@
         </form>
     </div>
 </div>
+
+<style>
+#tarix_product_results .list-group-item { cursor: pointer; }
+#tarix_product_results .list-group-item:hover { background-color: #f8f9fa; }
+#tarix_product_results .list-group-item.active { background-color: var(--bs-primary); color: #fff; }
+</style>
+<script>
+(function() {
+    var productInput = document.getElementById('tarix_product_input');
+    var productResults = document.getElementById('tarix_product_results');
+    var productIdHidden = document.getElementById('tarix_product_id_hidden');
+    var productSelect = document.getElementById('tarix_product_select');
+    var form = document.getElementById('tarixForm');
+
+    var selectedProductId = {{ (selected_product_id or 0) | tojson }};
+    if (selectedProductId && productSelect) {
+        var opt = productSelect.querySelector('option[value="' + selectedProductId + '"]');
+        if (opt) {
+            productInput.value = opt.textContent.trim();
+            productIdHidden.value = selectedProductId;
+        }
+    }
+
+    if (productInput && productSelect) {
+        productInput.addEventListener('input', function() {
+            var q = (this.value || '').trim().toLowerCase();
+            productResults.style.display = 'none';
+            productResults.innerHTML = '';
+            productIdHidden.value = '';
+            if (!q) return;
+            var opts = Array.from(productSelect.options).slice(1);
+            var found = opts.filter(function(o) {
+                var name = (o.dataset.name || '').toLowerCase();
+                var code = (o.dataset.code || '').toLowerCase();
+                var barcode = (o.dataset.barcode || '').toLowerCase();
+                var id = (o.value || '').toString();
+                return name.indexOf(q) !== -1 || code.indexOf(q) !== -1 || barcode.indexOf(q) !== -1 || id === q;
+            });
+            if (found.length) {
+                found.forEach(function(o) {
+                    var a = document.createElement('a');
+                    a.href = '#';
+                    a.className = 'list-group-item list-group-item-action';
+                    a.textContent = o.textContent;
+                    a.dataset.value = o.value;
+                    a.dataset.name = o.dataset.name || '';
+                    a.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        productInput.value = this.dataset.name || this.textContent;
+                        productIdHidden.value = this.dataset.value;
+                        productResults.style.display = 'none';
+                        productResults.innerHTML = '';
+                    });
+                    productResults.appendChild(a);
+                });
+                productResults.style.display = 'block';
+            } else {
+                productResults.innerHTML = '<div class="list-group-item text-muted">Topilmadi</div>';
+                productResults.style.display = 'block';
+            }
+        });
+        productInput.addEventListener('focus', function() {
+            if (productResults.innerHTML && productResults.querySelector('.list-group-item')) productResults.style.display = 'block';
+        });
+        document.addEventListener('click', function(e) {
+            if (productResults && !productInput.contains(e.target) && !productResults.contains(e.target))
+                productResults.style.display = 'none';
+        });
+    }
+
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            if (!(productIdHidden && productIdHidden.value)) {
+                e.preventDefault();
+                if (productInput) {
+                    productInput.focus();
+                    productInput.select();
+                }
+                alert('Mahsulotni yozib qidirib tanlang.');
+                return false;
+            }
+        });
+    }
+})();
+</script>
 {% endblock %}

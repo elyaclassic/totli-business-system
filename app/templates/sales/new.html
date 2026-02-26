@@ -75,11 +75,12 @@
                         {% endfor %}
                     </select>
                 </div>
-                <p class="text-muted small mb-2" id="sales_warehouse_hint">Omborni tanlang — shu ombordagi tovarlar ro'yxatda ko'rsatiladi. Tovarga bosib savatga qo'shing.</p>
+                <p class="text-muted small mb-2" id="sales_warehouse_hint">Omborni tanlang — shu ombordagi tovarlar ro'yxatda ko'rsatiladi. Tovarga bosib savatga qo'shing. Mahsulot qayerdan keldi? <a href="/qoldiqlar/tarix" target="_blank">Harakat tarixi</a> da ombor va mahsulotni tanlab barcha kirim/chiqim hujjatlarini ko'ring.</p>
+                {% set show_tannarx = current_user and current_user.role in ('admin', 'raxbar') %}
                 <div class="row g-3" id="sales_product_cards" style="display: none;">
                     {% for product in products %}
                     {% set _pt = product_prices_by_type.get(product.id) if product_prices_by_type is defined else none %}
-                    {% set display_price = (_pt if (_pt is not none and _pt > 0) else (product.sale_price or product.purchase_price or 0)) %}
+                    {% set display_price = (_pt if (_pt is not none and _pt > 0) else (product.sale_price or 0)) %}
                     {% set _uc = (product.unit.code or '')|lower if product.unit else '' %}
                     {% set _is_dona = _uc in ['dona', 'pc', 'pcs', 'ta', 'шт'] %}
                     <div class="col-md-4 sales-product-card" data-product-id="{{ product.id }}" data-is-dona="{{ '1' if _is_dona else '0' }}">
@@ -98,7 +99,11 @@
                                     <span class="text-muted">Narx kiritilmagan</span>
                                     {% endif %}
                                 </p>
+                                {% if show_tannarx and (product.purchase_price or 0) > 0 %}
+                                <p class="mb-0 mt-0 small text-muted">Tannarx: {{ "{:,.0f}".format(product.purchase_price or 0) }} so'm</p>
+                                {% endif %}
                                 <p class="mb-0 mt-1 sales-card-qty text-muted small"></p>
+                                <p class="mb-0 mt-1"><a href="#" class="sales-card-tarix-link small" data-product-id="{{ product.id }}" title="Mahsulot harakati tarixi — qaysi hujjatdan keldi"><i class="bi bi-clock-history"></i> Qayerdan?</a></p>
                                 {% endif %}
                             </div>
                         </div>
@@ -145,10 +150,20 @@
 </div>
 </form>
 
+<script type="application/json" id="sales-warehouse-products">{{ (warehouse_products | tojson) | safe }}</script>
+<script type="application/json" id="sales-warehouse-quantities">{{ ((warehouse_stock_quantities if warehouse_stock_quantities is defined else {}) | tojson) | safe }}</script>
 <script>
 (function() {
-    var warehouseProducts = {{ warehouse_products | tojson }};
-    var warehouseStockQuantities = {{ (warehouse_stock_quantities if warehouse_stock_quantities is defined else {}) | tojson }};
+    var warehouseProducts = {};
+    var warehouseStockQuantities = {};
+    function parseJson(el, fallback) {
+        if (!el || !el.textContent) return fallback;
+        var s = el.textContent.trim();
+        if (!s) return fallback;
+        try { return JSON.parse(s); } catch (e) { return fallback; }
+    }
+    warehouseProducts = parseJson(document.getElementById('sales-warehouse-products'), {});
+    warehouseStockQuantities = parseJson(document.getElementById('sales-warehouse-quantities'), {});
     var form = document.getElementById('salesCreateForm');
     var cartHidden = document.getElementById('cartHiddenInputs');
     var cartBody = document.getElementById('cartTableBody');
@@ -375,12 +390,27 @@
     }
 
     document.querySelectorAll('.product-card[data-product-id]').forEach(function(card) {
-        card.addEventListener('click', function() {
+        card.addEventListener('click', function(e) {
+            if (e.target.closest('.sales-card-tarix-link')) return;
             var id = this.getAttribute('data-product-id');
             var name = this.getAttribute('data-name');
             var price = this.getAttribute('data-price');
             var isDona = this.getAttribute('data-is-dona') === '1';
             addToCart(id, name, price, 1, isDona);
+        });
+    });
+    document.querySelectorAll('.sales-card-tarix-link').forEach(function(link) {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var whSelect = document.getElementById('sales_warehouse_select');
+            var whId = whSelect ? whSelect.value : '';
+            var productId = this.getAttribute('data-product-id') || '';
+            if (!whId) {
+                alert('Avval omborni tanlang.');
+                return;
+            }
+            window.open('/reports/stock/source?warehouse_id=' + encodeURIComponent(whId) + '&product_id=' + encodeURIComponent(productId), '_blank');
         });
     });
 })();

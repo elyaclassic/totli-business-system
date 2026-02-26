@@ -2221,12 +2221,14 @@ async def qoldiqlar_tarix(
             status_code=303,
         )
     selected_product_id = int(product_id) if product_id else None
+    selected_warehouse_id = int(warehouse_id) if warehouse_id else None
     return templates.TemplateResponse("qoldiqlar/tarix.html", {
         "request": request,
         "current_user": current_user,
         "warehouses": warehouses,
         "products": products,
         "selected_product_id": selected_product_id,
+        "selected_warehouse_id": selected_warehouse_id,
         "page_title": "Qoldiqlar — Mahsulot harakati tarixi",
     })
 
@@ -5530,10 +5532,16 @@ async def sales_new(
     current_user: User = Depends(require_auth)
 ):
     """Yangi sotuv — narx turini tanlang, shu bo'yicha mahsulot narxlari ko'rsatiladi. Barcha turlar (tayyor, yarim_tayyor, xom ashyo) ombor qoldig'ida ko'rinadi."""
-    products = db.query(Product).filter(
-        Product.type.in_(["tayyor", "yarim_tayyor", "hom_ashyo", "material"]),
-        Product.is_active == True
-    ).order_by(Product.name).all()
+    products = (
+        db.query(Product)
+        .options(joinedload(Product.unit))
+        .filter(
+            Product.type.in_(["tayyor", "yarim_tayyor", "hom_ashyo", "material"]),
+            Product.is_active == True,
+        )
+        .order_by(Product.name)
+        .all()
+    )
     partners = db.query(Partner).filter(Partner.is_active == True).order_by(Partner.name).all()
     warehouses = db.query(Warehouse).all()
     price_types = db.query(PriceType).filter(PriceType.is_active == True).order_by(PriceType.name).all()
@@ -5542,14 +5550,25 @@ async def sales_new(
     if current_pt_id:
         pps = db.query(ProductPrice).filter(ProductPrice.price_type_id == current_pt_id).all()
         product_prices_by_type = {pp.product_id: pp.sale_price for pp in pps}
-    # Ombor bo'yicha qoldiq bor mahsulotlar: warehouse_id -> [product_id, ...]
+    # Ombor bo'yicha qoldiq: warehouse_id -> [product_id, ...] (sum(quantity) > 0) va product_id -> miqdor
     warehouse_products = {}
+    warehouse_stock_quantities = {}
     for wh in warehouses:
-        rows = db.query(Stock.product_id).filter(
-            Stock.warehouse_id == wh.id,
-            Stock.quantity > 0
-        ).distinct().all()
+        rows = (
+            db.query(Stock.product_id)
+            .filter(Stock.warehouse_id == wh.id)
+            .group_by(Stock.product_id)
+            .having(func.coalesce(func.sum(Stock.quantity), 0) > 0)
+            .all()
+        )
         warehouse_products[str(wh.id)] = [r[0] for r in rows]
+        qty_rows = (
+            db.query(Stock.product_id, func.coalesce(func.sum(Stock.quantity), 0).label("total"))
+            .filter(Stock.warehouse_id == wh.id)
+            .group_by(Stock.product_id)
+            .all()
+        )
+        warehouse_stock_quantities[str(wh.id)] = {str(r[0]): float(r[1] or 0) for r in qty_rows}
     return templates.TemplateResponse("sales/new.html", {
         "request": request,
         "products": products,
@@ -5559,6 +5578,7 @@ async def sales_new(
         "current_price_type_id": current_pt_id,
         "product_prices_by_type": product_prices_by_type,
         "warehouse_products": warehouse_products,
+        "warehouse_stock_quantities": warehouse_stock_quantities,
         "current_user": current_user,
         "page_title": "Yangi sotuv"
     })
