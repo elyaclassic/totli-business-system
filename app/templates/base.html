@@ -292,6 +292,51 @@
             padding-top: 0 !important;
         }
 
+        /* Mobil: tepa sarlavha va gamburger */
+        @media screen and (max-width: 768px) {
+            .mobile-header {
+                display: flex !important;
+                align-items: center;
+                justify-content: space-between;
+                padding: 12px 16px;
+                background: var(--primary-color);
+                color: white;
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                z-index: 100;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            }
+            .mobile-header .hamburger {
+                cursor: pointer;
+                padding: 8px;
+                font-size: 1.5rem;
+                user-select: none;
+                -webkit-tap-highlight-color: transparent;
+            }
+            .mobile-header .title { font-weight: 600; font-size: 1.1rem; }
+            .mobile-header .user-menu { font-size: 1.25rem; }
+        }
+        @media screen and (min-width: 769px) {
+            .mobile-header { display: none !important; }
+        }
+
+        /* Sidebar overlay (mobil) */
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 998;
+        }
+        @media screen and (max-width: 768px) {
+            body.sidebar-open .sidebar-overlay { display: block !important; }
+        }
+
         /* MOBILE RESPONSIVE - FORCED */
         @media screen and (max-width: 768px) {
             .sidebar {
@@ -300,12 +345,23 @@
                 opacity: 0 !important;
                 width: 0 !important;
                 overflow: hidden !important;
+                transition: transform 0.25s ease, opacity 0.25s ease;
+            }
+            body.sidebar-open .sidebar {
+                display: block !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+                width: 260px !important;
+                overflow-y: auto !important;
+                z-index: 999;
+                box-shadow: 4px 0 20px rgba(0,0,0,0.2);
             }
 
             .main-content {
                 margin-left: 0 !important;
                 width: 100% !important;
                 padding: 10px !important;
+                padding-top: 56px !important;
             }
 
             .stat-card {
@@ -339,7 +395,7 @@
     <!-- Sidebar va mobile header: sotuvchi yoki ishlab chiqarish operatori uchun ko'rinmasin -->
     {% if not sotuvchi_no_sidebar and not production_no_sidebar %}
     <div class="mobile-header">
-        <div class="hamburger" onclick="toggleSidebar()">
+        <div class="hamburger" onclick="toggleSidebar()" role="button" aria-label="Menyuni ochish">
             <i class="bi bi-list"></i>
         </div>
         <div class="title">TOTLI HOLVA</div>
@@ -347,6 +403,7 @@
             <i class="bi bi-person-circle"></i>
         </div>
     </div>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()" aria-hidden="true"></div>
 
     <!-- Sidebar -->
     <nav class="sidebar">
@@ -860,21 +917,10 @@
         });
     </script>
     <script>
-        // Force hide sidebar on mobile
-        if (window.innerWidth <= 768) {
-            document.addEventListener('DOMContentLoaded', function () {
-                const sidebar = document.querySelector('.sidebar');
-                if (sidebar) {
-                    sidebar.style.display = 'none';
-                    sidebar.style.visibility = 'hidden';
-                    sidebar.style.width = '0';
-                }
-                const mainContent = document.querySelector('.main-content');
-                if (mainContent) {
-                    mainContent.style.marginLeft = '0';
-                    mainContent.style.width = '100%';
-                }
-            });
+        function toggleSidebar() {
+            document.body.classList.toggle('sidebar-open');
+            var overlay = document.getElementById('sidebarOverlay');
+            if (overlay) overlay.setAttribute('aria-hidden', document.body.classList.contains('sidebar-open') ? 'false' : 'true');
         }
     </script>
 

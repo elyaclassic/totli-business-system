@@ -16,7 +16,7 @@ router = APIRouter(tags=["auth"])
 
 
 def _redirect_after_login(user: User) -> str:
-    """Rolga qarab login yoki bosh sahifadan keyin qayerga yo'naltirish. Admin dan boshqa bosh sahifaga kirmaydi — ishlab chiqarishga yo'naltiriladi."""
+    """Rolga qarab login yoki bosh sahifadan keyin qayerga yo'naltirish. Ishlab chiqarish rollari — tezkor ishlab chiqarish oynasiga (/production)."""
     role = (user.role or "").strip().lower()
     if role == "admin":
         return "/"  # Faqat admin bosh sahifani ko'radi
@@ -25,14 +25,15 @@ def _redirect_after_login(user: User) -> str:
     role_home = {
         "agent": "/dashboard/agent",
         "driver": "/dashboard/agent",
-        "production": "/production/orders",
-        "qadoqlash": "/production/orders",
+        "production": "/production",
+        "qadoqlash": "/production",
         "sotuvchi": "/sales/pos",
-        "rahbar": "/production/orders",
-        "raxbar": "/production/orders",
+        "rahbar": "/production",
+        "raxbar": "/production",
+        "operator": "/production",
     }
-    # Boshqa barcha rollar (operator va h.k.) — bosh sahifaga emas, ishlab chiqarish oynasiga
-    return role_home.get(role, "/production/orders")
+    # Ishlab chiqarishga tegishli rollar — tezkor ishlab chiqarish oynasi (retsept, ombor, miqdor, Boshlash)
+    return role_home.get(role, "/production")
 
 
 @router.get("/login", response_class=HTMLResponse)

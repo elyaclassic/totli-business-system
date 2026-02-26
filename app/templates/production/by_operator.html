@@ -1,16 +1,18 @@
 {% extends "base.html" %}
-
+{% block extra_css %}
+<link href="/static/css/production.css" rel="stylesheet">
+{% endblock %}
 {% block content %}
-<div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-3">
+<div class="container-fluid production-page">
+    <div class="page-header">
         <div>
             <a href="/production" class="btn btn-outline-secondary btn-sm mb-2"><i class="bi bi-arrow-left"></i> Orqaga</a>
-            <h4 class="mb-0"><i class="bi bi-person-badge"></i> Operator bo'yicha ishlab chiqarish</h4>
+            <h4><i class="bi bi-person-badge"></i> Operator bo'yicha ishlab chiqarish</h4>
         </div>
     </div>
 
-    <div class="card mb-2">
-        <div class="card-body py-2">
+    <div class="card filter-card mb-3">
+        <div class="card-body">
             <form method="get" action="/production/by-operator" class="d-flex flex-wrap align-items-center gap-2">
                 <label class="form-label mb-0 small text-muted">Sana:</label>
                 <input type="date" name="date_from" class="form-control form-control-sm" style="width: auto;" value="{{ filter_date_from or '' }}">
@@ -22,8 +24,8 @@
     </div>
 
     {% if operator_totals %}
-    <div class="card mb-2">
-        <div class="card-header py-2">
+    <div class="card mb-3">
+        <div class="card-header">
             <i class="bi bi-calculator"></i> Operator bo'yicha jamlanma (qiyom hisobga olinmaydi — yarim tayyor, tayyor, dona)
         </div>
         <div class="card-body p-0">
@@ -54,9 +56,9 @@
     </div>
     {% endif %}
 
-    <div class="card">
+    <div class="card mb-0">
         <div class="card-body p-0">
-            <table class="table table-hover mb-0">
+            <table class="table table-hover mb-0 table-sm">
                 <thead class="table-light">
                     <tr>
                         <th>Sana</th>
@@ -112,5 +114,5 @@
             </table>
         </div>
     </div>
-</div>
+</div><!-- .production-page -->
 {% endblock %}

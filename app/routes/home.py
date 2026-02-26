@@ -16,13 +16,16 @@ from app.deps import get_current_user, require_auth
 router = APIRouter(tags=["home"])
 
 
-# Bosh sahifa faqat admin va rahbar (manager) uchun
+# Bosh sahifa faqat admin va manager uchun; qolganlar o'z rol sahifasiga (tezkor ishlab chiqarish = /production)
 _ROLE_HOME = {
     "agent": "/dashboard/agent",
     "driver": "/dashboard/agent",
     "production": "/production",
     "qadoqlash": "/production",
     "sotuvchi": "/sales/pos",
+    "rahbar": "/production",
+    "raxbar": "/production",
+    "operator": "/production",
 }
 
 

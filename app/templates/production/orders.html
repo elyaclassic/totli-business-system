@@ -1,16 +1,35 @@
 {% extends "base.html" %}
-
+{% block extra_css %}
+<link href="/static/css/production.css" rel="stylesheet">
+{% endblock %}
 {% block content %}
 <style>
-    /* Ishlab chiqarish buyurtmalari: filtr va jadval orasidagi bo'shliqni olib tashlash */
     .production-orders-wrap .card.mb-0 + .card { margin-top: 0 !important; }
     .production-orders-wrap .card .card-body.p-0 { padding: 0 !important; }
+    .production-orders-wrap .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .production-orders-wrap #productionTable td:last-child { min-width: 320px; white-space: normal; }
+    .production-orders-wrap #productionTable .amallar-cell { min-width: 320px; }
+    .production-orders-wrap #productionTable .amallar-cell .form-select-sm { min-width: 100px; }
+    .production-orders-wrap #productionTable .amallar-cell form { display: inline-block; vertical-align: middle; margin: 2px; }
+    @media (max-width: 767px) {
+        .production-orders-wrap .production-table-wrap { display: none !important; }
+        .production-orders-wrap .production-orders-cards { display: block; }
+    }
+    @media (min-width: 768px) {
+        .production-orders-wrap .production-orders-cards { display: none !important; }
+    }
+    .production-orders-wrap .production-order-card { border: 1px solid rgba(0,0,0,.1); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+    .production-orders-wrap .production-order-card .card-body { padding: 12px; }
+    .production-orders-wrap .production-order-card .prod-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 0.9rem; }
+    .production-orders-wrap .production-order-card .prod-row:last-child { margin-bottom: 0; }
+    .production-orders-wrap .production-order-card .prod-actions { flex-wrap: wrap; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; }
+    .production-orders-wrap .production-order-card select.form-select-sm { min-width: 120px; }
 </style>
 {% if error == "insufficient_stock" %}
 <div class="alert alert-danger alert-dismissible fade show" role="alert">
     <strong>Omborda yetarli xom ashyo yo'q.</strong>
-    {% if error_detail %}<br><small>{{ error_detail }}</small>{% endif %}
-    Kerakli mahsulotlarni omborga kiriting.
+    {% if error_detail %}<br><small>{{ error_detail|e }}</small>{% endif %}
+    <br><small class="text-muted">Qoldiq faqat buyurtmadagi <strong>1-ombor (xom ashyo ombori)</strong> bo'yicha tekshiriladi — kerakli mahsulotni shu omborga kiriting (kirim yoki inventarizatsiya).</small>
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 {% endif %}
@@ -38,23 +57,23 @@
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 {% endif %}
-<div class="container-fluid production-orders-wrap">
-<div class="d-flex justify-content-between align-items-center mb-2">
-    <h4 class="mb-0"><i class="bi bi-clipboard-check"></i> Ishlab chiqarish buyurtmalari</h4>
-    <div class="d-flex gap-2">
+<div class="container-fluid production-page production-orders-wrap">
+<div class="page-header">
+    <h4><i class="bi bi-clipboard-check"></i> Ishlab chiqarish buyurtmalari</h4>
+    <div class="btn-group-wrap">
         {% if current_user and (current_user.role or '')|lower in ['admin', 'rahbar', 'raxbar'] %}
         <a href="/production/by-operator" class="btn btn-outline-primary btn-sm"><i class="bi bi-person-badge"></i> Operator bo'yicha</a>
         <form method="post" action="/production/orders/fix-dates-from-numbers" class="d-inline" onsubmit="return confirm('Barcha ishlab chiqarish hujjatlarida sana hujjat raqamidan (PR-YYYYMMDD) o\'rnatiladi. Davom etasizmi?');">
             <button type="submit" class="btn btn-outline-secondary btn-sm" title="Tasdiqni bekor qilib qayta tasdiqlaganda sana o'zgargan hujjatlar uchun"><i class="bi bi-calendar-event"></i> Sanani hujjat raqamidan tuzatish</button>
         </form>
         {% endif %}
-        <a href="/production/new" class="btn btn-success"><i class="bi bi-plus-circle"></i> Yaratish</a>
+        <a href="/production/new" class="btn btn-success btn-sm"><i class="bi bi-plus-circle"></i> Yaratish</a>
     </div>
 </div>
 
 <!-- Filtrlar -->
-<div class="card mb-0">
-    <div class="card-body py-2 px-3 pb-2">
+<div class="card filter-card mb-2">
+    <div class="card-body">
         <form method="get" action="/production/orders" class="d-flex flex-wrap align-items-center gap-2 mb-1">
             <label class="form-label mb-0 small text-muted">Sana:</label>
             <input type="date" name="date_from" class="form-control form-control-sm" style="width: auto;" value="{{ filter_date_from or '' }}" title="Dan">
@@ -74,30 +93,30 @@
             <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-search"></i> Qidirish</button>
             <a href="/production/orders" class="btn btn-sm btn-outline-secondary">Tozalash</a>
         </form>
-        <div class="d-flex gap-2 mb-0">
-            <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('all')">
+        <div class="d-flex gap-2 mb-0 flex-wrap" id="statusFilterWrap">
+            <button type="button" class="btn btn-sm btn-outline-secondary status-filter-btn active" data-status="all" onclick="filterStatus('all', this)">
                 Barchasi ({{ productions|length }})
             </button>
-            <button class="btn btn-sm btn-outline-warning" onclick="filterStatus('draft')">
+            <button type="button" class="btn btn-sm btn-outline-warning status-filter-btn" data-status="draft" onclick="filterStatus('draft', this)">
                 Kutilmoqda ({{ productions|selectattr('status', 'eq', 'draft')|list|length }})
             </button>
-            <button class="btn btn-sm btn-outline-info" onclick="filterStatus('in_progress')">
+            <button type="button" class="btn btn-sm btn-outline-info status-filter-btn" data-status="in_progress" onclick="filterStatus('in_progress', this)">
                 Jarayonda ({{ productions|selectattr('status', 'eq', 'in_progress')|list|length }})
             </button>
-            <button class="btn btn-sm btn-outline-success" onclick="filterStatus('completed')">
+            <button type="button" class="btn btn-sm btn-outline-success status-filter-btn" data-status="completed" onclick="filterStatus('completed', this)">
                 Yakunlangan ({{ productions|selectattr('status', 'eq', 'completed')|list|length }})
             </button>
-            <button class="btn btn-sm btn-outline-danger" onclick="filterStatus('cancelled')">
+            <button type="button" class="btn btn-sm btn-outline-danger status-filter-btn" data-status="cancelled" onclick="filterStatus('cancelled', this)">
                 Bekor qilingan ({{ productions|selectattr('status', 'eq', 'cancelled')|list|length }})
             </button>
         </div>
-        <p class="small text-muted mb-0 mt-1 pt-0"><i class="bi bi-info-circle"></i> Operator: agar tizimga kirdingiz va <strong>Xodimlar</strong> da siz qaysidir xodimga bog'langan bo'lsangiz (xodim kartasida «Foydalanuvchi» tanlangan), Bosqich yoki Yakunlash bosilganda operator avtomatik shu xodim bo'ladi.</p>
     </div>
 </div>
 
-<!-- Jadval -->
-<div class="card mt-0">
+<!-- Jadval (desktop) -->
+<div class="card production-table-wrap">
     <div class="card-body p-0">
+        <div class="table-responsive">
         <table class="table table-hover mb-0">
             <thead class="table-light">
                 <tr>
@@ -111,7 +130,7 @@
                     <th>1-ombor</th>
                     <th>2-ombor</th>
                     <th>Holat</th>
-                    <th>Amallar</th>
+                    <th class="amallar-cell">Amallar</th>
                 </tr>
             </thead>
             <tbody id="productionTable">
@@ -198,7 +217,7 @@
                         <span class="badge bg-danger">Bekor</span>
                         {% endif %}
                     </td>
-                    <td>
+                    <td class="amallar-cell">
                         {% if prod.status == 'draft' or prod.status == 'in_progress' %}
                         <a href="/production/{{ prod.id }}/materials" class="btn btn-sm btn-outline-primary" title="Xom ashyoni tahrirlash">
                             <i class="bi bi-pencil"></i>
@@ -266,30 +285,83 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
     </div>
 </div>
 
+<!-- Mobil: kartochkalar -->
+<div class="production-orders-cards" id="productionCards">
+    {% for prod in productions %}
+    <div class="card production-order-card" data-status="{{ prod.status }}">
+        <div class="card-body">
+            {% set cur = getattr(prod, 'current_stage', 1) or 1 %}
+            {% set r_stages = (prod.recipe.stages|sort(attribute='stage_number')) if (prod.recipe and prod.recipe.stages) else [] %}
+            {% set eff_max = (r_stages|map(attribute='stage_number')|list|max) if r_stages else 2 %}
+            {% set unit_name = (prod.recipe.product.unit.name if prod.recipe and prod.recipe.product and prod.recipe.product.unit else 'kg') %}
+            {% set _rname = (prod.recipe.name or '')|lower if prod.recipe else '' %}
+            {% set _kg_per_unit = 0.25 if ('250gr' in _rname or '250 gr' in _rname) else (0.4 if ('400gr' in _rname or '400 gr' in _rname) else (5.0 if ('5kg' in _rname or '5 kg' in _rname) else (4.0 if ('4kg' in _rname or '4 kg' in _rname) else (3.0 if ('3kg' in _rname or '3 kg' in _rname) else (2.0 if ('2kg' in _rname or '2 kg' in _rname) else (1.0 if ('1kg' in _rname or '1 kg' in _rname) else (prod.recipe.output_quantity if prod.recipe and prod.recipe.output_quantity else 1))))))) %}
+            {% set qty_kg = prod.quantity * _kg_per_unit %}
+            <div class="prod-row"><strong>{{ prod.number }}</strong> <span class="text-muted">{{ prod.date.strftime('%d.%m.%Y %H:%M') }}</span></div>
+            <div class="prod-row">
+                {% if prod.recipe %}<a href="/production/{{ prod.id }}/materials">{{ prod.recipe.name }}</a>{% else %}-{% endif %}
+                <strong>{{ "%.2f"|format(prod.quantity) }} {{ unit_name }}</strong>{% if unit_name|lower != 'kg' %}<span class="text-muted small">({{ "%.2f"|format(qty_kg) }} kg)</span>{% endif %}
+            </div>
+            <div class="prod-row">
+                {% if prod.status == 'completed' %}<span class="badge bg-success">Yakunlandi</span>
+                {% elif prod.status == 'in_progress' %}<span class="badge bg-info">Jarayonda</span>
+                {% elif prod.status == 'draft' %}<span class="badge bg-warning">Kutilmoqda</span>
+                {% else %}<span class="badge bg-danger">Bekor</span>{% endif %}
+                <span class="text-muted small">{{ prod.warehouse.name if prod.warehouse else '-' }}</span>
+                <span class="text-muted small">{{ prod.operator.full_name if prod.operator else (prod.user.full_name if prod.user else '-') }}</span>
+            </div>
+            <div class="prod-row prod-actions">
+                {% if prod.status == 'draft' or prod.status == 'in_progress' %}
+                <a href="/production/{{ prod.id }}/materials" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> Tahrir</a>
+                <form method="POST" action="/production/{{ prod.id }}/complete-stage" class="d-inline">
+                    <input type="hidden" name="stage_number" value="{{ [cur, eff_max]|min }}">
+                    <select name="machine_id" class="form-select form-select-sm d-inline-block" title="Uskuna"><option value="">— Uskuna —</option>{% for m in machines %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}</select>
+                    <select name="operator_id" class="form-select form-select-sm d-inline-block" title="Operator">{% for e in employees %}<option value="{{ e.id }}" {% if current_user_employee_id and e.id == current_user_employee_id %}selected{% endif %}>{{ e.full_name }}</option>{% endfor %}</select>
+                    <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check-lg"></i> Bosqich</button>
+                </form>
+                <form method="POST" action="/production/{{ prod.id }}/complete" class="d-inline complete-form" data-prod-id="{{ prod.id }}">
+                    <input type="hidden" name="operator_id" class="complete-operator-id">
+                    <button type="submit" class="btn btn-sm btn-outline-success">Yakunlash</button>
+                </form>
+                <form method="POST" action="/production/{{ prod.id }}/cancel" class="d-inline"><button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-x-lg"></i></button></form>
+                {% elif prod.status == 'completed' %}
+                {% if current_user and current_user.role == 'admin' %}
+                <a href="/production/{{ prod.id }}/materials" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
+                <form method="POST" action="/production/{{ prod.id }}/revert" class="d-inline" onsubmit="return confirm('Tasdiqni bekor qilish?');"><button type="submit" class="btn btn-sm btn-outline-warning"><i class="bi bi-arrow-counterclockwise"></i></button></form>
+                {% endif %}
+                {% endif %}
+                {% if current_user and current_user.role == 'admin' %}
+                <form method="POST" action="/production/{{ prod.id }}/delete" class="d-inline" onsubmit="return confirm('O\'chirishni xohlaysizmi?');"><input type="hidden" name="csrf_token" value="{{ csrf_token_from_request(request) }}"><button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button></form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="text-center text-muted py-4"><i class="bi bi-inbox fs-1"></i><br>Ishlab chiqarish buyurtmalari yo'q</div>
+    {% endfor %}
+</div>
+
 <script>
-function filterStatus(status) {
+function filterStatus(status, btn) {
     var rows = document.querySelectorAll('#productionTable tr[data-status]');
+    var cards = document.querySelectorAll('#productionCards .production-order-card');
     rows.forEach(function(row) {
-        if (status === 'all' || row.dataset.status === status) {
-            row.style.display = '';
-        } else {
-            row.style.display = 'none';
-        }
+        row.style.display = (status === 'all' || row.dataset.status === status) ? '' : 'none';
     });
-    
-    // Active button
-    document.querySelectorAll('.card-body .btn').forEach(function(btn) {
-        btn.classList.remove('active');
+    cards.forEach(function(card) {
+        card.style.display = (status === 'all' || card.dataset.status === status) ? '' : 'none';
     });
-    event.target.classList.add('active');
+    document.querySelectorAll('.status-filter-btn').forEach(function(b) { b.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
 }
-// Yakunlash bosilganda shu qatordagi operator tanlovidan qiymatni yuborish (oylik hisobda kg chiqishi uchun)
+// Yakunlash bosilganda shu qator/kartochkadagi operator tanlovidan qiymatni yuborish (oylik hisobda kg chiqishi uchun)
 document.querySelectorAll('.complete-form').forEach(function(form) {
     form.addEventListener('submit', function() {
-        var row = form.closest('tr');
+        var row = form.closest('tr') || form.closest('.production-order-card');
         var sel = row ? row.querySelector('select[name=operator_id]') : null;
         var hid = form.querySelector('.complete-operator-id');
         if (sel && hid) hid.value = sel.value || '';

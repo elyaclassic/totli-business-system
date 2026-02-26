@@ -1,5 +1,7 @@
 {% extends "base.html" %}
-
+{% block extra_css %}
+<link href="/static/css/production.css" rel="stylesheet">
+{% endblock %}
 {% block content %}
 <style>
     .recipe_search_results {
@@ -22,7 +24,8 @@
         cursor: pointer;
     }
 </style>
-<div class="d-flex justify-content-between mb-4">
+<div class="container-fluid production-page">
+<div class="page-header">
     <div>
         <a href="/production" class="btn btn-outline-secondary btn-sm mb-2">
             <i class="bi bi-arrow-left"></i> Orqaga
@@ -31,8 +34,8 @@
     </div>
 </div>
 
-<div class="row">
-    <div class="col-md-8">
+<div class="row g-3">
+    <div class="col-lg-8">
         <div class="card">
             <div class="card-header">
                 <i class="bi bi-gear"></i> Ishlab chiqarish ma'lumotlari

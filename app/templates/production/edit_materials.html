@@ -1,7 +1,10 @@
 {% extends "base.html" %}
-
+{% block extra_css %}
+<link href="/static/css/production.css" rel="stylesheet">
+{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between mb-4">
+<div class="container-fluid production-page">
+<div class="page-header">
     <div>
         <a href="/production/orders" class="btn btn-outline-secondary btn-sm mb-2">
             <i class="bi bi-arrow-left"></i> Buyurtmalar
@@ -10,7 +13,7 @@
     </div>
 </div>
 
-<div class="alert alert-info">
+<div class="alert alert-info py-2 px-3 mb-3">
     <strong>{{ production.number }}</strong> — {{ recipe.name }}<br>
     <strong>Ishlab chiqarish miqdori: {{ "%.2f"|format(production.quantity) }} {{ output_unit_name|default('kg') }}</strong> (o'zgarmaydi).<br>
     {% if read_only %}
@@ -21,7 +24,7 @@
 </div>
 {% if (current_user and (current_user.role or '')|lower in ['admin', 'rahbar', 'raxbar']) and total_material_cost is defined and output_units is defined %}
 <div class="card mb-3 border-success">
-    <div class="card-body py-2">
+    <div class="card-body">
         <div class="row">
             <div class="col-md-6">
                 <strong>Jami xarajat (xom ashyo):</strong> {{ "{:,.0f}".format(total_material_cost) }} so'm
@@ -106,6 +109,7 @@
         </form>
     </div>
 </div>
+</div><!-- .production-page -->
 {% if not read_only and production.production_items %}
 <script>
 (function() {

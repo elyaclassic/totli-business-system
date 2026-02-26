@@ -156,15 +156,9 @@
                             {% set qty_fmt = "%.0f"|format(row.quantity|round(0)|int) if (row.quantity is not none and _is_dona) else ("%.3f"|format(row.quantity) if row.quantity is not none else "") %}
                             <td>
                                 {% if transfer.status == 'confirmed' %}
-<<<<<<< Current (Your changes)
-                                <input type="text" class="form-control qty-input" value="{{ "%.3f"|format(row.quantity) if row.quantity is not none else "" }}" readonly>
-                                {% else %}
-                                <input type="text" name="quantity_{{ loop.index }}" class="form-control qty-input" value="{{ "%.3f"|format(row.quantity) if row.quantity is not none else "" }}" inputmode="decimal">
-=======
                                 <input type="text" class="form-control qty-input" value="{{ qty_fmt }}" readonly>
                                 {% else %}
                                 <input type="text" name="quantity_{{ loop.index }}" class="form-control qty-input" value="{{ qty_fmt }}" inputmode="{{ 'numeric' if _is_dona else 'decimal' }}">
->>>>>>> Incoming (Background Agent changes)
                                 {% endif %}
                             </td>
                             {% if show_tannarx %}

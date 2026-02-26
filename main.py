@@ -8106,8 +8106,10 @@ async def production_orders(
         return RedirectResponse(url="/login?next=/production/orders", status_code=303)
     try:
         today = date.today()
+        role = (getattr(current_user, "role", None) or "").strip().lower()
+        # Admin/rahbar/raxbar uchun sukutda oy boshi–bugun (ko'proq buyurtma ko'rinsin); boshqalar uchun bugun
         if not (date_from or "").strip():
-            date_from = today.strftime("%Y-%m-%d")
+            date_from = (today.replace(day=1).strftime("%Y-%m-%d") if role in ("admin", "rahbar", "raxbar") else today.strftime("%Y-%m-%d"))
         if not (date_to or "").strip():
             date_to = today.strftime("%Y-%m-%d")
         operator_id_raw = request.query_params.get("operator_id")
@@ -8125,12 +8127,17 @@ async def production_orders(
                 joinedload(Production.recipe).joinedload(Recipe.product).joinedload(Product.unit),
                 joinedload(Production.operator),
                 joinedload(Production.user),
+                joinedload(Production.warehouse),
+                joinedload(Production.output_warehouse),
+                joinedload(Production.machine),
             )
             .order_by(Production.date.desc())
         )
-        role = (getattr(current_user, "role", None) or "").strip().lower()
-        if role in ("admin", "rahbar", "raxbar") and operator_id and operator_id > 0:
-            qry = qry.filter(Production.operator_id == operator_id)
+        if role in ("admin", "rahbar", "raxbar"):
+            # Admin/rahbar/raxbar: operator tanlangan bo'lsa shu operator, aks holda barcha buyurtmalar
+            if operator_id and operator_id > 0:
+                qry = qry.filter(Production.operator_id == operator_id)
+            # operator tanlanmagan: filterni qo'shamiz — barcha buyurtmalar ko'rinadi
         else:
             qry = qry.filter(Production.user_id == current_user.id)
 
@@ -8161,6 +8168,7 @@ async def production_orders(
         productions = qry.all()
         machines = db.query(Machine).filter(Machine.is_active == True).all()
         employees = db.query(Employee).filter(Employee.is_active == True).all()
+        current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first() if current_user else None
         error = request.query_params.get("error")
         detail = unquote(request.query_params.get("detail", "") or "")
         return templates.TemplateResponse("production/orders.html", {
@@ -8169,6 +8177,7 @@ async def production_orders(
             "productions": productions,
             "machines": machines,
             "employees": employees,
+            "current_user_employee_id": current_user_employee.id if current_user_employee else None,
             "page_title": "Ishlab chiqarish buyurtmalari",
             "error": error,
             "error_detail": detail,
@@ -8494,19 +8503,31 @@ async def create_production(
 def _do_complete_production_stock(db, production, recipe):
     """Xom ashyo ayirish, tayyor mahsulot qo'shish. RedirectResponse qaytaradi xato bo'lsa."""
     from urllib.parse import quote
+    wh_id = production.warehouse_id
+    if not wh_id:
+        return RedirectResponse(
+            url="/production/orders?error=insufficient_stock&detail=" + quote("Buyurtmada 1-ombor (xom ashyo) tanlanmagan."),
+            status_code=303
+        )
+    wh = db.query(Warehouse).filter(Warehouse.id == wh_id).first()
+    wh_name = wh.name if wh else f"#{wh_id}"
     if production.production_items:
         items_to_use = [(pi.product_id, pi.quantity) for pi in production.production_items]
     else:
         items_to_use = [(item.product_id, item.quantity * production.quantity) for item in recipe.items]
     for product_id, required in items_to_use:
         stock = db.query(Stock).filter(
-            Stock.warehouse_id == production.warehouse_id,
+            Stock.warehouse_id == wh_id,
             Stock.product_id == product_id
         ).first()
-        if not stock or stock.quantity < required:
+        available = float(stock.quantity or 0) if stock else 0
+        if available < required:
             product_name = db.query(Product).filter(Product.id == product_id).first()
             name = product_name.name if product_name else f"#{product_id}"
-            msg = quote(f"Yetarli yo'q: {name} (kerak: {required}, mavjud: {stock.quantity if stock else 0})", safe="")
+            msg = quote(
+                f"«{wh_name}» da {name} yetarli emas: kerak {required}, mavjud {available}. Kerakli mahsulotni shu omborga kiriting.",
+                safe=""
+            )
             return RedirectResponse(url=f"/production/orders?error=insufficient_stock&detail={msg}", status_code=303)
     # Xom ashyolarni ayirish va StockMovement yozuvlarini yaratish
     for product_id, required in items_to_use:
@@ -8666,7 +8687,7 @@ async def complete_production(prod_id: int, db: Session = Depends(get_db), curre
     production.current_stage = _recipe_max_stage(recipe)
     db.commit()
     check_low_stock_and_notify(db)
-    return RedirectResponse(url="/production/orders", status_code=303)
+    return RedirectResponse(url="/production", status_code=303)
 
 
 @app.post("/production/{prod_id}/revert")
