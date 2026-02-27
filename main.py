@@ -3764,6 +3764,12 @@ async def products_check_duplicates(
     })
 
 
+@app.get("/products/bulk-update")
+async def product_bulk_update_get_redirect():
+    """Brauzerda to'g'ridan-to'g'ri ochilsa tovarlar ro'yxatiga yo'naltirish (gruppavoy o'zgartirish faqat forma orqali POST)."""
+    return RedirectResponse(url="/products", status_code=303)
+
+
 @app.get("/products/{product_id}", response_class=HTMLResponse)
 async def product_detail(request: Request, product_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
     from urllib.parse import unquote
@@ -4085,6 +4091,48 @@ async def product_delete(
     product.is_active = False
     db.commit()
     return RedirectResponse(url="/products", status_code=303)
+
+
+@app.post("/products/bulk-update")
+async def product_bulk_update(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Faqat admin: tanlangan tovarlarga gruppaviy o'zgartirish (turi, o'lchov birligi)."""
+    from urllib.parse import quote
+    form = await request.form()
+    ids = form.getlist("product_ids")
+    new_type = (form.get("type") or "").strip()
+    unit_id_raw = form.get("unit_id")
+    new_unit_id = None
+    if unit_id_raw is not None and str(unit_id_raw).strip() and str(unit_id_raw).strip() != "0":
+        try:
+            new_unit_id = int(unit_id_raw)
+        except (ValueError, TypeError):
+            pass
+    updated = 0
+    for sid in ids:
+        try:
+            pid = int(sid)
+            product = db.query(Product).filter(Product.id == pid, Product.is_active == True).first()
+            if not product:
+                continue
+            changed = False
+            if new_type in ("tayyor", "yarim_tayyor", "hom_ashyo"):
+                product.type = new_type
+                changed = True
+            if new_unit_id is not None:
+                product.unit_id = new_unit_id
+                changed = True
+            if changed:
+                updated += 1
+        except (ValueError, TypeError):
+            pass
+    if updated > 0:
+        db.commit()
+    msg = quote(f"Tanlangan tovarlar yangilandi ({updated} ta).") if updated else quote("O'zgartirish kiritilmadi yoki tovarlar topilmadi.")
+    return RedirectResponse(url="/products?updated=" + msg, status_code=303)
 
 
 @app.post("/products/delete-bulk")
@@ -6229,22 +6277,25 @@ async def sales_pos_draft_get(
 
 
 def _get_pos_cash_register(db: Session, payment_type: str, department_id: Optional[int] = None):
-    """POS to'lov: savdo qaysi bo'limdan bo'lsa o'sha bo'lim kassasiga. payment_type naqd/plastik, nomida naqd/plastik bor kassa tanlanadi."""
+    """POS to'lov: savdo qaysi bo'limdan bo'lsa o'sha bo'lim kassasiga. payment_type: naqd, plastik, click, terminal — kassa nomida shu so'z bor bo'lsa tanlanadi."""
     payment_type = (payment_type or "").strip().lower()
-    # Avval shu bo'limdagi faol kassalar
     q = db.query(CashRegister).filter(CashRegister.is_active == True)
     if department_id:
         q = q.filter(CashRegister.department_id == department_id)
     active = q.order_by(CashRegister.id).all()
     if not active and department_id:
-        # Bo'lim kassasi yo'q — barcha faol kassalardan qidirish
         active = db.query(CashRegister).filter(CashRegister.is_active == True).order_by(CashRegister.id).all()
     if not active:
         return None
-    key = "naqd" if payment_type == "naqd" else "plastik"
+    key = payment_type if payment_type in ("naqd", "plastik", "click", "terminal") else "plastik"
     for c in active:
         if c.name and key in (c.name or "").lower():
             return c
+    if key in ("click", "terminal"):
+        fallback = "plastik"
+        for c in active:
+            if c.name and fallback in (c.name or "").lower():
+                return c
     return active[0]
 
 
@@ -6260,7 +6311,7 @@ async def sales_pos_complete(
         return RedirectResponse(url="/?error=pos_access", status_code=303)
     form = await request.form()
     payment_type = (form.get("payment_type") or "").strip().lower()
-    if payment_type not in ("naqd", "plastik"):
+    if payment_type not in ("naqd", "plastik", "click", "terminal"):
         return RedirectResponse(url="/sales/pos?error=payment", status_code=303)
     warehouse = _get_pos_warehouse_for_user(db, current_user)
     wh_id_form = form.get("warehouse_id")
@@ -6395,7 +6446,7 @@ async def sales_pos_complete(
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         pay_count = db.query(Payment).filter(Payment.created_at >= today_start).count()
         pay_number = f"PAY-{datetime.now().strftime('%Y%m%d')}-{pay_count + 1:04d}"
-        pay_type = "cash" if payment_type == "naqd" else "card"
+        pay_type = "cash" if payment_type == "naqd" else ("click" if payment_type == "click" else ("terminal" if payment_type == "terminal" else "card"))
         db.add(Payment(
             number=pay_number,
             type="income",
@@ -7800,23 +7851,50 @@ async def production_index_page(request: Request, db: Session = Depends(get_db),
 
     today = datetime.now().date()
     total_recipes = db.query(Recipe).filter(Recipe.is_active == True).count()
-    # Faqat joriy foydalanuvchi ishlab chiqargani: bugun va oxirgi ro'yxat
-    user_id_filter = Production.user_id == current_user.id if current_user and getattr(current_user, "id", None) else None
+    # Faqat joriy foydalanuvchiga tegishli: user_id yoki operator_id (xodim bog'langan bo'lsa)
+    current_user_employee = None
+    if current_user and getattr(current_user, "id", None):
+        current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first()
+    user_or_operator_filter = None
+    if current_user and getattr(current_user, "id", None):
+        if current_user_employee:
+            user_or_operator_filter = or_(
+                Production.user_id == current_user.id,
+                Production.operator_id == current_user_employee.id,
+            )
+        else:
+            user_or_operator_filter = Production.user_id == current_user.id
+
     today_productions = db.query(Production).filter(
         Production.date >= today,
         Production.status == "completed"
     )
-    if user_id_filter is not None:
-        today_productions = today_productions.filter(user_id_filter)
+    if user_or_operator_filter is not None:
+        today_productions = today_productions.filter(user_or_operator_filter)
     today_productions = today_productions.all()
     today_quantity = sum((p.quantity or 0) for p in today_productions)
     pending_productions = db.query(Production).filter(Production.status == "draft")
-    if user_id_filter is not None:
-        pending_productions = pending_productions.filter(user_id_filter)
+    if user_or_operator_filter is not None:
+        pending_productions = pending_productions.filter(user_or_operator_filter)
     pending_productions = pending_productions.count()
-    recent_productions = db.query(Production).filter(user_id_filter).order_by(
-        Production.date.desc()
-    ).limit(10).all() if user_id_filter is not None else []
+    recent_productions = (
+        db.query(Production)
+        .options(
+            joinedload(Production.recipe).joinedload(Recipe.product).joinedload(Product.unit),
+        )
+        .filter(user_or_operator_filter)
+        .order_by(Production.date.desc())
+        .limit(10)
+        .all()
+    ) if user_or_operator_filter is not None else []
+
+    # Operator / ishlab chiqarish / qadoqlash uchun "Retseptlar" ro'yxati blokini yashirish
+    _operator_type_roles = ("operator", "production", "qadoqlash")
+    show_recipes_section = not (
+        current_user
+        and getattr(current_user, "role", None)
+        and (current_user.role or "").strip().lower() in _operator_type_roles
+    )
 
     now = datetime.now()
     resp = templates.TemplateResponse("production/index.html", {
@@ -7828,6 +7906,7 @@ async def production_index_page(request: Request, db: Session = Depends(get_db),
         "recent_productions": recent_productions,
         "recipes": recipes,
         "warehouses": warehouses,
+        "show_recipes_section": show_recipes_section,
         "page_title": "Ishlab chiqarish",
         "now": now,
     })
@@ -7955,6 +8034,59 @@ async def add_recipe_item(
         quantity=quantity
     )
     db.add(item)
+    db.commit()
+    return RedirectResponse(url=f"/production/recipes/{recipe_id}", status_code=303)
+
+
+@app.post("/production/recipes/{recipe_id}/set-name")
+async def set_recipe_name(
+    recipe_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Retsept nomini o'zgartirish."""
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Retsept topilmadi")
+    if name:
+        recipe.name = name
+    db.commit()
+    return RedirectResponse(url=f"/production/recipes/{recipe_id}", status_code=303)
+
+
+@app.post("/production/recipes/{recipe_id}/set-warehouses")
+async def set_recipe_warehouses(
+    recipe_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Retsept uchun omborlarni saqlash."""
+    form = await request.form()
+    default_warehouse_id = form.get("default_warehouse_id")
+    default_output_warehouse_id = form.get("default_output_warehouse_id")
+    if default_warehouse_id is not None and str(default_warehouse_id).strip() == "":
+        default_warehouse_id = None
+    if default_output_warehouse_id is not None and str(default_output_warehouse_id).strip() == "":
+        default_output_warehouse_id = None
+    if default_warehouse_id is not None:
+        try:
+            default_warehouse_id = int(default_warehouse_id)
+        except (TypeError, ValueError):
+            default_warehouse_id = None
+    if default_output_warehouse_id is not None:
+        try:
+            default_output_warehouse_id = int(default_output_warehouse_id)
+        except (TypeError, ValueError):
+            default_output_warehouse_id = None
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Retsept topilmadi")
+    recipe.default_warehouse_id = default_warehouse_id
+    recipe.default_output_warehouse_id = default_output_warehouse_id
     db.commit()
     return RedirectResponse(url=f"/production/recipes/{recipe_id}", status_code=303)
 
@@ -8621,8 +8753,23 @@ def _recipe_max_stage(recipe) -> int:
     return max(s.stage_number for s in recipe.stages)
 
 
+def _production_orders_redirect_url(form, base="/production/orders", extra_params=None):
+    """Buyurtmalar sahifasiga qaytishda sana/operator/q filtrlarni saqlash."""
+    from urllib.parse import urlencode
+    params = {}
+    for key in ("redirect_date_from", "redirect_date_to", "redirect_operator_id", "redirect_q"):
+        val = form.get(key) if hasattr(form, "get") else (form or {}).get(key)
+        if val is not None and str(val).strip():
+            qkey = key.replace("redirect_", "")
+            params[qkey] = str(val).strip()
+    if extra_params:
+        params.update(extra_params)
+    return base + ("?" + urlencode(params) if params else "")
+
+
 @app.post("/production/{prod_id}/complete-stage")
 async def complete_production_stage(
+    request: Request,
     prod_id: int,
     stage_number: int = Form(...),
     machine_id: Optional[int] = Form(None),
@@ -8631,6 +8778,9 @@ async def complete_production_stage(
     current_user: User = Depends(require_auth),
 ):
     """Bosqichni yakunlash. Oxirgi bosqichda ombor harakati qiladi va buyurtma yakunlanadi (retseptdagi bosqichlar soniga qarab)."""
+    form = await request.form()
+    def _redirect(extra=None):
+        return RedirectResponse(url=_production_orders_redirect_url(form, extra_params=extra), status_code=303)
     production = db.query(Production).filter(Production.id == prod_id).first()
     if not production:
         raise HTTPException(status_code=404, detail="Topilmadi")
@@ -8648,7 +8798,7 @@ async def complete_production_stage(
     if stage_number < 1 or stage_number > max_stage:
         raise HTTPException(status_code=400, detail=f"Bosqich 1–{max_stage} oralig'ida bo'lishi kerak")
     if production.status == "completed":
-        return RedirectResponse(url="/production/orders", status_code=303)
+        return _redirect()
     current = getattr(production, "current_stage", None) or 1
     # Eski buyurtma 4 bosqichda qolgan, retsept endi 2 bosqich — bosqichni bosganda darhol yakunlash
     if current > max_stage:
@@ -8659,12 +8809,9 @@ async def complete_production_stage(
         production.current_stage = max_stage
         db.commit()
         check_low_stock_and_notify(db)
-        return RedirectResponse(url="/production/orders", status_code=303)
+        return _redirect()
     if stage_number != current:
-        return RedirectResponse(
-            url=f"/production/orders?error=stage&detail=Keyingi bosqich {current}",
-            status_code=303,
-        )
+        return _redirect(extra_params={"error": "stage", "detail": f"Keyingi bosqich {current}"})
     stage_row = db.query(ProductionStage).filter(
         ProductionStage.production_id == prod_id,
         ProductionStage.stage_number == stage_number,
@@ -8680,7 +8827,7 @@ async def complete_production_stage(
         production.current_stage = stage_number + 1
         production.status = "in_progress"
         db.commit()
-        return RedirectResponse(url="/production/orders", status_code=303)
+        return _redirect()
     err = _do_complete_production_stock(db, production, recipe)
     if err:
         return err
@@ -8688,12 +8835,12 @@ async def complete_production_stage(
     production.current_stage = max_stage
     db.commit()
     check_low_stock_and_notify(db)
-    return RedirectResponse(url="/production/orders", status_code=303)
+    return _redirect()
 
 
 @app.post("/production/{prod_id}/complete")
 async def complete_production(prod_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    """Ishlab chiqarishni bir martada yakunlash (barcha bosqichlarsiz)"""
+    """Ishlab chiqarishni bir martada yakunlash (barcha bosqichlarsiz) — tezkor ishlab chiqarishga qaytadi."""
     production = db.query(Production).filter(Production.id == prod_id).first()
     if not production:
         raise HTTPException(status_code=404, detail="Topilmadi")
@@ -8712,26 +8859,29 @@ async def complete_production(prod_id: int, db: Session = Depends(get_db), curre
 
 @app.post("/production/{prod_id}/revert")
 async def production_revert(
+    request: Request,
     prod_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
     """Tasdiqni bekor qilish (faqat admin): xom ashyoni qaytarish, tayyor mahsulotni olib tashlash, holatni qoralamaga o'tkazish"""
     from urllib.parse import quote
+    form = await request.form()
+
+    def _redirect(extra=None):
+        return RedirectResponse(
+            url=_production_orders_redirect_url(form, extra_params=extra),
+            status_code=303
+        )
+
     production = db.query(Production).filter(Production.id == prod_id).first()
     if not production:
         raise HTTPException(status_code=404, detail="Topilmadi")
     if production.status != "completed":
-        return RedirectResponse(
-            url="/production/orders?error=revert&detail=" + quote("Faqat yakunlangan buyurtmaning tasdiqini bekor qilish mumkin."),
-            status_code=303
-        )
+        return _redirect(extra_params={"error": "revert", "detail": "Faqat yakunlangan buyurtmaning tasdiqini bekor qilish mumkin."})
     recipe = db.query(Recipe).filter(Recipe.id == production.recipe_id).first()
     if not recipe:
-        return RedirectResponse(
-            url="/production/orders?error=revert&detail=" + quote("Retsept topilmadi."),
-            status_code=303
-        )
+        return _redirect(extra_params={"error": "revert", "detail": "Retsept topilmadi."})
     items_to_use = [(pi.product_id, pi.quantity) for pi in production.production_items] if production.production_items else [(item.product_id, item.quantity * production.quantity) for item in recipe.items]
     output_units = production.quantity * (recipe.output_quantity or 1)
     out_wh_id = production.output_warehouse_id if production.output_warehouse_id else production.warehouse_id
@@ -8740,11 +8890,14 @@ async def production_revert(
         Stock.warehouse_id == out_wh_id,
         Stock.product_id == recipe.product_id
     ).first()
-    if not product_stock or product_stock.quantity < output_units:
-        return RedirectResponse(
-            url="/production/orders?error=revert&detail=" + quote("Omborda tayyor mahsulot yetarli emas yoki o'zgargan. Tasdiqni bekor qilish mumkin emas."),
-            status_code=303
-        )
+    current_qty = float(product_stock.quantity or 0) if product_stock else 0
+    if not product_stock or current_qty < output_units:
+        out_wh = db.query(Warehouse).filter(Warehouse.id == out_wh_id).first()
+        out_product = db.query(Product).filter(Product.id == recipe.product_id).first()
+        wh_name = (out_wh.name if out_wh else "2-ombor") or "2-ombor"
+        prod_name = (out_product.name if out_product else "tayyor mahsulot") or "tayyor mahsulot"
+        detail = f"«{wh_name}» da «{prod_name}» dan kerak: {output_units:,.1f}, mavjud: {current_qty:,.1f}. Mahsulot sotilgan yoki ko'chirilgan bo'lishi mumkin — tasdiqni bekor qilish uchun 2-omborda shu miqdorda qoldiq bo'lishi kerak."
+        return _redirect(extra_params={"error": "revert", "detail": detail})
     product_stock.quantity -= output_units
     # Xom ashyolarni 1-omborga qaytarish
     for product_id, required in items_to_use:
@@ -8758,34 +8911,40 @@ async def production_revert(
             db.add(Stock(warehouse_id=production.warehouse_id, product_id=product_id, quantity=required))
     production.status = "draft"
     db.commit()
-    return RedirectResponse(url="/production/orders", status_code=303)
+    return _redirect()
 
 
 @app.post("/production/{prod_id}/cancel")
-async def cancel_production(prod_id: int, db: Session = Depends(get_db)):
+async def cancel_production(
+    request: Request,
+    prod_id: int,
+    db: Session = Depends(get_db),
+):
     """Ishlab chiqarishni bekor qilish"""
+    form = await request.form()
     production = db.query(Production).filter(Production.id == prod_id).first()
     if not production:
         raise HTTPException(status_code=404, detail="Topilmadi")
-    
     production.status = "cancelled"
     db.commit()
-    return RedirectResponse(url="/production/orders", status_code=303)
+    return RedirectResponse(url=_production_orders_redirect_url(form), status_code=303)
 
 
 @app.post("/production/{prod_id}/delete")
 async def delete_production(
+    request: Request,
     prod_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
     """Ishlab chiqarish buyurtmasini o'chirish — faqat admin."""
+    form = await request.form()
     production = db.query(Production).filter(Production.id == prod_id).first()
     if not production:
         raise HTTPException(status_code=404, detail="Buyurtma topilmadi")
     db.delete(production)
     db.commit()
-    return RedirectResponse(url="/production/orders", status_code=303)
+    return RedirectResponse(url=_production_orders_redirect_url(form), status_code=303)
 
 
 # ==========================================

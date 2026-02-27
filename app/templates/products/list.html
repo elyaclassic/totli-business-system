@@ -36,6 +36,12 @@
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 {% endif %}
+{% if request.query_params.get('updated') %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    <i class="bi bi-check-circle"></i> {{ request.query_params.get('updated') }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
 <div class="container-fluid">
     <div class="card">
             <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2 py-3">
@@ -63,6 +69,7 @@
                         <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
                         <button type="submit" class="btn btn-danger btn-sm" id="productsBulkDeleteBtn" disabled title="Tanlangan tovarlarni o'chirish"><i class="bi bi-trash"></i> Tanlanganlarni o'chirish</button>
                     </form>
+                    <button type="button" class="btn btn-warning btn-sm" id="productsBulkUpdateBtn" disabled data-bs-toggle="modal" data-bs-target="#bulkUpdateModal" title="Tanlangan tovarlarga turi yoki o'lchov birligini bir xil qilish"><i class="bi bi-pencil-square"></i> Gruppavoy o'zgartirish</button>
                     {% endif %}
                     <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addProductModal"><i class="bi bi-plus-circle"></i> Yaratish</button>
                 </div>
@@ -91,6 +98,7 @@
                             <th class="products-sort" data-sort="barcode" role="button" title="Saralash">Shtrix kod <i class="bi bi-arrow-down-up products-sort-icon"></i></th>
                             <th class="products-sort" data-sort="name" role="button" title="Saralash">Nomi <i class="bi bi-arrow-down-up products-sort-icon"></i></th>
                             <th class="products-sort" data-sort="type" role="button" title="Saralash">Turi <i class="bi bi-arrow-down-up products-sort-icon"></i></th>
+                            <th class="products-sort" data-sort="unit" role="button" title="Saralash">O'lchov birligi <i class="bi bi-arrow-down-up products-sort-icon"></i></th>
                             <th class="text-center">Tarix</th>
                             <th></th>
                         </tr>
@@ -98,7 +106,7 @@
                     <tbody>
                         {% if products %}
                         {% for product in products %}
-                        <tr class="product-row" data-search="{{ (product.name or '')|lower }} {{ (product.barcode or '')|lower }} {{ (product.type or '')|lower }} tayyor yarim xom ashyo" data-sort-num="{{ loop.index }}" data-sort-barcode="{{ (product.barcode or '-')|lower }}" data-sort-name="{{ (product.name or '')|lower }}" data-sort-type="{{ (product.type or '')|lower }}">
+                        <tr class="product-row" data-search="{{ (product.name or '')|lower }} {{ (product.barcode or '')|lower }} {{ (product.type or '')|lower }} {{ (product.unit.name if product.unit else '')|lower }} {{ (product.unit.code if product.unit else '')|lower }} tayyor yarim xom ashyo" data-sort-num="{{ loop.index }}" data-sort-barcode="{{ (product.barcode or '-')|lower }}" data-sort-name="{{ (product.name or '')|lower }}" data-sort-type="{{ (product.type or '')|lower }}" data-sort-unit="{{ (product.unit.name if product.unit else '')|lower }} {{ (product.unit.code if product.unit else '')|lower }}">
                             {% if current_user and current_user.role == 'admin' %}
                             <td class="text-center">
                                 <input type="checkbox" class="form-check-input product-row-check" name="product_ids" value="{{ product.id }}" form="productsBulkDeleteForm">
@@ -118,6 +126,7 @@
                                 <span class="badge bg-info">Xom ashyo</span>
                                 {% endif %}
                             </td>
+                            <td><span class="text-muted">{% if product.unit %}{{ product.unit.name or product.unit.code or '—' }}{% else %}—{% endif %}</span></td>
                             <td class="text-center">
                                 <a href="/qoldiqlar/tarix?product_id={{ product.id }}" class="btn btn-sm btn-outline-info" title="Mahsulot harakati tarixi"><i class="bi bi-clock-history"></i></a>
                             </td>
@@ -151,7 +160,7 @@
                         {% endfor %}
                         {% else %}
                         <tr>
-                            <td colspan="{% if current_user and current_user.role == 'admin' %}8{% else %}6{% endif %}" class="text-center text-muted py-5">
+                            <td colspan="{% if current_user and current_user.role == 'admin' %}9{% else %}7{% endif %}" class="text-center text-muted py-5">
                                 <i class="bi bi-box-seam fs-1 d-block mb-2"></i>
                                 Hozircha tovarlar yo'q<br>
                                 <small>Yuqoridagi Yaratish tugmasini bosing</small>
@@ -278,6 +287,47 @@
                 <div class="modal-footer py-2">
                     <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
                     <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-check-lg"></i> Saqlash</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Gruppavoy o'zgartirish modali -->
+<div class="modal fade" id="bulkUpdateModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="productsBulkUpdateForm" method="POST" action="/products/bulk-update" onsubmit="var t=document.getElementById('bulkUpdateType'); var u=document.getElementById('bulkUpdateUnitId'); if ((!t||!t.value) && (!u||!u.value)) { alert('Kamida bitta maydonni o\'zgartirish uchun tanlang (Turi yoki O\'lchov birligi).'); return false; } return true;">
+                <input type="hidden" name="csrf_token" value="{{ getattr(request.state, 'csrf_token', '') }}">
+                <div id="bulkUpdateProductIdsContainer"></div>
+                <div class="modal-header py-2">
+                    <h6 class="modal-title mb-0"><i class="bi bi-pencil-square"></i> Tanlangan tovarlarni gruppavoy o'zgartirish</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body py-3">
+                    <p class="text-muted small mb-3">Quyidagi maydonlarni to'ldiring — faqat to'ldirilganlari tanlangan tovarlarga qo'llanadi. O'zgartirmaslik uchun «— O'zgartirmaslik —» qoldiring.</p>
+                    <div class="mb-3">
+                        <label class="form-label small mb-1">Turi</label>
+                        <select name="type" class="form-select form-select-sm" id="bulkUpdateType">
+                            <option value="">— O'zgartirmaslik —</option>
+                            <option value="tayyor">Tayyor mahsulot</option>
+                            <option value="yarim_tayyor">Yarim tayyor</option>
+                            <option value="hom_ashyo">Xom ashyo</option>
+                        </select>
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label small mb-1">O'lchov birligi</label>
+                        <select name="unit_id" class="form-select form-select-sm" id="bulkUpdateUnitId">
+                            <option value="">— O'zgartirmaslik —</option>
+                            {% for unit in units or [] %}
+                            <option value="{{ unit.id }}">{{ unit.name }} ({{ unit.code }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-sm btn-warning"><i class="bi bi-check-lg"></i> Qo'llash</button>
                 </div>
             </form>
         </div>
@@ -425,31 +475,52 @@
     });
 })();
 
-// Admin: hammasini tanlash va tanlanganlarni o'chirish tugmasini yoqish
+// Admin: hammasini tanlash, tanlanganlarni o'chirish va gruppavoy o'zgartirish tugmalarini yoqish
 (function () {
     var selectAll = document.getElementById('productsSelectAll');
     var checkboxes = document.querySelectorAll('.product-row-check');
-    var bulkBtn = document.getElementById('productsBulkDeleteBtn');
-    if (!bulkBtn) return;
+    var bulkDeleteBtn = document.getElementById('productsBulkDeleteBtn');
+    var bulkUpdateBtn = document.getElementById('productsBulkUpdateBtn');
 
-    function updateBulkBtn() {
+    function updateBulkBtns() {
         var n = document.querySelectorAll('.product-row-check:checked').length;
-        bulkBtn.disabled = n === 0;
+        if (bulkDeleteBtn) bulkDeleteBtn.disabled = n === 0;
+        if (bulkUpdateBtn) bulkUpdateBtn.disabled = n === 0;
     }
 
-    checkboxes.forEach(function (cb) {
-        cb.addEventListener('change', updateBulkBtn);
-    });
-    updateBulkBtn();
+    if (checkboxes.length) {
+        checkboxes.forEach(function (cb) {
+            cb.addEventListener('change', updateBulkBtns);
+        });
+    }
+    updateBulkBtns();
 
     if (selectAll && checkboxes.length) {
         selectAll.addEventListener('change', function () {
             checkboxes.forEach(function (cb) {
                 if (cb.closest('tr') && cb.closest('tr').style.display !== 'none') cb.checked = selectAll.checked;
             });
-            updateBulkBtn();
+            updateBulkBtns();
         });
     }
+})();
+
+// Gruppavoy o'zgartirish: modaldan oldin tanlangan tovar idlarini formaga yozish
+(function () {
+    var modal = document.getElementById('bulkUpdateModal');
+    var container = document.getElementById('bulkUpdateProductIdsContainer');
+    if (!modal || !container) return;
+    modal.addEventListener('show.bs.modal', function () {
+        container.innerHTML = '';
+        var checked = document.querySelectorAll('.product-row-check:checked');
+        checked.forEach(function (cb) {
+            var inp = document.createElement('input');
+            inp.type = 'hidden';
+            inp.name = 'product_ids';
+            inp.value = cb.value || '';
+            if (inp.value) container.appendChild(inp);
+        });
+    });
 })();
 </script>
 {% endblock %}

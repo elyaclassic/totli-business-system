@@ -74,7 +74,7 @@
 <!-- Filtrlar -->
 <div class="card filter-card mb-2">
     <div class="card-body">
-        <form method="get" action="/production/orders" class="d-flex flex-wrap align-items-center gap-2 mb-1">
+        <form method="get" action="/production/orders" class="d-flex flex-wrap align-items-center gap-2 mb-1" id="productionOrdersFilterForm">
             <label class="form-label mb-0 small text-muted">Sana:</label>
             <input type="date" name="date_from" class="form-control form-control-sm" style="width: auto;" value="{{ filter_date_from or '' }}" title="Dan">
             <span class="small text-muted">—</span>
@@ -91,7 +91,7 @@
             <span class="small text-muted ms-2">Qidiruv:</span>
             <input type="text" name="q" class="form-control form-control-sm" style="width: 140px;" value="{{ filter_q or '' }}" autocomplete="off" placeholder="Raqam, retsept...">
             <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-search"></i> Qidirish</button>
-            <a href="/production/orders" class="btn btn-sm btn-outline-secondary">Tozalash</a>
+            <a href="/production/orders?clear=1" class="btn btn-sm btn-outline-secondary">Tozalash</a>
         </form>
         <div class="d-flex gap-2 mb-0 flex-wrap" id="statusFilterWrap">
             <button type="button" class="btn btn-sm btn-outline-secondary status-filter-btn active" data-status="all" onclick="filterStatus('all', this)">
@@ -346,6 +346,47 @@
 </div>
 
 <script>
+(function() {
+    var STORAGE_KEY = 'productionOrdersFilter';
+    var params = new URLSearchParams(window.location.search);
+    var hasClear = params.has('clear') || params.get('clear') === '1';
+    var hasDateFrom = params.has('date_from') || params.get('date_from');
+    var hasDateTo = params.has('date_to') || params.get('date_to');
+    if (hasClear) {
+        try { sessionStorage.removeItem(STORAGE_KEY); } catch (e) {}
+        if (window.location.search) {
+            var withoutClear = new URLSearchParams(window.location.search);
+            withoutClear.delete('clear');
+            var qs = withoutClear.toString();
+            window.location.replace('/production/orders' + (qs ? '?' + qs : ''));
+            return;
+        }
+    }
+    if (hasDateFrom || hasDateTo || params.get('operator_id') || params.get('q')) {
+        try {
+            var save = { date_from: params.get('date_from') || '', date_to: params.get('date_to') || '', operator_id: params.get('operator_id') || '', q: params.get('q') || '' };
+            sessionStorage.setItem(STORAGE_KEY, JSON.stringify(save));
+        } catch (e) {}
+    } else {
+        try {
+            var saved = sessionStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                var o = JSON.parse(saved);
+                if (o && (o.date_from || o.date_to)) {
+                    var qs = [];
+                    if (o.date_from) qs.push('date_from=' + encodeURIComponent(o.date_from));
+                    if (o.date_to) qs.push('date_to=' + encodeURIComponent(o.date_to));
+                    if (o.operator_id) qs.push('operator_id=' + encodeURIComponent(o.operator_id));
+                    if (o.q) qs.push('q=' + encodeURIComponent(o.q));
+                    if (qs.length) {
+                        window.location.replace('/production/orders?' + qs.join('&'));
+                        return;
+                    }
+                }
+            }
+        } catch (e) {}
+    }
+})();
 function filterStatus(status, btn) {
     var rows = document.querySelectorAll('#productionTable tr[data-status]');
     var cards = document.querySelectorAll('#productionCards .production-order-card');
@@ -367,6 +408,32 @@ document.querySelectorAll('.complete-form').forEach(function(form) {
         if (sel && hid) hid.value = sel.value || '';
     });
 });
+
+// Amal bajargandan keyin sana/operator/q filtri qolishi uchun — formalarga yashirin filtrlarni qo'shish
+(function() {
+    var filterForm = document.getElementById('productionOrdersFilterForm');
+    if (!filterForm) return;
+    function appendFilterParams(form) {
+        if (!form || form.action.indexOf('/production/') === -1) return;
+        if (form.action.indexOf('/complete-stage') !== -1 || form.action.indexOf('/revert') !== -1 ||
+            form.action.indexOf('/cancel') !== -1 || form.action.indexOf('/delete') !== -1) {
+            var names = ['date_from', 'date_to', 'operator_id', 'q'];
+            names.forEach(function(name) {
+                if (form.querySelector('input[name="redirect_' + name + '"]')) return;
+                var inp = filterForm.querySelector('[name="' + name + '"]');
+                var val = inp ? (inp.value || '').trim() : '';
+                var h = document.createElement('input');
+                h.type = 'hidden';
+                h.name = 'redirect_' + name;
+                h.value = val;
+                form.appendChild(h);
+            });
+        }
+    }
+    document.querySelectorAll('form[action*="/production/"]').forEach(function(form) {
+        form.addEventListener('submit', function() { appendFilterParams(form); }, false);
+    });
+})();
 </script>
 </div>
 {% endblock %}

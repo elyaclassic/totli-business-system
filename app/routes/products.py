@@ -12,7 +12,7 @@ import barcode
 from barcode.writer import ImageWriter
 from fastapi import APIRouter, Request, Depends, Form, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 
 from app.core import templates
@@ -217,7 +217,7 @@ async def products_list(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    query = db.query(Product).filter(Product.is_active == True)
+    query = db.query(Product).options(joinedload(Product.unit)).filter(Product.is_active == True)
     if type == "tayyor":
         query = query.filter(Product.type == "tayyor")
     elif type == "yarim_tayyor":
@@ -393,6 +393,55 @@ async def product_delete_bulk(
     db.commit()
     msg = quote(f"Tanlangan {deleted} ta tovar o'chirildi.") if deleted else quote("Hech narsa tanlanmadi.")
     return RedirectResponse(url="/products?deleted=" + msg, status_code=303)
+
+
+@router.get("/bulk-update")
+async def product_bulk_update_get(
+    current_user: User = Depends(require_auth),
+):
+    """GET /products/bulk-update — brauzerda ochilganda tovarlar sahifasiga yo'naltirish."""
+    return RedirectResponse(url="/products", status_code=303)
+
+
+@router.post("/bulk-update")
+async def product_bulk_update(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Faqat admin: tanlangan tovarlarga gruppaviy o'zgartirish (turi, o'lchov birligi)."""
+    form = await request.form()
+    ids = form.getlist("product_ids")
+    new_type = (form.get("type") or "").strip()
+    unit_id_raw = form.get("unit_id")
+    new_unit_id = None
+    if unit_id_raw is not None and str(unit_id_raw).strip() and str(unit_id_raw).strip() != "0":
+        try:
+            new_unit_id = int(unit_id_raw)
+        except (ValueError, TypeError):
+            pass
+    updated = 0
+    for sid in ids:
+        try:
+            pid = int(sid)
+            product = db.query(Product).filter(Product.id == pid, Product.is_active == True).first()
+            if not product:
+                continue
+            changed = False
+            if new_type in ("tayyor", "yarim_tayyor", "hom_ashyo"):
+                product.type = new_type
+                changed = True
+            if new_unit_id is not None:
+                product.unit_id = new_unit_id
+                changed = True
+            if changed:
+                updated += 1
+        except (ValueError, TypeError):
+            pass
+    if updated > 0:
+        db.commit()
+    msg = quote(f"Tanlangan tovarlar yangilandi ({updated} ta).") if updated else quote("O'zgartirish kiritilmadi yoki tovarlar topilmadi.")
+    return RedirectResponse(url="/products?updated=" + msg, status_code=303)
 
 
 @router.post("/{product_id}/upload-image")

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role in ('admin', 'raxbar')) %}
+{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role == 'admin') %}
 <div class="pos-premium">
 <!-- To'liq ekran taklifi (sahifa ochilganda bir marta ko'rsatiladi) -->
 <div id="posFullscreenPrompt" class="pos-fullscreen-prompt" style="display: none;">
@@ -21,7 +21,7 @@
 {% endif %}
 {% if error == 'payment' %}
 <div class="alert alert-warning alert-dismissible fade show" role="alert">
-    To'lov turini tanlang (Naqd yoki Plastik).
+    To'lov turini tanlang (Naqd, Plastik, Click yoki Terminal).
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 {% endif %}
@@ -215,6 +215,8 @@
                             <div class="d-flex gap-2 flex-wrap">
                                 <button type="button" class="btn btn-sm pos-payment-pill" data-payment="naqd" id="posSidebarNaqd"><i class="bi bi-cash-stack me-1"></i>Naqd</button>
                                 <button type="button" class="btn btn-sm pos-payment-pill" data-payment="plastik" id="posSidebarPlastik"><i class="bi bi-credit-card me-1"></i>Plastik</button>
+                                <button type="button" class="btn btn-sm pos-payment-pill" data-payment="click" id="posSidebarClick"><i class="bi bi-phone me-1"></i>Click</button>
+                                <button type="button" class="btn btn-sm pos-payment-pill" data-payment="terminal" id="posSidebarTerminal"><i class="bi bi-upc-scan me-1"></i>Terminal</button>
                             </div>
                         </div>
                         <div class="pos-partner-discount mb-3">
@@ -319,13 +321,19 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body pos-payment-body py-4 px-4">
-                    <p class="text-center mb-4 opacity-75 small"><kbd class="pos-kbd">1</kbd> Naqd &nbsp; <kbd class="pos-kbd">2</kbd> Plastik</p>
+                    <p class="text-center mb-4 opacity-75 small"><kbd class="pos-kbd">1</kbd> Naqd &nbsp; <kbd class="pos-kbd">2</kbd> Plastik &nbsp; <kbd class="pos-kbd">3</kbd> Click &nbsp; <kbd class="pos-kbd">4</kbd> Terminal</p>
                     <div class="d-grid gap-3">
-                        <button type="button" class="btn btn-lg py-4 pos-payment-btn pos-payment-naqd" data-payment="naqd" id="posPaymentNaqd">
+                        <button type="button" class="btn btn-lg py-3 pos-payment-btn pos-payment-naqd" data-payment="naqd" id="posPaymentNaqd">
                             <i class="bi bi-cash-stack me-2 fs-5"></i> Naqd
                         </button>
-                        <button type="button" class="btn btn-lg py-4 pos-payment-btn pos-payment-plastik" data-payment="plastik" id="posPaymentPlastik">
+                        <button type="button" class="btn btn-lg py-3 pos-payment-btn pos-payment-plastik" data-payment="plastik" id="posPaymentPlastik">
                             <i class="bi bi-credit-card me-2 fs-5"></i> Plastik
+                        </button>
+                        <button type="button" class="btn btn-lg py-3 pos-payment-btn pos-payment-click" data-payment="click" id="posPaymentClick">
+                            <i class="bi bi-phone me-2 fs-5"></i> Click
+                        </button>
+                        <button type="button" class="btn btn-lg py-3 pos-payment-btn pos-payment-terminal" data-payment="terminal" id="posPaymentTerminal">
+                            <i class="bi bi-upc-scan me-2 fs-5"></i> Terminal
                         </button>
                     </div>
                 </div>
@@ -669,7 +677,7 @@
         btnSotuv.addEventListener('click', function() {
             if (cart.length === 0) return;
             var p = paymentTypeInput ? paymentTypeInput.value : '';
-            if (p && (p === 'naqd' || p === 'plastik')) {
+            if (p && ['naqd', 'plastik', 'click', 'terminal'].indexOf(p) !== -1) {
                 doPayment(p);
             } else {
                 var modal = bootstrap.Modal.getOrCreateInstance(paymentModal);
@@ -702,6 +710,8 @@
         paymentModal.addEventListener('keydown', function(e) {
             if (e.key === '1') { e.preventDefault(); doPayment('naqd'); }
             if (e.key === '2') { e.preventDefault(); doPayment('plastik'); }
+            if (e.key === '3') { e.preventDefault(); doPayment('click'); }
+            if (e.key === '4') { e.preventDefault(); doPayment('terminal'); }
         });
     }
 
@@ -1143,6 +1153,18 @@
     box-shadow: 0 4px 14px rgba(37,99,235,0.3);
 }
 .pos-premium .pos-payment-plastik:hover { color: #fff; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(37,99,235,0.4); }
+.pos-premium .pos-payment-click {
+    background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(124,58,237,0.3);
+}
+.pos-premium .pos-payment-click:hover { color: #fff; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(124,58,237,0.4); }
+.pos-premium .pos-payment-terminal {
+    background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(13,148,136,0.3);
+}
+.pos-premium .pos-payment-terminal:hover { color: #fff; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(13,148,136,0.4); }
 
 #posCartTotal, #posCartTotalFinal { font-variant-numeric: tabular-nums; }
 

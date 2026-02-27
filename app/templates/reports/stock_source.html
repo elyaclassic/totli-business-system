@@ -18,7 +18,8 @@
             <strong>Mahsulot:</strong> {{ product.name if product else '-' }} ({{ product.code or product.barcode or '-' }})
         </p>
         <p class="text-muted small mb-2">Jadvalda faqat <strong>shu mahsulot</strong> ({{ product.name if product else '-' }}) omborga kirgan yoki chiqqan harakatlar ko‘rsatiladi. «Ishlab chiqarish» qatori — shu mahsulotni tayyor mahsulot qilib chiqargan buyurtma (hujjatni «Ochish» orqali ko‘ring).</p>
-        <p class="text-success fw-bold mb-0">Hozirgi qoldiq (Stock jadvalidagi yig‘indi): <strong>{% if is_dona %}{{ "{:,.0f}".format(current_qty|round(0)) }}{% else %}{{ "{:,.3f}".format(current_qty) }}{% endif %}</strong></p>
+        <p class="text-muted small mb-0"><i class="bi bi-exclamation-triangle text-warning"></i> <strong>Ogohlantirish «Hujjatda …»</strong> — ishlab chiqarish hujjatida (retsept bo'yicha) ko'rsatilgan miqdor va harakatda yozilgan miqdor bir-biriga to'g'ri kelmaganida chiqadi (masalan, retsept o'zgartirilgandan keyin yoki boshqa birlikda yozilganda). Qoldiq har doim tasdiqlash paytida yozilgan miqdorga asoslanadi; ogohlantirish faqat farqni ko'rsatish uchun.</p>
+        <p class="text-success fw-bold mb-0 mt-2">Hozirgi qoldiq (Stock jadvalidagi yig‘indi): <strong>{% if is_dona %}{{ "{:,.0f}".format(current_qty|round(0)) }}{% else %}{{ "{:,.3f}".format(current_qty) }}{% endif %}</strong></p>
     </div>
     <div class="card-body p-0">
         <table class="table table-hover table-sm">
@@ -46,7 +47,7 @@
                         <td>
                             <a href="{{ m.document_url }}" target="_blank" class="btn btn-sm btn-outline-primary">Ochish</a>
                             {% if m.get('quantity_mismatch') %}
-                            <br><small class="text-warning" title="Hujjatda ko'rsatilgan miqdor ({{ m.document_quantity|round(0) if is_dona else m.document_quantity }}) harakatdagi ({{ '{:+,.0f}'.format(m.quantity_change|round(0)) if is_dona else '{:+,.3f}'.format(m.quantity_change) }}) dan farq qiladi. Qoldiq tasdiqlash paytidagi miqdorga asoslangan."><i class="bi bi-exclamation-triangle"></i> Hujjatda {{ m.document_quantity|round(0) if is_dona else "{:,.1f}".format(m.document_quantity) }}</small>
+                            <br><small class="text-warning" title="Hujjatda (retsept boʻyicha) {{ m.document_quantity|round(0) if is_dona else m.document_quantity }}, harakatda yozilgan {{ '{:+,.0f}'.format(m.quantity_change|round(0)) if is_dona else '{:+,.3f}'.format(m.quantity_change) }} — farq bor. Qoldiq har doim tasdiqlashdagi miqdorga asoslangan."><i class="bi bi-exclamation-triangle"></i> Hujjatda {{ m.document_quantity|round(0) if is_dona else "{:,.1f}".format(m.document_quantity) }}</small>
                             {% endif %}
                         </td>
                     </tr>

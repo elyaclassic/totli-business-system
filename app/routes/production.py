@@ -412,6 +412,8 @@ async def production_index_page(
         traceback.print_exc()
         print(f"Production index page error: {error_msg}")
     
+    # Operator / ishlab chiqarish / qadoqlash kabi foydalanuvchilarga Retseptlar bloki ko'rinmasin (faqat o'zining oxirgi ishlab chiqarishlari ko'rinadi)
+    show_recipes_section = not filter_by_operator
     try:
         resp = templates.TemplateResponse("production/index.html", {
             "request": request,
@@ -422,6 +424,7 @@ async def production_index_page(
             "recent_productions": recent_productions,
             "recipes": recipes,
             "warehouses": warehouses,
+            "show_recipes_section": show_recipes_section,
             "page_title": "Ishlab chiqarish",
             "now": datetime.now(),
         })
@@ -441,6 +444,7 @@ async def production_index_page(
             "recent_productions": [],
             "recipes": [],
             "warehouses": [],
+            "show_recipes_section": True,
             "page_title": "Ishlab chiqarish",
             "now": datetime.now(),
             "error": f"Xatolik: {error_msg[:200]}",
@@ -558,6 +562,22 @@ async def add_recipe_item(
     if not recipe:
         raise HTTPException(status_code=404, detail="Retsept topilmadi")
     db.add(RecipeItem(recipe_id=recipe_id, product_id=product_id, quantity=quantity))
+    db.commit()
+    return RedirectResponse(url=f"/production/recipes/{recipe_id}", status_code=303)
+
+
+@router.post("/recipes/{recipe_id}/set-name")
+async def set_recipe_name(
+    recipe_id: int,
+    name: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Retsept nomini o'zgartirish."""
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Retsept topilmadi")
+    recipe.name = (name or "").strip() or recipe.name
     db.commit()
     return RedirectResponse(url=f"/production/recipes/{recipe_id}", status_code=303)
 
@@ -1060,9 +1080,15 @@ async def production_revert(
         Stock.warehouse_id == out_wh_id,
         Stock.product_id == recipe.product_id,
     ).first()
-    if not product_stock or product_stock.quantity < output_units:
+    current_qty = float(product_stock.quantity or 0) if product_stock else 0
+    if not product_stock or current_qty < output_units:
+        out_wh = db.query(Warehouse).filter(Warehouse.id == out_wh_id).first()
+        out_product = db.query(Product).filter(Product.id == recipe.product_id).first()
+        wh_name = (out_wh.name if out_wh else "2-ombor") or "2-ombor"
+        prod_name = (out_product.name if out_product else "tayyor mahsulot") or "tayyor mahsulot"
+        detail = f"«{wh_name}» da «{prod_name}» dan kerak: {output_units:,.1f}, mavjud: {current_qty:,.1f}. Mahsulot sotilgan yoki ko'chirilgan bo'lishi mumkin — tasdiqni bekor qilish uchun 2-omborda shu miqdorda qoldiq bo'lishi kerak."
         return RedirectResponse(
-            url="/production/orders?error=revert&detail=" + quote("Omborda tayyor mahsulot yetarli emas yoki o'zgargan. Tasdiqni bekor qilish mumkin emas."),
+            url="/production/orders?error=revert&detail=" + quote(detail),
             status_code=303,
         )
     product_stock.quantity -= output_units

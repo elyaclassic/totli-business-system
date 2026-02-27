@@ -124,7 +124,8 @@
             </div>
         </div>
         
-        <!-- Retseptlar -->
+        <!-- Retseptlar (operator / ishlab chiqarish / qadoqlash uchun ko'rinmasin) -->
+        {% if show_recipes_section|default(true) %}
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-journal-text"></i> Retseptlar</span>
@@ -143,6 +144,7 @@
                 </ul>
             </div>
         </div>
+        {% endif %}
     </div>
     
     <!-- Oxirgi ishlab chiqarishlar -->

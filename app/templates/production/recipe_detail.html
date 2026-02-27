@@ -48,6 +48,13 @@
                 <i class="bi bi-info-circle"></i> Ma'lumotlar
             </div>
             <div class="card-body">
+                <form method="POST" action="/production/recipes/{{ recipe.id }}/set-name" class="mb-3">
+                    <label class="form-label small text-muted mb-1">Retsept nomi</label>
+                    <div class="input-group input-group-sm">
+                        <input type="text" class="form-control" name="name" value="{{ recipe.name or '' }}" maxlength="200" placeholder="Retsept nomi">
+                        <button type="submit" class="btn btn-outline-primary"><i class="bi bi-check-lg"></i> Saqlash</button>
+                    </div>
+                </form>
                 <table class="table table-sm">
                     <tr>
                         <td>Mahsulot:</td>
