@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role == 'admin') %}
+{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role in ('admin', 'raxbar')) %}
 <div class="pos-premium">
 <!-- To'liq ekran taklifi (sahifa ochilganda bir marta ko'rsatiladi) -->
 <div id="posFullscreenPrompt" class="pos-fullscreen-prompt" style="display: none;">
@@ -46,7 +46,12 @@
 
 <div class="container-fluid pos-container">
     <div class="pos-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-        <h1 class="pos-title mb-0"><i class="bi bi-cart-check-fill me-2"></i>Sotuv oynasi</h1>
+        <div class="d-flex align-items-center gap-3">
+            <form method="post" action="/logout" class="d-inline">
+                <button type="submit" class="btn btn-outline-secondary btn-sm pos-btn-exit" title="Tizimdan chiqish"><i class="bi bi-box-arrow-right me-1"></i>Chiqish</button>
+            </form>
+            <h1 class="pos-title mb-0"><i class="bi bi-cart-check-fill me-2"></i>Sotuv oynasi</h1>
+        </div>
         <div class="d-flex align-items-center gap-2">
         {% if pos_user_warehouses %}
         <div class="pos-warehouses-compact d-flex align-items-center gap-2">
@@ -942,10 +947,11 @@
     font-variant-numeric: tabular-nums;
 }
 
-.pos-premium .pos-container { max-width: 1600px; margin: 0 auto; padding: 0 1rem; }
+.pos-premium .pos-container { max-width: 1600px; margin: 0 auto; padding: 1.5rem 1rem 1rem; }
 
 /* Header */
-.pos-premium .pos-header { margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--pos-border); }
+.pos-premium .pos-header { margin-bottom: 1.5rem; padding-bottom: 1rem; padding-top: 0.25rem; border-bottom: 1px solid var(--pos-border); }
+.pos-premium .pos-btn-exit { white-space: nowrap; }
 .pos-premium .pos-title {
     font-size: 1.65rem;
     font-weight: 700;

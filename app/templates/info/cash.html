@@ -21,6 +21,7 @@
                         <tr>
                             <th>#</th>
                             <th>Nomi</th>
+                            <th>To'lov turi (POS)</th>
                             <th>Bo'lim</th>
                             <th>Balans</th>
                             <th>Holati</th>
@@ -32,6 +33,19 @@
                         <tr>
                         <td>{{ cash.id }}</td>
                         <td><strong>{{ cash.name }}</strong></td>
+                        <td>
+                            {% if cash.payment_type == 'naqd' %}
+                            <span class="badge bg-success">Naqd</span>
+                            {% elif cash.payment_type == 'plastik' %}
+                            <span class="badge bg-primary">Plastik</span>
+                            {% elif cash.payment_type == 'click' %}
+                            <span class="badge bg-secondary">Click</span>
+                            {% elif cash.payment_type == 'terminal' %}
+                            <span class="badge bg-info">Terminal</span>
+                            {% else %}
+                            <span class="text-muted" title="Tahrirlash orqali tanlang">Tanlanmagan</span>
+                            {% endif %}
+                        </td>
                         <td>
                             {% if cash.department %}
                             <span class="badge bg-info">{{ cash.department.name }}</span>
@@ -53,7 +67,7 @@
                         </td>
                         <td>
                             <button class="btn btn-sm btn-outline-primary" title="Tahrirlash"
-                                onclick="editCash({{ cash.id }}, `{{ cash.name }}`, {{ cash.balance }}, {{ cash.department_id or 'null' }})">
+                                onclick="editCash({{ cash.id }}, `{{ cash.name }}`, {{ cash.balance }}, {{ cash.department_id or 'null' }}, '{{ (cash.payment_type or '')|e }}')">
                                 <i class="bi bi-pencil"></i>
                             </button>
                             {% if current_user and current_user.role == 'admin' %}
@@ -70,7 +84,7 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="6" class="text-muted text-center py-4">Hozircha kassalar yo'q. Yangi kassa qo'shish uchun yuqoridagi Yaratish tugmasini bosing.</td>
+                            <td colspan="7" class="text-muted text-center py-4">Hozircha kassalar yo'q. Yangi kassa qo'shish uchun yuqoridagi Yaratish tugmasini bosing.</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -111,6 +125,17 @@
                         <input type="text" class="form-control form-control-sm" name="name" placeholder="Asosiy kassa" required>
                     </div>
                     <div class="mb-2">
+                        <label class="form-label small mb-0">To'lov turi (POS)</label>
+                        <select class="form-select form-select-sm" name="payment_type">
+                            <option value="">— Tanlanmagan —</option>
+                            <option value="naqd">Naqd</option>
+                            <option value="plastik">Plastik</option>
+                            <option value="click">Click</option>
+                            <option value="terminal">Terminal</option>
+                        </select>
+                        <small class="text-muted">Sotuv oynasida qaysi to'lov turi tanlansa, pul shu kassaga yoziladi.</small>
+                    </div>
+                    <div class="mb-2">
                         <label class="form-label small mb-0">Bo'lim</label>
                         <select class="form-select form-select-sm" name="department_id">
                             <option value="">— Tanlanmagan —</option>
@@ -146,6 +171,16 @@
                     <div class="mb-2">
                         <label class="form-label small mb-0">Nomi *</label>
                         <input type="text" class="form-control form-control-sm" name="name" id="edit_name" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">To'lov turi (POS)</label>
+                        <select class="form-select form-select-sm" name="payment_type" id="edit_payment_type">
+                            <option value="">— Tanlanmagan —</option>
+                            <option value="naqd">Naqd</option>
+                            <option value="plastik">Plastik</option>
+                            <option value="click">Click</option>
+                            <option value="terminal">Terminal</option>
+                        </select>
                     </div>
                     <div class="mb-2">
                         <label class="form-label small mb-0">Bo'lim</label>
@@ -216,11 +251,12 @@
         }
     });
 
-    function editCash(id, name, balance, departmentId) {
+    function editCash(id, name, balance, departmentId, paymentType) {
         document.getElementById('editCashForm').action = '/info/cash/edit/' + id;
         document.getElementById('edit_name').value = name;
         document.getElementById('edit_balance').value = balance;
         document.getElementById('edit_department_id').value = departmentId || '';
+        document.getElementById('edit_payment_type').value = paymentType || '';
         new bootstrap.Modal(document.getElementById('editCashModal')).show();
     }
 

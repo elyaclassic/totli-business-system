@@ -93,8 +93,19 @@ async def login(
         })
 
 
-@router.get("/logout")
-async def logout():
+def _do_logout_response():
+    """Session cookie o'chiriladi va /login ga yo'naltiriladi."""
+    use_https = os.getenv("HTTPS", "").lower() in ("1", "true", "yes")
     resp = RedirectResponse(url="/login", status_code=303)
-    resp.delete_cookie("session_token")
+    resp.delete_cookie("session_token", path="/", samesite="lax", secure=use_https, httponly=True)
     return resp
+
+
+@router.get("/logout")
+async def logout_get():
+    return _do_logout_response()
+
+
+@router.post("/logout")
+async def logout_post():
+    return _do_logout_response()

@@ -709,13 +709,14 @@ class PosDraft(Base):
 # ==========================================
 
 class CashRegister(Base):
-    """Kassalar"""
+    """Kassalar. payment_type: POS da qaysi to'lov turiga bog'lanishi (naqd, plastik, click, terminal)."""
     __tablename__ = "cash_registers"
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100))
     balance = Column(Float, default=0)
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)  # Bo'limga biriktirish
+    payment_type = Column(String(20), nullable=True)  # naqd, plastik, click, terminal — POS to'lov turi
     is_active = Column(Boolean, default=True)
     
     department = relationship("Department", back_populates="cash_registers")
@@ -1147,10 +1148,25 @@ def ensure_recipe_warehouse_columns():
         print(f"ensure_recipe_warehouse_columns: {e}")
 
 
+def ensure_cash_register_payment_type():
+    """cash_registers jadvaliga payment_type ustunini qo'shadi (POS to'lov turi: naqd, plastik, click, terminal)."""
+    from sqlalchemy import text
+    try:
+        with engine.begin() as conn:
+            r = conn.execute(text("PRAGMA table_info(cash_registers)"))
+            cols = [row[1] for row in r]
+            if "payment_type" not in cols:
+                conn.execute(text("ALTER TABLE cash_registers ADD COLUMN payment_type VARCHAR(20)"))
+                print("cash_registers.payment_type ustuni qo'shildi.")
+    except Exception as e:
+        print(f"ensure_cash_register_payment_type: {e}")
+
+
 # Bazani yaratish — faqat jadvallar yaratiladi, mavjud ma'lumotlar o'chirilmaydi (saqlanadi)
 def init_db():
     Base.metadata.create_all(bind=engine)
     ensure_recipe_warehouse_columns()
+    ensure_cash_register_payment_type()
     print("Database tayyor (mavjud ma'lumotlar saqlanadi).")
 
 

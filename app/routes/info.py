@@ -8,6 +8,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Request, Depends, Form, File, HTTPException, UploadFile, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
 import openpyxl
 
 from app.core import templates
@@ -22,6 +23,7 @@ from app.models.database import (
     ProductPrice,
     ProductPriceHistory,
     CashRegister,
+    Payment,
     Department,
     Direction,
     Position,
@@ -653,14 +655,19 @@ async def info_cash_add(
     name: str = Form(...),
     balance: float = Form(0),
     department_id: int = Form(None),
+    payment_type: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
+    pt = (payment_type or "").strip() or None
+    if pt and pt not in ("naqd", "plastik", "click", "terminal"):
+        pt = None
     cash = CashRegister(
-        name=name, 
-        balance=balance, 
+        name=name,
+        balance=balance,
         department_id=department_id if department_id else None,
-        is_active=True
+        payment_type=pt,
+        is_active=True,
     )
     db.add(cash)
     db.commit()
@@ -673,6 +680,7 @@ async def info_cash_edit(
     name: str = Form(...),
     balance: float = Form(0),
     department_id: int = Form(None),
+    payment_type: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
@@ -682,6 +690,8 @@ async def info_cash_edit(
     cash.name = name
     cash.balance = balance
     cash.department_id = department_id if department_id else None
+    pt = (payment_type or "").strip() or None
+    cash.payment_type = pt if pt in ("naqd", "plastik", "click", "terminal") else None
     db.commit()
     return RedirectResponse(url="/info/cash", status_code=303)
 
@@ -694,6 +704,31 @@ async def info_cash_delete(cash_id: int, db: Session = Depends(get_db), current_
     db.delete(cash)
     db.commit()
     return RedirectResponse(url="/info/cash", status_code=303)
+
+
+@router.post("/cash/recalculate/{cash_id}")
+async def info_cash_recalculate(
+    cash_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Kassa balansini Payment yozuvlaridan qayta hisoblaydi (faqat admin)."""
+    cash = db.query(CashRegister).filter(CashRegister.id == cash_id).first()
+    if not cash:
+        raise HTTPException(status_code=404, detail="Kassa topilmadi")
+    total = (
+        db.query(func.coalesce(func.sum(Payment.amount), 0))
+        .filter(Payment.cash_register_id == cash_id)
+        .scalar()
+    )
+    if total is None:
+        total = 0
+    cash.balance = float(total)
+    db.commit()
+    return RedirectResponse(
+        url="/info/cash?recalculated=1&balance=" + quote(str(cash.balance)),
+        status_code=303,
+    )
 
 
 # ---------- Departments ----------

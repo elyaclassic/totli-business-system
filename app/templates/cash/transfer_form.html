@@ -2,9 +2,12 @@
 
 {% block content %}
 <div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <h5 class="mb-0"><i class="bi bi-bank"></i> Kassadan kassaga o'tkazish {% if transfer %}{{ transfer.number }}{% else %}(yaratish){% endif %}</h5>
-        <a href="/cash/transfers" class="btn btn-outline-secondary btn-sm">Ro'yxat</a>
+        <div class="d-flex align-items-center gap-2">
+            <a href="/sales/pos" class="btn btn-outline-primary btn-sm"><i class="bi bi-cart-check me-1"></i>Sotuv oynasi</a>
+            <a href="/cash/transfers" class="btn btn-outline-secondary btn-sm">Ro'yxat</a>
+        </div>
     </div>
     {% if request.query_params.get('sent') == '1' %}
     <div class="alert alert-success alert-dismissible fade show py-2 small" role="alert">

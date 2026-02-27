@@ -2,8 +2,9 @@
 
 {% block content %}
 <style>
-    .product-results { box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #dee2e6; border-radius: 0.25rem; margin-top: 2px; background: white; }
-    .product-results .list-group-item:hover { background-color: #f8f9fa; cursor: pointer; }
+    .product-results, .add-product-results { box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid #0d6efd; border-radius: 0.25rem; margin-top: 2px; background: white; z-index: 1050; position: fixed; min-width: 280px; max-width: 420px; max-height: 70vh; overflow-y: auto; }
+    .product-results .list-group-item, .add-product-results .list-group-item { cursor: pointer; }
+    .product-results .list-group-item:hover, .add-product-results .list-group-item:hover { background-color: #e7f1ff; }
     /* Jadval ixcham va simmetrik, hajmi o‘rtacha */
     .table-compact { font-size: 0.875rem; table-layout: fixed; width: 100%; }
     .table-compact th, .table-compact td { padding: 0.35rem 0.5rem; vertical-align: middle; }
@@ -156,9 +157,9 @@
             <form method="post" action="/qoldiqlar/tovar/hujjat/{{ doc.id }}/add-row" class="row g-2 align-items-end mb-4">
                 <div class="col-md-3 position-relative">
                     <label class="form-label small">Mahsulot *</label>
-                    <input type="text" class="form-control form-control-sm add-product-search" placeholder="Nomi yoki kod..." autocomplete="off">
+                    <input type="text" class="form-control form-control-sm add-product-search" placeholder="Yozing yoki bosing — mahsulotni tanlang" autocomplete="off">
                     <input type="hidden" name="product_id" id="add_row_product_id" required>
-                    <div class="add-product-results list-group position-absolute" style="z-index:1000; max-height:200px; overflow-y:auto; display:none; left:0; right:0;"></div>
+                    <div class="add-product-results list-group" style="display:none;"></div>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small">O'mbor *</label>
@@ -185,9 +186,9 @@
                     <button type="submit" class="btn btn-primary btn-sm w-100"><i class="bi bi-plus-circle"></i> Qo'shish</button>
                 </div>
             </form>
-            <select id="add_row_product_list" style="display:none;">
+            <select id="add_row_product_list" style="display:none;" aria-hidden="true">
                 {% for p in products %}
-                <option value="{{ p.id }}" data-name="{{ p.name }}" data-code="{{ p.code or '' }}">{{ p.name }}{% if p.code %} ({{ p.code }}){% endif %}</option>
+                <option value="{{ p.id }}" data-name="{{ p.name|e }}" data-code="{{ (p.code or '')|e }}" data-barcode="{{ (p.barcode or '')|e }}">{{ p.name }}{% if p.code %} ({{ p.code }}){% endif %}</option>
                 {% endfor %}
             </select>
             {% endif %}
@@ -212,9 +213,9 @@
                             <tr class="item-row">
                                 <td class="row-n">1</td>
                                 <td class="position-relative">
-                                    <input type="text" class="form-control form-control-sm product-search" placeholder="Mahsulot nomi yoki kodi..." autocomplete="off">
+                                    <input type="text" class="form-control form-control-sm product-search" placeholder="Yozing yoki maydonni bosing — ro'yxatdan tanlang" autocomplete="off">
                                     <input type="hidden" name="product_id" class="row-product-id">
-                                    <div class="product-results list-group position-absolute" style="z-index:1000; max-height:200px; overflow-y:auto; display:none; left:0; right:0;"></div>
+                                    <div class="product-results list-group" style="display:none;"></div>
                                 </td>
                                 <td>
                                     <select name="warehouse_id" class="form-select form-select-sm">
@@ -237,9 +238,9 @@
                     <button type="submit" class="btn btn-success"><i class="bi bi-check-circle"></i> Saqlash</button>
                 </div>
             </form>
-            <select id="product_list" style="display:none;">
+            <select id="product_list" style="display:none;" aria-hidden="true">
                 {% for p in products %}
-                <option value="{{ p.id }}" data-name="{{ p.name }}" data-code="{{ p.code or '' }}">{{ p.name }}{% if p.code %} ({{ p.code }}){% endif %}</option>
+                <option value="{{ p.id }}" data-name="{{ p.name|e }}" data-code="{{ (p.code or '')|e }}" data-barcode="{{ (p.barcode or '')|e }}">{{ p.name }}{% if p.code %} ({{ p.code }}){% endif %}</option>
                 {% endfor %}
             </select>
             {% endif %}
@@ -274,11 +275,12 @@
     function filterProducts(term) {
         if (!productList || !productList.options) return [];
         term = (term || '').trim().toLowerCase();
-        if (!term) return [];
+        if (!term) return Array.from(productList.options);
         return Array.from(productList.options).filter(function(opt) {
             var name = (opt.dataset.name || '').toLowerCase();
             var code = (opt.dataset.code || '').toLowerCase();
-            return name.indexOf(term) !== -1 || code.indexOf(term) !== -1;
+            var barcode = (opt.dataset.barcode || '').toLowerCase();
+            return name.indexOf(term) !== -1 || code.indexOf(term) !== -1 || barcode.indexOf(term) !== -1;
         });
     }
 
@@ -313,11 +315,18 @@
         function updateRowNumbers() {
             itemsBody.querySelectorAll('tr.item-row').forEach(function(r, i) { var n = r.querySelector('.row-n'); if (n) n.textContent = i + 1; });
         }
+        function positionDropdownBelow(resultsDiv, inputEl) {
+            if (!resultsDiv || !inputEl) return;
+            var r = inputEl.getBoundingClientRect();
+            resultsDiv.style.left = r.left + 'px';
+            resultsDiv.style.top = (r.bottom + 4) + 'px';
+            resultsDiv.style.width = Math.max(r.width, 280) + 'px';
+        }
         function showRowResults(row, term) {
             const resultsDiv = row.querySelector('.product-results');
+            const searchInput = row.querySelector('.product-search');
             if (!resultsDiv) return;
-            term = (term || '').trim().toLowerCase();
-            const matches = term ? filterProducts(term) : Array.from(productList.options);
+            const matches = filterProducts((term || '').trim());
             resultsDiv.innerHTML = '';
             if (matches.length > 0) {
                 matches.forEach(function(opt) {
@@ -335,6 +344,7 @@
                     resultsDiv.appendChild(a);
                 });
                 resultsDiv.style.display = 'block';
+                positionDropdownBelow(resultsDiv, searchInput);
             }
         }
         function bindProductSearch(row) {
@@ -343,11 +353,18 @@
             const resultsDiv = row.querySelector('.product-results');
             if (!searchInput || !resultsDiv) return;
             searchInput.addEventListener('focus', function() {
-                if (!hiddenId.value) showRowResults(row, this.value);
+                showRowResults(row, this.value.trim());
             });
             searchInput.addEventListener('input', function() {
-                hiddenId.value = '';
+                if (!this.value.trim()) hiddenId.value = '';
                 showRowResults(row, this.value);
+            });
+            searchInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') { resultsDiv.style.display = 'none'; return; }
+                if (e.key === 'Enter') {
+                    var first = resultsDiv.querySelector('.list-group-item');
+                    if (first) { first.click(); e.preventDefault(); }
+                }
             });
         }
         document.getElementById('newDocForm').addEventListener('submit', function(e) {
@@ -374,17 +391,14 @@
         });
     }
 
-    // Mavjud hujjat: qator qo'shish formadagi mahsulot qidiruv
+    // Mavjud hujjat: qator qo'shish formadagi mahsulot qidiruv (focusda ham ro'yxat ko'rinsin)
     const addProductSearch = document.querySelector('.add-product-search');
     const addProductResults = document.querySelector('.add-product-results');
     const addRowProductId = document.getElementById('add_row_product_id');
     if (addProductSearch && addProductResults && addRowProductId) {
-        addProductSearch.addEventListener('input', function() {
-            const term = this.value.trim();
-            addProductResults.style.display = 'none';
+        function showAddProductResults(term) {
             addProductResults.innerHTML = '';
-            addRowProductId.value = '';
-            const matches = filterProducts(term);
+            const matches = filterProducts(term || '');
             if (matches.length > 0) {
                 matches.forEach(function(opt) {
                     const a = document.createElement('a');
@@ -399,7 +413,20 @@
                     addProductResults.appendChild(a);
                 });
                 addProductResults.style.display = 'block';
+                var r = addProductSearch.getBoundingClientRect();
+                addProductResults.style.left = r.left + 'px';
+                addProductResults.style.top = (r.bottom + 4) + 'px';
+                addProductResults.style.width = Math.max(r.width, 280) + 'px';
+            } else {
+                addProductResults.style.display = 'none';
             }
+        }
+        addProductSearch.addEventListener('focus', function() {
+            showAddProductResults(this.value.trim());
+        });
+        addProductSearch.addEventListener('input', function() {
+            if (!this.value.trim()) addRowProductId.value = '';
+            showAddProductResults(this.value);
         });
         document.addEventListener('click', function(ev) {
             if (!addProductSearch.contains(ev.target) && !addProductResults.contains(ev.target)) addProductResults.style.display = 'none';

@@ -4,7 +4,7 @@
 {% set _stages = recipe_stages if recipe_stages is defined else [] %}
 <div class="d-flex justify-content-between mb-4">
     <div>
-        <a href="/production/recipes" class="btn btn-outline-secondary btn-sm mb-2">
+        <a href="/production/recipes{% if search_q %}?q={{ search_q | urlencode }}{% endif %}" class="btn btn-outline-secondary btn-sm mb-2">
             <i class="bi bi-arrow-left"></i> Orqaga
         </a>
         <h4><i class="bi bi-journal-text"></i> {{ recipe.name }}</h4>
@@ -29,6 +29,7 @@
             <li class="list-group-item d-flex justify-content-between align-items-center flex-grow-1">
                 <span><span class="badge bg-primary rounded-pill me-2">{{ s.stage_number }}</span> {{ s.name }}</span>
                 <form method="POST" action="/production/recipes/{{ recipe.id }}/delete-stage/{{ s.id }}" style="display: inline;" onsubmit="return confirm('Ushbu bosqichni o\u2019chirmoqchimisiz?');">
+                    <input type="hidden" name="return_q" value="{{ search_q or '' }}">
                     <button type="submit" class="btn btn-sm btn-outline-danger" title="O'chirish"><i class="bi bi-trash"></i></button>
                 </form>
             </li>
@@ -49,6 +50,7 @@
             </div>
             <div class="card-body">
                 <form method="POST" action="/production/recipes/{{ recipe.id }}/set-name" class="mb-3">
+                    <input type="hidden" name="return_q" value="{{ search_q or '' }}">
                     <label class="form-label small text-muted mb-1">Retsept nomi</label>
                     <div class="input-group input-group-sm">
                         <input type="text" class="form-control" name="name" value="{{ recipe.name or '' }}" maxlength="200" placeholder="Retsept nomi">
@@ -91,6 +93,7 @@
             <div class="card-body">
                 <p class="text-muted small mb-3">Retseptni tanlaganda «Yangi ishlab chiqarish» formasida shu omborlar avtomatik tanlanadi.</p>
                 <form method="POST" action="/production/recipes/{{ recipe.id }}/set-warehouses">
+                    <input type="hidden" name="return_q" value="{{ search_q or '' }}">
                     <div class="mb-2">
                         <label class="form-label small">1-ombor: Xom ashyo ombori</label>
                         <select name="default_warehouse_id" class="form-select form-select-sm">
@@ -173,6 +176,7 @@
                                     <i class="bi bi-pencil"></i>
                                 </button>
                                 <form method="POST" action="/production/recipes/{{ recipe.id }}/delete-item/{{ item.id }}" style="display:inline;" onsubmit="return confirm('Ushbu xom ashyoni tarkibdan o\'chirmoqchimisiz?');">
+                                    <input type="hidden" name="return_q" value="{{ search_q or '' }}">
                                     <button type="submit" class="btn btn-sm btn-outline-danger" title="O'chirish"><i class="bi bi-trash"></i></button>
                                 </form>
                             </td>
@@ -227,6 +231,7 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <form method="POST" id="editItemForm">
+                <input type="hidden" name="return_q" id="editFormReturnQ" value="{{ search_q or '' }}">
                 <div class="modal-header">
                     <h5 class="modal-title">Tarkib qatorini tahrirlash</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -257,6 +262,7 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <form method="POST" action="/production/recipes/{{ recipe.id }}/add-item" id="addItemForm">
+                <input type="hidden" name="return_q" value="{{ search_q or '' }}">
                 <div class="modal-header">
                     <h5 class="modal-title">Xom ashyo qo'shish</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -453,6 +459,7 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <form method="POST" action="/production/recipes/{{ recipe.id }}/add-stage">
+                <input type="hidden" name="return_q" value="{{ search_q or '' }}">
                 <div class="modal-header">
                     <h5 class="modal-title">Bosqich qo'shish</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
