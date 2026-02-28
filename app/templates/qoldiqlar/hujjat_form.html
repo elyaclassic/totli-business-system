@@ -44,8 +44,8 @@
             </form>
             {% endif %}
             {% elif doc and doc.status == 'confirmed' and current_user and current_user.role == 'admin' %}
-            <form method="post" action="/qoldiqlar/tovar/hujjat/{{ doc.id }}/revert" class="d-inline" onsubmit="return confirm('Tasdiqni bekor qilish — ombor qoldig\'i kamayadi. Davom etasizmi?');">
-                <button type="submit" class="btn btn-warning"><i class="bi bi-arrow-counterclockwise"></i> Tasdiqni bekor qilish</button>
+            <form method="post" action="/qoldiqlar/tovar/hujjat/{{ doc.id }}/revert" class="d-inline" onsubmit="return confirm('Tasdiqni bekor qilish — ombor qoldig\'i kamayadi. Faqat siz (admin) bu amalni qilasiz. Davom etasizmi?');">
+                <button type="submit" class="btn btn-warning" title="Faqat admin tasdiqni bekor qiladi — tizim o'zidan bekor qilmaydi"><i class="bi bi-arrow-counterclockwise"></i> Tasdiqni bekor qilish</button>
             </form>
             {% endif %}
         </div>
@@ -56,7 +56,7 @@
                     <p class="mb-0"><strong>Hujjat raqami:</strong> <span class="badge bg-primary">{{ doc.number }}</span> &nbsp; <strong>Sana:</strong> {{ doc.date.strftime('%d.%m.%Y %H:%M') if doc.date else '-' }} &nbsp; <strong>Foydalanuvchi:</strong> {{ doc.user.full_name or doc.user.username if doc.user else '-' }}</p>
                 </div>
                 <div class="col-md-6">
-                    <p class="mb-0"><strong>Holat:</strong> {% if doc.status == 'draft' %}<span class="badge bg-warning text-dark">Qoralama</span>{% else %}<span class="badge bg-success">Tasdiqlangan</span>{% endif %}
+                    <p class="mb-0"><strong>Holat:</strong> {% if doc.status == 'draft' %}<span class="badge bg-warning text-dark">Qoralama</span>{% else %}<span class="badge bg-success">Tasdiqlangan</span> <small class="text-muted">(tasdiq o'zidan bekor bo'lmaydi — faqat admin bekor qiladi)</small>{% endif %}
                     &nbsp; <strong>Jami tannarx:</strong> <span class="text-success fw-bold">{{ "{:,.0f}".format(doc.total_tannarx or 0) }}</span> so'm
                     &nbsp; <strong>Jami sotuv:</strong> <span class="text-primary fw-bold">{{ "{:,.0f}".format(doc.total_sotuv or 0) }}</span> so'm</p>
                 </div>

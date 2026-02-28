@@ -148,8 +148,8 @@
                                     <td>
                                         <a href="/qoldiqlar/tovar/hujjat/{{ d.id }}" class="btn btn-sm btn-outline-primary">Ochish</a>
                                         {% if d.status == 'confirmed' and current_user and current_user.role == 'admin' %}
-                                        <form method="post" action="/qoldiqlar/tovar/hujjat/{{ d.id }}/revert" class="d-inline" onsubmit="return confirm('Tasdiqni bekor qilmoqchimisiz?');">
-                                            <button type="submit" class="btn btn-sm btn-outline-warning" title="Tasdiqni bekor qilish"><i class="bi bi-arrow-counterclockwise"></i></button>
+                                        <form method="post" action="/qoldiqlar/tovar/hujjat/{{ d.id }}/revert" class="d-inline" onsubmit="return confirm('Tasdiqni bekor qilmoqchimisiz? Tasdiq o\'zidan bekor bo\'lmaydi — faqat admin shu tugmani bosganda bekor bo\'ladi.');">
+                                            <button type="submit" class="btn btn-sm btn-outline-warning" title="Tasdiqni bekor qilish (faqat admin)"><i class="bi bi-arrow-counterclockwise"></i></button>
                                         </form>
                                         {% elif d.status == 'draft' and current_user and current_user.role == 'admin' %}
                                         <form method="post" action="/qoldiqlar/tovar/hujjat/{{ d.id }}/delete" class="d-inline" onsubmit="return confirm('Ushbu hujjatni o\'chirmoqchimisiz?');">

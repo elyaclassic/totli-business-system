@@ -24,11 +24,12 @@
     .production-orders-wrap .production-order-card .prod-row:last-child { margin-bottom: 0; }
     .production-orders-wrap .production-order-card .prod-actions { flex-wrap: wrap; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; }
     .production-orders-wrap .production-order-card select.form-select-sm { min-width: 120px; }
+    #production-error-alert .production-error-detail { font-size: 1rem; }
 </style>
 {% if error == "insufficient_stock" %}
-<div class="alert alert-danger alert-dismissible fade show" role="alert">
+<div id="production-error-alert" class="alert alert-danger alert-dismissible fade show mb-0" role="alert">
     <strong>Omborda yetarli xom ashyo yo'q.</strong>
-    {% if error_detail %}<br><small>{{ error_detail|e }}</small>{% endif %}
+    {% if error_detail %}<br><span class="production-error-detail">{{ error_detail|e }}</span>{% endif %}
     <br><small class="text-muted">Qoldiq faqat buyurtmadagi <strong>1-ombor (xom ashyo ombori)</strong> bo'yicha tekshiriladi — kerakli mahsulotni shu omborga kiriting (kirim yoki inventarizatsiya).</small>
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
@@ -223,6 +224,7 @@
                             <i class="bi bi-pencil"></i>
                         </a>
                         <form method="POST" action="/production/{{ prod.id }}/complete-stage" style="display: inline;" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token_from_request(request) }}">
                             <input type="hidden" name="stage_number" value="{{ [cur, eff_max]|min }}">
                             <select name="machine_id" class="form-select form-select-sm d-inline-block w-auto" title="Uskuna">
                                 <option value="">— Uskuna —</option>
@@ -239,10 +241,12 @@
                             </button>
                         </form>
                         <form method="POST" action="/production/{{ prod.id }}/complete" style="display: inline;" class="d-inline complete-form" title="Bir martada yakunlash (4 bosqichsiz)" data-prod-id="{{ prod.id }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token_from_request(request) }}">
                             <input type="hidden" name="operator_id" class="complete-operator-id">
                             <button type="submit" class="btn btn-sm btn-outline-success">Yakunlash</button>
                         </form>
                         <form method="POST" action="/production/{{ prod.id }}/cancel" style="display: inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token_from_request(request) }}">
                             <button type="submit" class="btn btn-sm btn-danger" title="Bekor qilish">
                                 <i class="bi bi-x-lg"></i>
                             </button>
@@ -253,6 +257,7 @@
                             <i class="bi bi-pencil"></i>
                         </a>
                         <form method="POST" action="/production/{{ prod.id }}/revert" style="display: inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token_from_request(request) }}">
                             <button type="submit" class="btn btn-sm btn-outline-warning" title="Tasdiqni bekor qilish"
                                 onclick="return confirm('Tasdiqni bekor qilish — xom ashyo qaytadi, tayyor mahsulot olib tashlanadi. Davom etasizmi?');">
                                 <i class="bi bi-arrow-counterclockwise"></i>
@@ -318,16 +323,18 @@
                 {% if prod.status == 'draft' or prod.status == 'in_progress' %}
                 <a href="/production/{{ prod.id }}/materials" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> Tahrir</a>
                 <form method="POST" action="/production/{{ prod.id }}/complete-stage" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token_from_request(request) }}">
                     <input type="hidden" name="stage_number" value="{{ [cur, eff_max]|min }}">
                     <select name="machine_id" class="form-select form-select-sm d-inline-block" title="Uskuna"><option value="">— Uskuna —</option>{% for m in machines %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}</select>
                     <select name="operator_id" class="form-select form-select-sm d-inline-block" title="Operator">{% for e in employees %}<option value="{{ e.id }}" {% if current_user_employee_id and e.id == current_user_employee_id %}selected{% endif %}>{{ e.full_name }}</option>{% endfor %}</select>
                     <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check-lg"></i> Bosqich</button>
                 </form>
                 <form method="POST" action="/production/{{ prod.id }}/complete" class="d-inline complete-form" data-prod-id="{{ prod.id }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token_from_request(request) }}">
                     <input type="hidden" name="operator_id" class="complete-operator-id">
                     <button type="submit" class="btn btn-sm btn-outline-success">Yakunlash</button>
                 </form>
-                <form method="POST" action="/production/{{ prod.id }}/cancel" class="d-inline"><button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-x-lg"></i></button></form>
+                <form method="POST" action="/production/{{ prod.id }}/cancel" class="d-inline"><input type="hidden" name="csrf_token" value="{{ csrf_token_from_request(request) }}"><button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-x-lg"></i></button></form>
                 {% elif prod.status == 'completed' %}
                 {% if current_user and current_user.role == 'admin' %}
                 <a href="/production/{{ prod.id }}/materials" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
@@ -368,23 +375,27 @@
             sessionStorage.setItem(STORAGE_KEY, JSON.stringify(save));
         } catch (e) {}
     } else {
-        try {
-            var saved = sessionStorage.getItem(STORAGE_KEY);
-            if (saved) {
-                var o = JSON.parse(saved);
-                if (o && (o.date_from || o.date_to)) {
-                    var qs = [];
-                    if (o.date_from) qs.push('date_from=' + encodeURIComponent(o.date_from));
-                    if (o.date_to) qs.push('date_to=' + encodeURIComponent(o.date_to));
-                    if (o.operator_id) qs.push('operator_id=' + encodeURIComponent(o.operator_id));
-                    if (o.q) qs.push('q=' + encodeURIComponent(o.q));
-                    if (qs.length) {
-                        window.location.replace('/production/orders?' + qs.join('&'));
-                        return;
+        // Xato (error/detail) bo'lsa sessionStorage redirect qilma — xabar o'qilishi kerak
+        var hasError = params.has('error') || params.has('detail');
+        if (!hasError) {
+            try {
+                var saved = sessionStorage.getItem(STORAGE_KEY);
+                if (saved) {
+                    var o = JSON.parse(saved);
+                    if (o && (o.date_from || o.date_to)) {
+                        var qs = [];
+                        if (o.date_from) qs.push('date_from=' + encodeURIComponent(o.date_from));
+                        if (o.date_to) qs.push('date_to=' + encodeURIComponent(o.date_to));
+                        if (o.operator_id) qs.push('operator_id=' + encodeURIComponent(o.operator_id));
+                        if (o.q) qs.push('q=' + encodeURIComponent(o.q));
+                        if (qs.length) {
+                            window.location.replace('/production/orders?' + qs.join('&'));
+                            return;
+                        }
                     }
                 }
-            }
-        } catch (e) {}
+            } catch (e) {}
+        }
     }
 })();
 function filterStatus(status, btn) {
@@ -415,7 +426,7 @@ document.querySelectorAll('.complete-form').forEach(function(form) {
     if (!filterForm) return;
     function appendFilterParams(form) {
         if (!form || form.action.indexOf('/production/') === -1) return;
-        if (form.action.indexOf('/complete-stage') !== -1 || form.action.indexOf('/revert') !== -1 ||
+        if (form.action.indexOf('/complete-stage') !== -1 || form.action.indexOf('/complete') !== -1 || form.action.indexOf('/revert') !== -1 ||
             form.action.indexOf('/cancel') !== -1 || form.action.indexOf('/delete') !== -1) {
             var names = ['date_from', 'date_to', 'operator_id', 'q'];
             names.forEach(function(name) {
@@ -433,6 +444,16 @@ document.querySelectorAll('.complete-form').forEach(function(form) {
     document.querySelectorAll('form[action*="/production/"]').forEach(function(form) {
         form.addEventListener('submit', function() { appendFilterParams(form); }, false);
     });
+})();
+// Xato xabari bo'lsa sahifa ochilganda alert ko'rinishiga scroll qilish
+(function() {
+    var params = new URLSearchParams(window.location.search);
+    if (params.has('error') || params.has('detail')) {
+        var el = document.getElementById('production-error-alert') || document.querySelector('.alert.alert-danger, .alert.alert-warning');
+        if (el) {
+            setTimeout(function() { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100);
+        }
+    }
 })();
 </script>
 </div>
