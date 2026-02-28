@@ -8961,8 +8961,15 @@ async def complete_production_stage(
 
 
 @app.post("/production/{prod_id}/complete")
-async def complete_production(prod_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
+async def complete_production(
+    request: Request,
+    prod_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
     """Ishlab chiqarishni bir martada yakunlash (barcha bosqichlarsiz) — tezkor ishlab chiqarishga qaytadi."""
+    form = await request.form()
+    redirect_url = _production_orders_redirect_url(form)
     production = db.query(Production).filter(Production.id == prod_id).first()
     if not production:
         raise HTTPException(status_code=404, detail="Topilmadi")
@@ -8976,7 +8983,7 @@ async def complete_production(prod_id: int, db: Session = Depends(get_db), curre
     production.current_stage = _recipe_max_stage(recipe)
     db.commit()
     check_low_stock_and_notify(db)
-    return RedirectResponse(url="/production", status_code=303)
+    return RedirectResponse(url=redirect_url, status_code=303)
 
 
 @app.post("/production/{prod_id}/revert")
