@@ -6424,7 +6424,8 @@ async def sales_pos_complete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """POS savatni sotuv qilish — to'lov turi (naqd/plastik), order foydalanuvchi ombori bo'yicha."""
+    """POS savatni sotuv qilish. Naqd mijoz → pul kassaga; boshqa kontragent → qarz, to'lov muddati."""
+    _ensure_orders_payment_due_date_column(db)
     role = (current_user.role or "").strip()
     if role not in ("sotuvchi", "admin", "manager"):
         return RedirectResponse(url="/?error=pos_access", status_code=303)
@@ -6522,8 +6523,21 @@ async def sales_pos_complete(
     order.discount_percent = discount_percent
     order.discount_amount = discount_amount
     order.total = total_order - discount_sum
-    order.paid = order.total
-    order.debt = 0
+    is_cash_client = (partner.id == default_partner.id)
+    if is_cash_client:
+        order.paid = order.total
+        order.debt = 0
+    else:
+        order.paid = 0
+        order.debt = order.total
+        due_str = (form.get("payment_due_date") or "").strip()
+        if due_str:
+            try:
+                order.payment_due_date = datetime.strptime(due_str, "%Y-%m-%d").date()
+            except (ValueError, TypeError):
+                order.payment_due_date = (datetime.now() + timedelta(days=7)).date()
+        else:
+            order.payment_due_date = (datetime.now() + timedelta(days=7)).date()
     for pid, qty in items_for_stock:
         stock = db.query(Stock).filter(
             Stock.warehouse_id == order.warehouse_id,
@@ -6556,29 +6570,34 @@ async def sales_pos_complete(
         )
     order.status = "completed"
     db.commit()
-    # Savdo qaysi bo'limdan bo'lsa (ombor orqali) — o'sha bo'lim kassasiga yozish; naqd/plastik bo'yicha
-    department_id = getattr(warehouse, "department_id", None) if warehouse else None
-    if not department_id and current_user:
-        department_id = getattr(current_user, "department_id", None)
-    cash_register = _get_pos_cash_register(db, payment_type, department_id)
-    if cash_register and (order.total or 0) > 0:
-        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        pay_count = db.query(Payment).filter(Payment.created_at >= today_start).count()
-        pay_number = f"PAY-{datetime.now().strftime('%Y%m%d')}-{pay_count + 1:04d}"
-        pay_type = "cash" if payment_type == "naqd" else ("click" if payment_type == "click" else ("terminal" if payment_type == "terminal" else "card"))
-        db.add(Payment(
-            number=pay_number,
-            type="income",
-            cash_register_id=cash_register.id,
-            partner_id=order.partner_id,
-            order_id=order.id,
-            amount=order.total,
-            payment_type=pay_type,
-            category="sale",
-            description=f"POS sotuv {order.number}",
-            user_id=current_user.id if current_user else None,
-        ))
-        cash_register.balance = (cash_register.balance or 0) + (order.total or 0)
+    if is_cash_client:
+        # Naqd mijoz: pul avtomatik kassaga
+        department_id = getattr(warehouse, "department_id", None) if warehouse else None
+        if not department_id and current_user:
+            department_id = getattr(current_user, "department_id", None)
+        cash_register = _get_pos_cash_register(db, payment_type, department_id)
+        if cash_register and (order.total or 0) > 0:
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            pay_count = db.query(Payment).filter(Payment.created_at >= today_start).count()
+            pay_number = f"PAY-{datetime.now().strftime('%Y%m%d')}-{pay_count + 1:04d}"
+            pay_type = "cash" if payment_type == "naqd" else ("click" if payment_type == "click" else ("terminal" if payment_type == "terminal" else "card"))
+            db.add(Payment(
+                number=pay_number,
+                type="income",
+                cash_register_id=cash_register.id,
+                partner_id=order.partner_id,
+                order_id=order.id,
+                amount=order.total,
+                payment_type=pay_type,
+                category="sale",
+                description=f"POS sotuv {order.number}",
+                user_id=current_user.id if current_user else None,
+            ))
+            cash_register.balance = (cash_register.balance or 0) + (order.total or 0)
+            db.commit()
+    else:
+        # Boshqa kontragent: qarz, hisobiga yoziladi
+        partner.balance = (partner.balance or 0) + (order.total or 0)
         db.commit()
     check_low_stock_and_notify(db)
     return RedirectResponse(url="/sales/pos?success=1&number=" + order.number, status_code=303)
@@ -7049,6 +7068,19 @@ def _ensure_payments_status_column(db: Session) -> None:
     """Agar payments jadvalida status ustuni bo'lmasa, qo'shadi (xato bo'lmasin)."""
     try:
         db.execute(text("ALTER TABLE payments ADD COLUMN status VARCHAR(20) DEFAULT 'confirmed'"))
+        db.commit()
+    except OperationalError as e:
+        db.rollback()
+        if "duplicate column" not in str(e).lower():
+            raise
+    except Exception:
+        db.rollback()
+
+
+def _ensure_orders_payment_due_date_column(db: Session) -> None:
+    """Agar orders jadvalida payment_due_date ustuni bo'lmasa, qo'shadi."""
+    try:
+        db.execute(text("ALTER TABLE orders ADD COLUMN payment_due_date DATE"))
         db.commit()
     except OperationalError as e:
         db.rollback()

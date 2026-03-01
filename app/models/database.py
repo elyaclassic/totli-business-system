@@ -663,6 +663,7 @@ class Order(Base):
     debt = Column(Float, default=0)  # Qarz
     status = Column(String(20), default="draft")  # draft, confirmed, completed, cancelled
     payment_type = Column(String(20), nullable=True)  # naqd, plastik — to'lov turi (POS sotuvlar uchun)
+    payment_due_date = Column(Date, nullable=True)  # Qarz bo'lganda to'lov muddati (boshqa kontragent)
     note = Column(Text)
     created_at = Column(DateTime, default=datetime.now)
     

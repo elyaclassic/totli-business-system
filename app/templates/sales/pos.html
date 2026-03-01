@@ -255,6 +255,10 @@
                             </div>
                             <input type="hidden" name="discount_percent" id="posDiscountPercent" value="0">
                             <input type="hidden" name="discount_amount" id="posDiscountAmount" value="0">
+                            <div class="mt-2" id="posPaymentDueDateWrap" style="display:none;" data-default-partner-id="{{ default_partner_id or '' }}">
+                                <label class="form-label small text-muted mb-1">To'lov muddati (qarz bo'lsa)</label>
+                                <input type="date" name="payment_due_date" id="posPaymentDueDate" class="form-control form-control-sm">
+                            </div>
                         </div>
                         <div class="pos-summary" id="posSummaryBlock">
                             <div class="pos-total-row d-flex justify-content-between align-items-center">
@@ -612,6 +616,29 @@
             window.location.href = '/sales/pos?warehouse_id=' + encodeURIComponent(id);
         });
     }
+    (function() {
+        var partnerSelect = document.getElementById('posPartnerSelect');
+        var dueWrap = document.getElementById('posPaymentDueDateWrap');
+        var dueInput = document.getElementById('posPaymentDueDate');
+        if (!partnerSelect || !dueWrap) return;
+        var defaultId = (dueWrap.getAttribute('data-default-partner-id') || '').trim();
+        function toggleDueDate() {
+            var sel = (partnerSelect.value || '').trim();
+            if (sel && defaultId && sel !== defaultId) {
+                dueWrap.style.display = '';
+                if (dueInput && !dueInput.value) {
+                    var d = new Date();
+                    d.setDate(d.getDate() + 7);
+                    dueInput.value = d.toISOString().slice(0, 10);
+                }
+            } else {
+                dueWrap.style.display = 'none';
+                if (dueInput) dueInput.value = '';
+            }
+        }
+        partnerSelect.addEventListener('change', toggleDueDate);
+        toggleDueDate();
+    })();
     var posDiscountInputEl = document.getElementById('posDiscountInput');
     var posDiscountTypeEl = document.getElementById('posDiscountType');
     if (posDiscountInputEl) {
