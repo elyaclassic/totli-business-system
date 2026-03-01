@@ -11,9 +11,9 @@
 </div>
 {% if success == '1' and number %}
 <div class="alert alert-success alert-dismissible fade show d-flex align-items-center justify-content-between flex-wrap gap-2 pos-alert-success" role="alert">
-    <span><strong>Sotuv bajarildi.</strong> Hujjat: {{ number }}</span>
+    <span><strong>Sotuv bajarildi.</strong> Hujjat: {{ number }}. Chek avtomatik printerga yuboriladi. Printer ishlamasa, chek oynasida «Saqlab qo'yish» tugmasini bosing.</span>
     <div>
-        <a href="/sales/pos/receipt?number={{ number|urlencode }}" target="_blank" class="btn btn-sm btn-outline-success me-2" title="Chekni chop etish (Xprinter)"><i class="bi bi-printer me-1"></i>Chekni chop etish</a>
+        <a href="/sales/pos/receipt?number={{ number|urlencode }}" target="_blank" class="btn btn-sm btn-outline-success me-2" title="Chekni qayta chop etish"><i class="bi bi-printer me-1"></i>Chekni chop etish</a>
         <a href="/sales/pos" class="btn btn-sm btn-success me-2"><i class="bi bi-cart-plus"></i> Yana sotuv</a>
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
@@ -371,7 +371,11 @@
     var trigger = document.getElementById('posReceiptTrigger');
     if (trigger && trigger.getAttribute('data-receipt-number')) {
         var num = trigger.getAttribute('data-receipt-number');
-        window.open('/sales/pos/receipt?number=' + encodeURIComponent(num), 'pos_receipt', 'width=320,height=520,scrollbars=yes');
+        var receiptUrl = '/sales/pos/receipt?number=' + encodeURIComponent(num) + '&print=1';
+        setTimeout(function() {
+            var w = window.open(receiptUrl, 'pos_receipt', 'width=320,height=520,scrollbars=yes');
+            if (!w && typeof console !== 'undefined') console.warn('Chek oynasi bloklandi. «Chekni chop etish» tugmasini bosing.');
+        }, 350);
     }
 
     /* To'liq ekran taklifi — sahifa ochilganda ko'rsatiladi */
@@ -621,12 +625,13 @@
         var dueWrap = document.getElementById('posPaymentDueDateWrap');
         var dueInput = document.getElementById('posPaymentDueDate');
         if (!partnerSelect || !dueWrap) return;
-        var defaultId = (dueWrap.getAttribute('data-default-partner-id') || '').trim();
+        var defaultId = String((dueWrap.getAttribute('data-default-partner-id') || '').trim());
         function toggleDueDate() {
-            var sel = (partnerSelect.value || '').trim();
-            if (sel && defaultId && sel !== defaultId) {
+            var sel = String((partnerSelect.value || '').trim());
+            var isOtherPartner = sel && (defaultId ? sel !== defaultId : true);
+            if (isOtherPartner) {
                 dueWrap.style.display = '';
-                if (dueInput && !dueInput.value) {
+                if (dueInput) {
                     var d = new Date();
                     d.setDate(d.getDate() + 7);
                     dueInput.value = d.toISOString().slice(0, 10);
@@ -717,6 +722,15 @@
     if (btnSotuv) {
         btnSotuv.addEventListener('click', function() {
             if (cart.length === 0) return;
+            var partnerSelect = document.getElementById('posPartnerSelect');
+            var dueWrap = document.getElementById('posPaymentDueDateWrap');
+            var defaultId = dueWrap ? String((dueWrap.getAttribute('data-default-partner-id') || '').trim()) : '';
+            var sel = partnerSelect ? String((partnerSelect.value || '').trim()) : '';
+            if (sel && defaultId && sel !== defaultId) {
+                /* Boshqa kontragent — qarzga, to'lov turi modali kerak emas */
+                doPayment('naqd');
+                return;
+            }
             var p = paymentTypeInput ? paymentTypeInput.value : '';
             if (p && ['naqd', 'plastik', 'click', 'terminal'].indexOf(p) !== -1) {
                 doPayment(p);

@@ -64,18 +64,20 @@
         .thanks { text-align: center; margin-top: 12px; font-size: 12px; }
         .receipt-barcode {
             text-align: center;
-            margin-top: 8px;
-            padding-top: 6px;
+            margin-top: 10px;
+            padding-top: 8px;
             border-top: 1px dotted #333;
         }
         .receipt-barcode img {
             max-width: 100%;
+            width: 100%;
             height: auto;
-            max-height: 36px;
+            min-height: 48px;
+            max-height: 72px;
             display: block;
             margin: 0 auto;
         }
-        .receipt-barcode .barcode-number { font-size: 10px; margin-top: 2px; letter-spacing: 1px; }
+        .receipt-barcode .barcode-number { font-size: 12px; margin-top: 4px; letter-spacing: 1px; font-weight: bold; }
         @media print {
             body { padding: 4px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             .no-print { display: none !important; }
@@ -126,7 +128,7 @@
         <div>{{ "{:,.2f}".format(order.paid or order.total or 0) }}</div>
     </div>
 
-    <div class="thanks">Rahmat!</div>
+    <div class="thanks">Haridingiz uchun Rahmat!</div>
     {% if receipt_barcode_b64 %}
     <div class="receipt-barcode">
         <img src="data:image/png;base64,{{ receipt_barcode_b64 }}" alt="Chek {{ order.number }}">
@@ -136,8 +138,10 @@
     {% else %}
     <div class="receipt-line">Hujjat topilmadi.</div>
     {% endif %}
-    <p class="no-print" style="margin-top: 16px; text-align: center;">
+    <div class="no-print" style="margin-top: 16px; text-align: center; font-size: 11px;">
+        <p class="text-muted mb-2">Printer ishlamasa, «Saqlab qo'yish» ni bosing va chop etish oynasida «PDF ga saqlash» ni tanlang.</p>
+        <button type="button" onclick="window.print();" style="padding: 6px 14px; font-size: 12px; margin-right: 8px;">Saqlab qo'yish / Qayta chop etish</button>
         <button type="button" onclick="window.close();" style="padding: 6px 14px; font-size: 12px;">Yopish</button>
-    </p>
+    </div>
 </body>
 </html>

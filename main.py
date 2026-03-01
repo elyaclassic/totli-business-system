@@ -6145,6 +6145,7 @@ async def sales_pos(
     current_user: User = Depends(require_auth),
 ):
     """Sotuv oynasi: faqat sotuvchi (yoki admin/menejer tekshiruvi uchun). Tovarlar foydalanuvchi bo'limi/omboridan."""
+    _ensure_orders_payment_due_date_column(db)
     from urllib.parse import unquote
     role = (current_user.role or "").strip()
     if role not in ("sotuvchi", "admin", "manager"):
@@ -6628,7 +6629,7 @@ async def sales_pos_receipt(
     receipt_barcode_b64 = None
     try:
         writer = ImageWriter()
-        writer.set_options({"module_width": 0.25, "module_height": 8, "font_size": 6})
+        writer.set_options({"module_width": 0.45, "module_height": 16, "font_size": 11})
         buf = io.BytesIO()
         code128 = barcode.get("code128", order.number, writer=writer)
         code128.write(buf)
