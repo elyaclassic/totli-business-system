@@ -45,7 +45,7 @@
     <div class="card-body py-3">
         <div class="row g-3 text-center">
             <div class="col-6 col-md-3">
-                <span class="text-muted small d-block">Davlati {{ date_from }} qoldiq</span>
+                <span class="text-muted small d-block">Davr boshiga qoldiq ({{ date_from }})</span>
                 <strong class="{% if opening_balance > 0 %}text-danger{% elif opening_balance < 0 %}text-success{% else %}text-muted{% endif %}">
                     {{ "{:,.0f}".format(opening_balance) }} so'm
                 </strong>
@@ -59,7 +59,7 @@
                 <strong>{{ "{:,.0f}".format(total_credit) }}</strong>
             </div>
             <div class="col-6 col-md-3">
-                <span class="text-muted small d-block">Davlati {{ date_to }} qoldiq</span>
+                <span class="text-muted small d-block">Davr oxiriga qoldiq ({{ date_to }})</span>
                 <strong class="{% if closing_balance > 0 %}text-danger{% elif closing_balance < 0 %}text-success{% else %}text-muted{% endif %}">
                     {{ "{:,.0f}".format(closing_balance) }} so'm
                 </strong>
@@ -108,7 +108,7 @@
                 </thead>
                 <tbody>
                     <tr class="table-info">
-                        <td><strong>{{ date_from }} sanaga qoldiq</strong></td>
+                        <td><strong>Davr boshiga qoldiq ({{ date_from }})</strong></td>
                         <td class="text-end border-start">{% if opening_balance > 0 %}{{ "{:,.0f}".format(opening_balance) }}{% else %}—{% endif %}</td>
                         <td class="text-end">{% if opening_balance < 0 %}{{ "{:,.0f}".format(-opening_balance) }}{% else %}—{% endif %}</td>
                         <td class="text-end border-start">{% if opening_balance < 0 %}{{ "{:,.0f}".format(-opening_balance) }}{% else %}—{% endif %}</td>
@@ -133,7 +133,7 @@
                         </tr>
                     {% endif %}
                     <tr class="table-info fw-bold">
-                        <td><strong>{{ date_to }} sanaga qoldiq</strong></td>
+                        <td><strong>Davr oxiriga qoldiq ({{ date_to }})</strong></td>
                         <td class="text-end border-start">{% if closing_balance > 0 %}{{ "{:,.0f}".format(closing_balance) }}{% else %}—{% endif %}</td>
                         <td class="text-end">{% if closing_balance < 0 %}{{ "{:,.0f}".format(-closing_balance) }}{% else %}—{% endif %}</td>
                         <td class="text-end border-start">{% if closing_balance < 0 %}{{ "{:,.0f}".format(-closing_balance) }}{% else %}—{% endif %}</td>
