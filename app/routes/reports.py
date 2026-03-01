@@ -1118,23 +1118,8 @@ async def report_partner_reconciliation_export(
     ws["A1"].font = Font(bold=True, size=14)
     ws["A2"] = f"TOTLI HOLVA va {partner.name or ''}"
     ws["A3"] = f"Davr: {date_from} — {date_to}"
-    # Analitika bloki (veb sahifadagi summary ga mos)
-    ws["A4"] = "Davr boshiga qoldiq (" + date_from + "):"
-    ws["A4"].font = Font(bold=True)
-    ws["B4"] = opening_balance
-    ws["A5"] = "Davr debet:"
-    ws["B5"] = total_debit
-    ws["A6"] = "Davr kredit:"
-    ws["B6"] = total_credit
-    ws["A7"] = "Davr oxiriga qoldiq (" + date_to + "):"
-    ws["A7"].font = Font(bold=True)
-    ws["B7"] = closing_balance
-    ws["A8"] = "Bizning foydamizga (kontragent qarzdor):"
-    ws["B8"] = closing_balance if closing_balance > 0 else 0
-    ws["A9"] = "Kontragent foydasiga (biz qarzdormiz):"
-    ws["B9"] = -closing_balance if closing_balance < 0 else 0
     ws.append([])
-    table_start = 11
+    table_start = 5
     headers = ["Hujjatlar", "TOTLI HOLVA DT (so'm)", "TOTLI HOLVA KT (so'm)", f"{partner.name or 'Kontragent'} DT (so'm)", f"{partner.name or 'Kontragent'} KT (so'm)"]
     for c, h in enumerate(headers, 1):
         cell = ws.cell(row=table_start, column=c, value=h)
@@ -1165,6 +1150,12 @@ async def report_partner_reconciliation_export(
     ws.cell(row=row_num, column=3, value=-closing_balance if closing_balance < 0 else 0)
     ws.cell(row=row_num, column=4, value=-closing_balance if closing_balance < 0 else 0)
     ws.cell(row=row_num, column=5, value=closing_balance if closing_balance > 0 else 0)
+    row_num += 2  # bo'sh qator, keyin xulosa
+    ws.cell(row=row_num, column=1, value="Bizning foydamizga (kontragent qarzdor):")
+    ws.cell(row=row_num, column=2, value=closing_balance if closing_balance > 0 else 0)
+    row_num += 1
+    ws.cell(row=row_num, column=1, value="Kontragent foydasiga (biz qarzdormiz):")
+    ws.cell(row=row_num, column=2, value=-closing_balance if closing_balance < 0 else 0)
     ws.column_dimensions["A"].width = 52
     for col in ["B", "C", "D", "E"]:
         ws.column_dimensions[col].width = 18
