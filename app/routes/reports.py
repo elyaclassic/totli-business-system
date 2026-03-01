@@ -1071,6 +1071,46 @@ async def report_partner_reconciliation_export(
     total_credit = sum(r["credit"] for r in rows)
     opening_balance = opening_debit - opening_credit
     closing_balance = opening_balance + total_debit - total_credit
+
+    # Mahsulotlar bo'yicha analitika (veb sahifadagi kabi)
+    date_from_start = dt_from.replace(hour=0, minute=0, second=0, microsecond=0)
+    date_to_end = dt_to.replace(hour=23, minute=59, second=59, microsecond=999999)
+    by_product_purchase = {}
+    for pi, prod in (
+        db.query(PurchaseItem, Product)
+        .join(Purchase, PurchaseItem.purchase_id == Purchase.id)
+        .join(Product, PurchaseItem.product_id == Product.id)
+        .filter(
+            Purchase.partner_id == partner_id,
+            Purchase.date >= date_from_start,
+            Purchase.date <= date_to_end,
+        )
+    ).all():
+        key = prod.id
+        if key not in by_product_purchase:
+            by_product_purchase[key] = {"product_name": prod.name or "", "product_code": prod.code or "", "quantity": 0.0, "total": 0.0}
+        by_product_purchase[key]["quantity"] += float(pi.quantity or 0)
+        by_product_purchase[key]["total"] += float(pi.total or 0)
+    products_purchased = sorted(by_product_purchase.values(), key=lambda x: -x["total"])
+    by_product_sale = {}
+    for oi, prod in (
+        db.query(OrderItem, Product)
+        .join(Order, OrderItem.order_id == Order.id)
+        .join(Product, OrderItem.product_id == Product.id)
+        .filter(
+            Order.partner_id == partner_id,
+            Order.type == "sale",
+            Order.date >= date_from_start,
+            Order.date <= date_to_end,
+        )
+    ).all():
+        key = prod.id
+        if key not in by_product_sale:
+            by_product_sale[key] = {"product_name": prod.name or "", "product_code": prod.code or "", "quantity": 0.0, "total": 0.0}
+        by_product_sale[key]["quantity"] += float(oi.quantity or 0)
+        by_product_sale[key]["total"] += float(oi.total or 0)
+    products_sold = sorted(by_product_sale.values(), key=lambda x: -x["total"])
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Solishtirish"
@@ -1078,25 +1118,41 @@ async def report_partner_reconciliation_export(
     ws["A1"].font = Font(bold=True, size=14)
     ws["A2"] = f"TOTLI HOLVA va {partner.name or ''}"
     ws["A3"] = f"Davr: {date_from} — {date_to}"
+    # Analitika bloki (veb sahifadagi summary ga mos)
+    ws["A4"] = "Davlati qoldiq (" + date_from + "):"
+    ws["A4"].font = Font(bold=True)
+    ws["B4"] = opening_balance
+    ws["A5"] = "Davr debet:"
+    ws["B5"] = total_debit
+    ws["A6"] = "Davr kredit:"
+    ws["B6"] = total_credit
+    ws["A7"] = "Yakuniy qoldiq (" + date_to + "):"
+    ws["A7"].font = Font(bold=True)
+    ws["B7"] = closing_balance
+    ws["A8"] = "Bizning foydamizga (kontragent qarzdor):"
+    ws["B8"] = closing_balance if closing_balance > 0 else 0
+    ws["A9"] = "Kontragent foydasiga (biz qarzdormiz):"
+    ws["B9"] = -closing_balance if closing_balance < 0 else 0
     ws.append([])
+    table_start = 11
     headers = ["Hujjatlar", "TOTLI HOLVA DT (so'm)", "TOTLI HOLVA KT (so'm)", f"{partner.name or 'Kontragent'} DT (so'm)", f"{partner.name or 'Kontragent'} KT (so'm)"]
     for c, h in enumerate(headers, 1):
-        cell = ws.cell(row=6, column=c, value=h)
+        cell = ws.cell(row=table_start, column=c, value=h)
         cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         cell.font = Font(bold=True, color="FFFFFF")
-    row_num = 7
+    row_num = table_start + 1
     ws.cell(row=row_num, column=1, value=f"{date_from} sanaga qoldiq")
-    ws.cell(row=row_num, column=2, value=opening_balance if opening_balance > 0 else None)
-    ws.cell(row=row_num, column=3, value=-opening_balance if opening_balance < 0 else None)
-    ws.cell(row=row_num, column=4, value=-opening_balance if opening_balance < 0 else None)
-    ws.cell(row=row_num, column=5, value=opening_balance if opening_balance > 0 else None)
+    ws.cell(row=row_num, column=2, value=opening_balance if opening_balance > 0 else 0)
+    ws.cell(row=row_num, column=3, value=-opening_balance if opening_balance < 0 else 0)
+    ws.cell(row=row_num, column=4, value=-opening_balance if opening_balance < 0 else 0)
+    ws.cell(row=row_num, column=5, value=opening_balance if opening_balance > 0 else 0)
     row_num += 1
     for r in rows:
         ws.cell(row=row_num, column=1, value=r.get("doc_label") or f"{r.get('doc_type', '')} {r.get('doc_number', '')}")
-        ws.cell(row=row_num, column=2, value=r["debit"] if r["debit"] else None)
-        ws.cell(row=row_num, column=3, value=r["credit"] if r["credit"] else None)
-        ws.cell(row=row_num, column=4, value=r["credit"] if r["credit"] else None)
-        ws.cell(row=row_num, column=5, value=r["debit"] if r["debit"] else None)
+        ws.cell(row=row_num, column=2, value=r["debit"] if r["debit"] else 0)
+        ws.cell(row=row_num, column=3, value=r["credit"] if r["credit"] else 0)
+        ws.cell(row=row_num, column=4, value=r["credit"] if r["credit"] else 0)
+        ws.cell(row=row_num, column=5, value=r["debit"] if r["debit"] else 0)
         row_num += 1
     ws.cell(row=row_num, column=1, value="Jami davr:")
     ws.cell(row=row_num, column=2, value=total_debit)
@@ -1105,10 +1161,48 @@ async def report_partner_reconciliation_export(
     ws.cell(row=row_num, column=5, value=total_debit)
     row_num += 1
     ws.cell(row=row_num, column=1, value=f"{date_to} sanaga qoldiq")
-    ws.cell(row=row_num, column=2, value=closing_balance if closing_balance > 0 else None)
-    ws.cell(row=row_num, column=3, value=-closing_balance if closing_balance < 0 else None)
-    ws.cell(row=row_num, column=4, value=-closing_balance if closing_balance < 0 else None)
-    ws.cell(row=row_num, column=5, value=closing_balance if closing_balance > 0 else None)
+    ws.cell(row=row_num, column=2, value=closing_balance if closing_balance > 0 else 0)
+    ws.cell(row=row_num, column=3, value=-closing_balance if closing_balance < 0 else 0)
+    ws.cell(row=row_num, column=4, value=-closing_balance if closing_balance < 0 else 0)
+    ws.cell(row=row_num, column=5, value=closing_balance if closing_balance > 0 else 0)
+    ws.column_dimensions["A"].width = 52
+    for col in ["B", "C", "D", "E"]:
+        ws.column_dimensions[col].width = 18
+
+    # Varaq: Kontragentdan xarid qilingan mahsulotlar
+    ws_purchase = wb.create_sheet("Xarid qilingan", 1)
+    ws_purchase["A1"] = "Kontragentdan xarid qilingan mahsulotlar"
+    ws_purchase["A1"].font = Font(bold=True, size=12)
+    ws_purchase["A2"] = f"Kontragent: {partner.name or ''}  |  Davr: {date_from} — {date_to}"
+    for c, h in enumerate(["Mahsulot", "Kod", "Miqdor", "Summa (so'm)"], 1):
+        cell = ws_purchase.cell(row=4, column=c, value=h)
+        cell.fill = PatternFill(start_color="2E7D32", end_color="2E7D32", fill_type="solid")
+        cell.font = Font(bold=True, color="FFFFFF")
+    for i, p in enumerate(products_purchased, 5):
+        ws_purchase.cell(row=i, column=1, value=p["product_name"])
+        ws_purchase.cell(row=i, column=2, value=p["product_code"])
+        ws_purchase.cell(row=i, column=3, value=p["quantity"])
+        ws_purchase.cell(row=i, column=4, value=p["total"])
+    if not products_purchased:
+        ws_purchase.cell(row=5, column=1, value="Davrda xarid qilinmagan.")
+
+    # Varaq: Kontragentga sotilgan mahsulotlar
+    ws_sale = wb.create_sheet("Sotilgan", 2)
+    ws_sale["A1"] = "Kontragentga sotilgan mahsulotlar"
+    ws_sale["A1"].font = Font(bold=True, size=12)
+    ws_sale["A2"] = f"Kontragent: {partner.name or ''}  |  Davr: {date_from} — {date_to}"
+    for c, h in enumerate(["Mahsulot", "Kod", "Miqdor", "Summa (so'm)"], 1):
+        cell = ws_sale.cell(row=4, column=c, value=h)
+        cell.fill = PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid")
+        cell.font = Font(bold=True, color="FFFFFF")
+    for i, p in enumerate(products_sold, 5):
+        ws_sale.cell(row=i, column=1, value=p["product_name"])
+        ws_sale.cell(row=i, column=2, value=p["product_code"])
+        ws_sale.cell(row=i, column=3, value=p["quantity"])
+        ws_sale.cell(row=i, column=4, value=p["total"])
+    if not products_sold:
+        ws_sale.cell(row=5, column=1, value="Davrda sotuv bo'lmagan.")
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
