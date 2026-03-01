@@ -65,12 +65,16 @@
     }
 </style>
 
+{% set from_pos = from_pos|default(false) %}
 <div class="container-fluid">
     <div class="row mb-3">
-        <div class="col-12">
-            <a href="/purchases" class="btn btn-outline-secondary mb-3">
+        <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
+            <a href="/purchases{% if from_pos %}?from=pos{% endif %}" class="btn btn-outline-secondary mb-0">
                 <i class="bi bi-arrow-left"></i> Orqaga
             </a>
+            {% if from_pos %}
+            <a href="/sales/pos" class="btn btn-outline-primary mb-0"><i class="bi bi-cart-check me-1"></i>Sotuv oynasiga</a>
+            {% endif %}
         </div>
     </div>
 
@@ -80,6 +84,7 @@
         </div>
         <div class="card-body">
             <form method="POST" action="/purchases/create" id="purchaseCreateForm">
+                {% if from_pos %}<input type="hidden" name="from_pos" value="1">{% endif %}
                 <div class="row mb-4">
                     <div class="col-md-6">
                         <div class="mb-3 position-relative">
@@ -99,12 +104,17 @@
                     <div class="col-md-6">
                         <div class="mb-3">
                             <label class="form-label">Ombor *</label>
-                            <select name="warehouse_id" class="form-select" required>
+                            {% if warehouses and warehouses|length == 1 %}
+                            <input type="hidden" name="warehouse_id" value="{{ warehouses[0].id }}" id="purchase_warehouse_id">
+                            <p class="form-control-plaintext mb-0 py-2 px-3 bg-light rounded border"><strong>{{ warehouses[0].name }}</strong></p>
+                            {% else %}
+                            <select name="warehouse_id" class="form-select" id="purchase_warehouse_select" required>
                                 <option value="">Tanlang...</option>
                                 {% for warehouse in warehouses %}
                                 <option value="{{ warehouse.id }}">{{ warehouse.name }}</option>
                                 {% endfor %}
                             </select>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -128,8 +138,9 @@
                     {% endfor %}
                 </select>
 
-                <!-- Mahsulotlar jadvali -->
+                <!-- Mahsulotlar jadvali: kirim narxi shu yerda, sotuv narxi narx turlaridan -->
                 <h6 class="mb-2">Mahsulotlar</h6>
+                <p class="text-muted small mb-2">Kirim narxi shu yerda yoziladi; sotuv narxi narx turlaridan olinadi.</p>
                 <div class="mb-3" style="position: relative;">
                     <div class="table-responsive">
                         <table class="table table-sm" id="productsTable">
@@ -137,7 +148,7 @@
                                 <tr>
                                     <th>Mahsulot</th>
                                     <th style="width: 120px;">Miqdor</th>
-                                    <th style="width: 140px;">Narx (so'm)</th>
+                                    <th style="width: 140px;">Kirim narxi (so'm)</th>
                                     <th style="width: 100px;"></th>
                                 </tr>
                             </thead>
@@ -288,6 +299,10 @@
 
     // Mahsulot qidirish funksiyasi
     const productSelect = document.getElementById('product_select');
+    // Ombor ID — bitta ombor bo'lsa hidden input, ko'p bo'lsa select
+    function getWarehouseIdEl() {
+        return document.querySelector('select[name="warehouse_id"]') || document.getElementById('purchase_warehouse_id');
+    }
     
     function initProductSearch(row) {
         const searchInput = row.querySelector('.product-search-input');
@@ -376,12 +391,12 @@
         function updateProductPrice(row) {
             const hiddenInput = row.querySelector('.product-id-hidden');
             const priceInput = row.querySelector('input[name="price"]');
-            const warehouseSelect = document.querySelector('select[name="warehouse_id"]');
+            const warehouseIdEl = getWarehouseIdEl();
             
-            if (!hiddenInput || !priceInput || !warehouseSelect) return;
+            if (!hiddenInput || !priceInput || !warehouseIdEl) return;
             
             const productId = hiddenInput.value;
-            const warehouseId = warehouseSelect.value;
+            const warehouseId = warehouseIdEl.value;
             
             if (!productId || !warehouseId) {
                 priceInput.value = '';
@@ -408,10 +423,10 @@
                 });
         }
         
-        // Ombor o'zgarganda barcha qatorlardagi narxlarni yangilash
-        const warehouseSelect = document.querySelector('select[name="warehouse_id"]');
-        if (warehouseSelect) {
-            warehouseSelect.addEventListener('change', function() {
+        // Ombor o'zgarganda (faqat select mavjud bo'lsa) barcha qatorlardagi narxlarni yangilash
+        const purchaseWarehouseSelect = document.querySelector('select[name="warehouse_id"]');
+        if (purchaseWarehouseSelect) {
+            purchaseWarehouseSelect.addEventListener('change', function() {
                 document.querySelectorAll('.product-row').forEach(function(row) {
                     const hiddenInput = row.querySelector('.product-id-hidden');
                     if (hiddenInput && hiddenInput.value) {
@@ -508,12 +523,12 @@
         // Yangi qator uchun narxni avtomatik to'ldirish funksiyasini qo'shish
         const newHiddenInput = newRow.querySelector('.product-id-hidden');
         const newPriceInput = newRow.querySelector('input[name="price"]');
-        const warehouseSelect = document.querySelector('select[name="warehouse_id"]');
+        const warehouseIdElNew = getWarehouseIdEl();
         
-        if (newHiddenInput && newPriceInput && warehouseSelect) {
+        if (newHiddenInput && newPriceInput && warehouseIdElNew) {
             function updateNewRowPrice() {
                 const productId = newHiddenInput.value;
-                const warehouseId = warehouseSelect.value;
+                const warehouseId = warehouseIdElNew.value;
                 
                 if (!productId || !warehouseId) {
                     newPriceInput.value = '';

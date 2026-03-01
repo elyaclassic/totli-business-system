@@ -1037,6 +1037,14 @@ async def info_users(
         .order_by(User.id)
         .all()
     )
+    # Ishga qabul qilingan (faol) hodimlar — Xodim dropdown uchun
+    employees = (
+        db.query(Employee)
+        .filter(Employee.is_active == True)
+        .order_by(Employee.full_name)
+        .all()
+    )
+    user_to_employee = {e.user_id: e for e in db.query(Employee).filter(Employee.user_id != None).all()}
     departments = db.query(Department).filter(Department.is_active == True).order_by(Department.name).all()
     warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
     cash_registers = db.query(CashRegister).filter(CashRegister.is_active == True).order_by(CashRegister.name).all()
@@ -1044,6 +1052,8 @@ async def info_users(
     return templates.TemplateResponse("info/users.html", {
         "request": request,
         "users": users,
+        "employees": employees,
+        "user_to_employee": user_to_employee,
         "departments": departments,
         "warehouses": warehouses,
         "cash_registers": cash_registers,

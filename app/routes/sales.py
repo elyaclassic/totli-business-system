@@ -25,6 +25,7 @@ from app.models.database import (
     Stock,
     Order,
     OrderItem,
+    Payment,
     ProductPrice,
     PriceType,
 )
@@ -430,14 +431,21 @@ async def sales_delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    """Sotuvni o'chirish (admin). Qoralama — bekor qilingan qiladi; bekor qilingan — bazadan o'chiradi."""
     order = db.query(Order).filter(Order.id == order_id, Order.type == "sale").first()
     if not order:
         raise HTTPException(status_code=404, detail="Sotuv topilmadi")
-    if order.status != "draft":
+    if order.status not in ("draft", "cancelled"):
         return RedirectResponse(
-            url="/sales?error=delete&detail=" + quote("Faqat qoralama holatidagi sotuvni o'chirish mumkin."),
+            url="/sales?error=delete&detail=" + quote("Faqat qoralama yoki bekor qilingan sotuvni o'chirish mumkin. Avval tasdiqni bekor qiling."),
             status_code=303,
         )
-    order.status = "cancelled"
-    db.commit()
+    if order.status == "draft":
+        order.status = "cancelled"
+        db.commit()
+    else:
+        db.query(OrderItem).filter(OrderItem.order_id == order_id).delete()
+        db.query(Payment).filter(Payment.order_id == order_id).update({Payment.order_id: None})
+        db.query(Order).filter(Order.id == order_id).delete()
+        db.commit()
     return RedirectResponse(url="/sales", status_code=303)

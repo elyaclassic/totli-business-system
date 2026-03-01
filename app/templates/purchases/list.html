@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% set from_pos = from_pos|default(false) %}
 {% if error == "delete" and error_detail %}
 <div class="alert alert-warning alert-dismissible fade show" role="alert">
     {{ error_detail }}
@@ -8,9 +9,14 @@
 </div>
 {% endif %}
 <div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4 class="mb-0"><i class="bi bi-box-seam"></i> Tovar kirimlari</h4>
-        <a href="/purchases/new" class="btn btn-success"><i class="bi bi-plus-circle"></i> Yaratish</a>
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <h4 class="mb-0"><i class="bi bi-box-seam"></i> Tovar kirimlari</h4>
+            {% if from_pos %}
+            <a href="/sales/pos" class="btn btn-outline-primary btn-sm"><i class="bi bi-cart-check me-1"></i>Sotuv oynasiga qaytish</a>
+            {% endif %}
+        </div>
+        <a href="/purchases/new{% if from_pos %}?from=pos{% endif %}" class="btn btn-success"><i class="bi bi-plus-circle"></i> Yaratish</a>
     </div>
     <div class="card">
         <div class="card-body p-0">
@@ -32,7 +38,7 @@
                         {% for purchase in purchases %}
                         <tr>
                             <td>{{ loop.index }}</td>
-                            <td><a href="/purchases/edit/{{ purchase.id }}">{{ purchase.number }}</a></td>
+                            <td><a href="/purchases/edit/{{ purchase.id }}{% if from_pos %}?from=pos{% endif %}">{{ purchase.number }}</a></td>
                             <td>{{ purchase.date.strftime('%d.%m.%Y %H:%M') if purchase.date else '-' }}</td>
                             <td>{{ purchase.partner.name if purchase.partner else '-' }}</td>
                             <td>{{ purchase.warehouse.name if purchase.warehouse else '-' }}</td>
@@ -49,7 +55,7 @@
                                 {% endif %}
                             </td>
                             <td>
-                                <a href="/purchases/edit/{{ purchase.id }}" class="btn btn-sm btn-outline-primary">Ochish</a>
+                                <a href="/purchases/edit/{{ purchase.id }}{% if from_pos %}?from=pos{% endif %}" class="btn btn-sm btn-outline-primary">Ochish</a>
                                 {% if purchase.status == 'confirmed' and current_user and current_user.role == 'admin' %}
                                 <form method="POST" action="/purchases/{{ purchase.id }}/revert" class="d-inline" onsubmit="return confirm('Tasdiqni bekor qilish — ombor qoldig\'i kamayadi. Davom etasizmi?');">
                                     <button type="submit" class="btn btn-sm btn-outline-warning" title="Tasdiqni bekor qilish"><i class="bi bi-arrow-counterclockwise"></i></button>
@@ -63,7 +69,7 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="8" class="text-muted text-center py-4">Hozircha tovar kirimlari yo'q. <a href="/purchases/new">Yangi kirim yaratish</a></td>
+                            <td colspan="8" class="text-muted text-center py-4">Hozircha tovar kirimlari yo'q. <a href="/purchases/new{% if from_pos %}?from=pos{% endif %}">Yangi kirim yaratish</a></td>
                         </tr>
                         {% endfor %}
                     </tbody>

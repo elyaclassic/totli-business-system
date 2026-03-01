@@ -2,6 +2,8 @@
 
 {% block content %}
 {% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role == 'admin') %}
+{% set search_q = search_q|default('') %}
+{% set search_encoded = search_encoded|default('') %}
 {% if import_ok == '1' %}
     <div class="alert alert-success alert-dismissible fade show" role="alert">
     <strong>Import muvaffaqiyatli.</strong>
@@ -46,10 +48,13 @@
     <div class="card">
             <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2 py-3">
                 <div class="d-flex flex-wrap gap-2 align-items-center">
-                    <a href="/products" class="btn btn-sm {% if current_type == 'all' %}btn-success{% else %}btn-outline-success{% endif %}">Hammasi</a>
-                    <a href="/products?type=tayyor" class="btn btn-sm {% if current_type == 'tayyor' %}btn-success{% else %}btn-outline-success{% endif %}">Tayyor</a>
-                    <a href="/products?type=yarim_tayyor" class="btn btn-sm {% if current_type == 'yarim_tayyor' %}btn-warning{% else %}btn-outline-warning{% endif %}">Yarim tayyor</a>
-                    <a href="/products?type=hom_ashyo" class="btn btn-sm {% if current_type == 'hom_ashyo' %}btn-info{% else %}btn-outline-info{% endif %}">Xom ashyo</a>
+                    <a href="/products{% if search_encoded %}?search={{ search_encoded }}{% endif %}" class="btn btn-sm {% if current_type == 'all' %}btn-success{% else %}btn-outline-success{% endif %}">Hammasi</a>
+                    <a href="/products?type=tayyor{% if search_encoded %}&search={{ search_encoded }}{% endif %}" class="btn btn-sm {% if current_type == 'tayyor' %}btn-success{% else %}btn-outline-success{% endif %}">Tayyor</a>
+                    <a href="/products?type=yarim_tayyor{% if search_encoded %}&search={{ search_encoded }}{% endif %}" class="btn btn-sm {% if current_type == 'yarim_tayyor' %}btn-warning{% else %}btn-outline-warning{% endif %}">Yarim tayyor</a>
+                    <a href="/products?type=hom_ashyo{% if search_encoded %}&search={{ search_encoded }}{% endif %}" class="btn btn-sm {% if current_type == 'hom_ashyo' %}btn-info{% else %}btn-outline-info{% endif %}">Xom ashyo</a>
+                    {% if current_type != 'all' or search_q %}
+                    <a href="/products" class="btn btn-sm btn-outline-secondary" title="Barcha filtrlarni tozalash"><i class="bi bi-x-circle"></i> Tozalash</a>
+                    {% endif %}
                 </div>
                 <div class="d-flex flex-wrap gap-2 align-items-center">
                     <a href="/product-check" class="btn btn-outline-info btn-sm" title="Bir xil nomdagi tovarlarni tekshirish"><i class="bi bi-clipboard-check"></i> Tekshiruv</a>
@@ -75,15 +80,19 @@
                 </div>
             </div>
             <div class="card-body border-bottom">
-                <div class="row align-items-center">
+                <form method="get" action="/products" class="row align-items-end g-2" id="productsFilterForm">
+                    <input type="hidden" name="type" value="{{ current_type }}">
                     <div class="col-md-4">
                         <label class="form-label mb-0 small text-muted"><i class="bi bi-search"></i> Ro'yxatdan qidirish</label>
-                        <input type="text" id="productsSearch" class="form-control form-control-sm" placeholder="Nomi, shtrix kod yoki turi bo'yicha (Ctrl+F)" autocomplete="off">
+                        <input type="text" name="search" id="productsSearch" class="form-control form-control-sm" placeholder="Nomi, kod yoki shtrix kod (Enter — filtrlash)" value="{{ search_q or '' }}" autocomplete="off">
                     </div>
                     <div class="col-auto">
-                        <small id="productsSearchCount" class="text-muted"></small>
+                        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> Qidirish</button>
                     </div>
-                </div>
+                    <div class="col-auto">
+                        <small id="productsSearchCount" class="text-muted">{% if search_q %}{{ products|length }} ta ko'rsatilmoqda{% endif %}</small>
+                    </div>
+                </form>
             </div>
             <div class="card-body p-0">
                 <table class="table table-hover mb-0" id="productsTable">
@@ -394,7 +403,7 @@
     });
 })();
 
-// Ro'yxatdan qidirish (Ctrl+F)
+// Ro'yxatdan qidirish (Ctrl+F) — sahifada tez filtrlash; Enter yoki «Qidirish» — URL orqali saqlanadi
 (function () {
     var searchInp = document.getElementById('productsSearch');
     var countEl = document.getElementById('productsSearchCount');
@@ -410,14 +419,14 @@
             tr.style.display = show ? '' : 'none';
             if (show) visible++;
         });
-        if (countEl) {
+        if (countEl && countEl.closest('form')) {
             if (q) countEl.textContent = visible + ' / ' + rows.length + ' ta';
-            else countEl.textContent = '';
         }
     }
 
     searchInp.addEventListener('input', updateFilter);
     searchInp.addEventListener('keyup', updateFilter);
+    updateFilter();
     document.addEventListener('keydown', function (e) {
         if (e.ctrlKey && e.key === 'f') {
             e.preventDefault();

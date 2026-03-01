@@ -56,7 +56,7 @@
                         {% for doc in docs %}
                         <tr>
                             <td><strong>{{ doc.number }}</strong></td>
-                            <td>{{ doc.employee.full_name }} <small class="text-muted">({{ doc.employee.code }})</small></td>
+                            <td>{{ doc.employee.full_name }} <small class="text-muted">({{ doc.employee.code or doc.employee.id }})</small></td>
                             <td>{{ doc.doc_date.strftime('%d.%m.%Y') }}</td>
                             <td>{% if doc.hire_date %}{{ doc.hire_date.strftime('%d.%m.%Y') }}{% else %}-{% endif %}</td>
                             <td>{{ doc.position or '-' }}</td>

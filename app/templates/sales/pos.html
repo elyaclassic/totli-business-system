@@ -53,6 +53,7 @@
             <h1 class="pos-title mb-0"><i class="bi bi-cart-check-fill me-2"></i>Sotuv oynasi</h1>
         </div>
         <div class="d-flex align-items-center gap-2">
+        <a href="/purchases?from=pos" class="btn btn-outline-success btn-sm" title="Kirim hujjatlari ro'yxati — o'zingiz kiritganlar"><i class="bi bi-box-arrow-in-down me-1"></i>Tovar kirimi</a>
         {% if pos_user_warehouses %}
         <div class="pos-warehouses-compact d-flex align-items-center gap-2">
             <label class="small text-muted mb-0">Ombor:</label>
@@ -278,6 +279,7 @@
                         <button type="button" class="btn w-100 pos-btn-sotuv py-3" id="posBtnSotuv" disabled><i class="bi bi-cash-coin me-2"></i>Sotuv <small class="opacity-75">(F2)</small></button>
                         <div class="pos-extra-actions mt-3 pt-3 border-top border-secondary border-opacity-25">
                             <div class="row g-2">
+                                <div class="col-4"><a href="/purchases?from=pos" class="btn btn-sm w-100 pos-action-pill text-decoration-none" title="Kirim hujjatlari — Yaratish orqali yangi kirim"><i class="bi bi-box-arrow-in-down me-1"></i>Tovar kirimi</a></div>
                                 <div class="col-4"><button type="button" class="btn btn-sm w-100 pos-action-pill" id="posBtnKunlikSotuv" title="Kunlik sotuv"><i class="bi bi-calendar-day me-1"></i>Kunlik sotuv</button></div>
                                 <div class="col-4"><button type="button" class="btn btn-sm w-100 pos-action-pill" id="posBtnKassaniTasdiqlash" title="Kassani tasdiqlash"><i class="bi bi-check-circle me-1"></i>Kassani tasdiqlash</button></div>
                                 <div class="col-4"><button type="button" class="btn btn-sm w-100 pos-action-pill" id="posBtnChekniSaqlash" title="Chekni saqlash"><i class="bi bi-receipt me-1"></i>Chekni saqlash</button></div>
@@ -1099,12 +1101,13 @@
     box-shadow: var(--pos-shadow-hover);
     border-color: rgba(13,107,75,0.25);
 }
-.pos-premium .pos-product-image-wrap { height: 88px; border-radius: var(--pos-radius-sm); overflow: hidden; background: #f8f9fb; }
+.pos-premium .pos-product-image-wrap { height: 160px; min-height: 160px; border-radius: var(--pos-radius-sm); overflow: hidden; background: #f8f9fb; display: flex; align-items: center; justify-content: center; }
 .pos-premium .pos-product-img {
     width: 100%;
     height: 100%;
     object-fit: contain;
-    padding: 4px;
+    padding: 6px;
+    box-sizing: border-box;
 }
 .pos-premium .pos-product-placeholder {
     width: 100%;

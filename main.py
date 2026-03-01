@@ -39,6 +39,7 @@ from app.utils.auth import (
     generate_csrf_token, verify_csrf_token,
 )
 from app.utils.notifications import check_low_stock_and_notify, get_unread_count, get_user_notifications
+from app.utils.user_scope import get_warehouses_for_user
 from app.deps import get_current_user, require_auth, require_admin
 from app.core import templates
 from app.routes import auth as auth_routes
@@ -3593,13 +3594,42 @@ async def import_directions(file: UploadFile = File(...), db: Session = Depends(
 # Foydalanuvchilar bo'limi (faqat admin)
 @app.get("/info/users", response_class=HTMLResponse)
 async def info_users(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    """Foydalanuvchilar ro'yxati"""
-    users = db.query(User).all()
+    """Foydalanuvchilar ro'yxati — hodimlar, bo'lim, ombor, kassa ro'yxatlari bilan."""
+    users = (
+        db.query(User)
+        .options(
+            joinedload(User.department),
+            joinedload(User.warehouse),
+            joinedload(User.cash_register),
+            joinedload(User.departments_list),
+            joinedload(User.warehouses_list),
+            joinedload(User.cash_registers_list),
+        )
+        .order_by(User.id)
+        .all()
+    )
+    employees = (
+        db.query(Employee)
+        .filter(Employee.is_active == True)
+        .order_by(Employee.full_name)
+        .all()
+    )
+    user_to_employee = {e.user_id: e for e in db.query(Employee).filter(Employee.user_id != None).all()}
+    departments = db.query(Department).filter(Department.is_active == True).order_by(Department.name).all()
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
+    cash_registers = db.query(CashRegister).filter(CashRegister.is_active == True).order_by(CashRegister.name).all()
+    error = request.query_params.get("error", "").strip()
     return templates.TemplateResponse("info/users.html", {
         "request": request,
         "users": users,
+        "employees": employees,
+        "user_to_employee": user_to_employee,
+        "departments": departments,
+        "warehouses": warehouses,
+        "cash_registers": cash_registers,
         "current_user": current_user,
-        "page_title": "Foydalanuvchilar"
+        "page_title": "Foydalanuvchilar",
+        "error": error,
     })
 
 @app.post("/info/users/add")
@@ -4028,8 +4058,15 @@ async def import_products(
         )
 
 @app.get("/products", response_class=HTMLResponse)
-async def products_list(request: Request, type: str = "all", db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    """Tovarlar ro'yxati"""
+async def products_list(
+    request: Request,
+    type: str = "all",
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tovarlar ro'yxati — turi va qidiruv bo'yicha filtr (tozalashguncha saqlanadi)."""
+    from urllib.parse import unquote
     query = db.query(Product).filter(Product.is_active == True)
     if type == "tayyor":
         query = query.filter(Product.type == "tayyor")
@@ -4037,24 +4074,35 @@ async def products_list(request: Request, type: str = "all", db: Session = Depen
         query = query.filter(Product.type == "yarim_tayyor")
     elif type == "hom_ashyo":
         query = query.filter(Product.type == "hom_ashyo")
-    
+    search_q = (search or "").strip()
+    if search_q:
+        like = f"%{search_q}%"
+        query = query.filter(
+            or_(
+                Product.name.ilike(like),
+                func.coalesce(Product.code, "").ilike(like),
+                func.coalesce(Product.barcode, "").ilike(like),
+            )
+        )
     products = query.all()
     categories = db.query(Category).all()
     units = db.query(Unit).all()
-    from urllib.parse import unquote
     import_ok = request.query_params.get("import_ok")
     added = request.query_params.get("added")
     updated = request.query_params.get("updated")
     import_skipped = request.query_params.get("skipped")
     import_error = request.query_params.get("error") == "import"
     import_detail = unquote(request.query_params.get("detail", "") or "")
-    
+    from urllib.parse import quote as url_quote
+    search_encoded = url_quote(search_q) if search_q else ""
     return templates.TemplateResponse("products/list.html", {
         "request": request,
         "products": products,
         "categories": categories,
         "units": units,
         "current_type": type,
+        "search_q": search_q,
+        "search_encoded": search_encoded,
         "current_user": current_user,
         "page_title": "Tovarlar",
         "import_ok": import_ok,
@@ -5082,12 +5130,20 @@ async def warehouse_transfer(
 # ==========================================
 
 @app.get("/purchases", response_class=HTMLResponse)
-async def purchases_list(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    """Tovar kirimlari ro'yxati"""
+async def purchases_list(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tovar kirimlari ro'yxati. from=pos bo'lsa — faqat joriy foydalanuvchi kiritganlar."""
     from urllib.parse import unquote
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
-    purchases = db.query(Purchase).order_by(Purchase.date.desc()).limit(100).all()
+    query = db.query(Purchase)
+    from_pos = request.query_params.get("from") == "pos"
+    if from_pos:
+        query = query.filter(Purchase.user_id == current_user.id)
+    purchases = query.order_by(Purchase.date.desc()).limit(100).all()
     error = request.query_params.get("error")
     error_detail = unquote(request.query_params.get("detail", "") or "")
     return templates.TemplateResponse("purchases/list.html", {
@@ -5097,23 +5153,25 @@ async def purchases_list(request: Request, db: Session = Depends(get_db), curren
         "page_title": "Tovar kirimlari",
         "error": error,
         "error_detail": error_detail,
+        "from_pos": from_pos,
     })
 
 
 @app.get("/purchases/new", response_class=HTMLResponse)
 async def purchase_new(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    """Yangi tovar kirimi"""
+    """Yangi tovar kirimi — ombor faqat foydalanuvchiga tegishli/tayinlanganlar."""
+    from_pos = request.query_params.get("from") == "pos"
     products = db.query(Product).filter(Product.is_active == True).all()
-    # Barcha faol kontragentlar (ta'minotchi qidiruvida topilsin)
     partners = db.query(Partner).filter(Partner.is_active == True).order_by(Partner.name).all()
-    warehouses = db.query(Warehouse).all()
+    warehouses = get_warehouses_for_user(db, current_user)
     return templates.TemplateResponse("purchases/new.html", {
         "request": request,
         "products": products,
         "partners": partners,
         "warehouses": warehouses,
         "current_user": current_user,
-        "page_title": "Yangi tovar kirimi"
+        "page_title": "Yangi tovar kirimi",
+        "from_pos": from_pos,
     })
 
 
@@ -5134,6 +5192,10 @@ async def purchase_create(
         warehouse_id = int(warehouse_id)
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Noto'g'ri ma'lumot")
+    allowed_warehouses = get_warehouses_for_user(db, current_user)
+    allowed_warehouse_ids = [w.id for w in allowed_warehouses]
+    if warehouse_id not in allowed_warehouse_ids:
+        raise HTTPException(status_code=403, detail="Tanlangan ombor sizga ruxsat etilmagan")
 
     product_ids = form.getlist("product_id")
     quantities = form.getlist("quantity")
@@ -5182,6 +5244,7 @@ async def purchase_create(
         number=number,
         partner_id=partner_id,
         warehouse_id=warehouse_id,
+        user_id=current_user.id if current_user else None,
         total=total,
         total_expenses=total_expenses,
         status="draft",
@@ -5210,7 +5273,9 @@ async def purchase_create(
             db.add(PurchaseExpense(purchase_id=purchase.id, name=str(name).strip(), amount=amt))
 
     db.commit()
-    return RedirectResponse(url=f"/purchases/edit/{purchase.id}", status_code=303)
+    from_pos = (form.get("from_pos") or "").strip() == "1"
+    edit_url = f"/purchases/edit/{purchase.id}" + ("?from=pos" if from_pos else "")
+    return RedirectResponse(url=edit_url, status_code=303)
 
 
 @app.get("/purchases/edit/{purchase_id}", response_class=HTMLResponse)
@@ -5224,6 +5289,7 @@ async def purchase_edit(request: Request, purchase_id: int, db: Session = Depend
         raise HTTPException(status_code=404, detail="Tovar kirimi topilmadi")
     if purchase.status == "confirmed" and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Tasdiqlangan kirimni faqat administrator tahrirlashi mumkin")
+    from_pos = request.query_params.get("from") == "pos"
     products = db.query(Product).filter(Product.is_active == True).all()
     revert_error = request.query_params.get("error") == "revert"
     revert_detail = unquote(request.query_params.get("detail", "") or "")
@@ -5235,6 +5301,7 @@ async def purchase_edit(request: Request, purchase_id: int, db: Session = Depend
         "page_title": f"Tovar kirimi: {purchase.number}",
         "revert_error": revert_error,
         "revert_detail": revert_detail,
+        "from_pos": from_pos,
     })
 
 
@@ -5996,18 +6063,24 @@ async def sales_delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """Sotuvni o'chirish (faqat qoralama, faqat admin)"""
+    """Sotuvni o'chirish (admin). Qoralama — bekor qilingan qiladi; bekor qilingan — bazadan o'chiradi."""
+    from urllib.parse import quote
     order = db.query(Order).filter(Order.id == order_id, Order.type == "sale").first()
     if not order:
         raise HTTPException(status_code=404, detail="Sotuv topilmadi")
-    if order.status != "draft":
-        from urllib.parse import quote
+    if order.status not in ("draft", "cancelled"):
         return RedirectResponse(
-            url="/sales?error=delete&detail=" + quote("Faqat qoralama holatidagi sotuvni o'chirish mumkin. Avval tasdiqni bekor qiling."),
+            url="/sales?error=delete&detail=" + quote("Faqat qoralama yoki bekor qilingan sotuvni o'chirish mumkin. Avval tasdiqni bekor qiling."),
             status_code=303
         )
-    order.status = "cancelled"
-    db.commit()
+    if order.status == "draft":
+        order.status = "cancelled"
+        db.commit()
+    else:
+        db.query(OrderItem).filter(OrderItem.order_id == order_id).delete()
+        db.query(Payment).filter(Payment.order_id == order_id).update({Payment.order_id: None})
+        db.query(Order).filter(Order.id == order_id).delete()
+        db.commit()
     return RedirectResponse(url="/sales", status_code=303)
 
 
@@ -6629,7 +6702,12 @@ async def sales_pos_receipt(
     receipt_barcode_b64 = None
     try:
         writer = ImageWriter()
-        writer.set_options({"module_width": 0.45, "module_height": 16, "font_size": 11})
+        writer.set_options({
+            "module_width": 0.35,
+            "module_height": 14,
+            "font_size": 10,
+            "dpi": 600,
+        })
         buf = io.BytesIO()
         code128 = barcode.get("code128", order.number, writer=writer)
         code128.write(buf)
@@ -7431,8 +7509,13 @@ async def employment_docs_list(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Ishga qabul qilish hujjatlari ro'yxati"""
-    docs = db.query(EmploymentDoc).order_by(EmploymentDoc.created_at.desc()).all()
+    """Ishga qabul qilish hujjatlari ro'yxati — barcha foydalanuvchilar barcha hujjatlarni ko'radi"""
+    docs = (
+        db.query(EmploymentDoc)
+        .options(joinedload(EmploymentDoc.employee))
+        .order_by(EmploymentDoc.created_at.desc())
+        .all()
+    )
     return templates.TemplateResponse("employees/hiring_docs_list.html", {
         "request": request,
         "docs": docs,

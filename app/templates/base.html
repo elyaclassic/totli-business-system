@@ -747,6 +747,16 @@
                     <i class="bi bi-bar-chart-line"></i> Hisobotlar
                 </a>
             </li>
+            <li class="nav-item">
+                <a class="nav-link {% if page_title == 'Xodimlar' or page_title == 'Xodimni tahrirlash' %}active{% endif %}" href="/employees">
+                    <i class="bi bi-person-plus"></i> Xodimlar
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if page_title == 'Ishga qabul qilish hujjatlari' or (page_title and 'Ishga qabul' in page_title) %}active{% endif %}" href="/employees/hiring-docs">
+                    <i class="bi bi-file-earmark-person"></i> Ishga qabul hujjati
+                </a>
+            </li>
 
             {% elif qadoqlash_menu %}
             <!-- Qadoqlash uchun qisqa menyu -->
@@ -768,6 +778,16 @@
             <li class="nav-item">
                 <a class="nav-link {% if 'Hisobot' in page_title %}active{% endif %}" href="/reports">
                     <i class="bi bi-bar-chart-line"></i> Hisobotlar
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if page_title == 'Xodimlar' or page_title == 'Xodimni tahrirlash' %}active{% endif %}" href="/employees">
+                    <i class="bi bi-person-plus"></i> Xodimlar
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if page_title == 'Ishga qabul qilish hujjatlari' or (page_title and 'Ishga qabul' in page_title) %}active{% endif %}" href="/employees/hiring-docs">
+                    <i class="bi bi-file-earmark-person"></i> Ishga qabul hujjati
                 </a>
             </li>
 

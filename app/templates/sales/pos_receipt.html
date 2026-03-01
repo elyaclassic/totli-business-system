@@ -70,12 +70,14 @@
         }
         .receipt-barcode img {
             max-width: 100%;
-            width: 100%;
+            width: auto;
             height: auto;
-            min-height: 48px;
-            max-height: 72px;
+            min-height: 44px;
+            max-height: 64px;
             display: block;
             margin: 0 auto;
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: crisp-edges;
         }
         .receipt-barcode .barcode-number { font-size: 12px; margin-top: 4px; letter-spacing: 1px; font-weight: bold; }
         @media print {

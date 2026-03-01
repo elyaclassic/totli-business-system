@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 
 {% block content %}
+<style>
+    #addUserScopeTabs .nav-link, #editUserScopeTabs .nav-link { font-size: 0.8rem; }
+    #addUserScopeContent .tab-pane, #editUserScopeContent .tab-pane { min-height: 2.5rem; }
+</style>
 <div class="container-fluid">
     {% if error %}
     <div class="alert alert-danger alert-dismissible fade show" role="alert">
@@ -180,52 +184,62 @@
                         </div>
                     </div>
 
-                    <!-- Bo'lim, Ombor, Kassa — bir qatorda, tanlanganlar chip -->
-                    <div class="row g-2 mb-2">
-                        <div class="col-md-4">
-                            <label class="form-label small mb-0">Bo'lim</label>
-                            <div class="d-flex gap-1">
-                                <select class="form-select form-select-sm flex-grow-1" id="add_department_id">
-                                    <option value="">-- Tanlang --</option>
-                                    {% for d in (departments or []) %}
-                                    <option value="{{ d.id }}">{{ d.name }}</option>
-                                    {% endfor %}
-                                </select>
-                                <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" id="add_btn_department" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                    <!-- Bo'lim, Ombor, Kassa — 1C uslubida tablar: bosganda o'z ro'yxati -->
+                    <div class="mb-2">
+                        <ul class="nav nav-tabs nav-tabs-sm flex-nowrap" id="addUserScopeTabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active py-1 px-2 small" id="add-tab-department" data-bs-toggle="tab" data-bs-target="#add-pane-department" type="button" role="tab">Bo'lim</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link py-1 px-2 small" id="add-tab-warehouse" data-bs-toggle="tab" data-bs-target="#add-pane-warehouse" type="button" role="tab">Ombor</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link py-1 px-2 small" id="add-tab-cash" data-bs-toggle="tab" data-bs-target="#add-pane-cash" type="button" role="tab">Kassa</button>
+                            </li>
+                        </ul>
+                        <div class="tab-content border border-top-0 rounded-bottom p-2 bg-light" id="addUserScopeContent">
+                            <div class="tab-pane fade show active" id="add-pane-department" role="tabpanel">
+                                <div class="d-flex gap-1 align-items-center">
+                                    <select class="form-select form-select-sm flex-grow-1" id="add_department_id">
+                                        <option value="">-- Tanlang --</option>
+                                        {% for d in (departments or []) %}
+                                        <option value="{{ d.id }}">{{ d.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="add_btn_department" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                                </div>
+                                <div id="add_department_ids_container"></div>
+                                <ul id="add_department_list" class="list-group list-group-flush mt-1 small" style="max-height:120px;overflow-y:auto;"></ul>
                             </div>
-                            <div id="add_department_ids_container"></div>
-                            <div id="add_department_list" class="d-flex flex-wrap gap-1 mt-1"></div>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label small mb-0">Ombor</label>
-                            <div class="d-flex gap-1">
-                                <select class="form-select form-select-sm flex-grow-1" id="add_warehouse_id">
-                                    <option value="">-- Tanlang --</option>
-                                    {% for w in (warehouses or []) %}
-                                    <option value="{{ w.id }}">{{ w.name }}</option>
-                                    {% endfor %}
-                                </select>
-                                <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" id="add_btn_warehouse" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                            <div class="tab-pane fade" id="add-pane-warehouse" role="tabpanel">
+                                <div class="d-flex gap-1 align-items-center">
+                                    <select class="form-select form-select-sm flex-grow-1" id="add_warehouse_id">
+                                        <option value="">-- Tanlang --</option>
+                                        {% for w in (warehouses or []) %}
+                                        <option value="{{ w.id }}">{{ w.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="add_btn_warehouse" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                                </div>
+                                <div id="add_warehouse_ids_container"></div>
+                                <ul id="add_warehouse_list" class="list-group list-group-flush mt-1 small" style="max-height:120px;overflow-y:auto;"></ul>
                             </div>
-                            <div id="add_warehouse_ids_container"></div>
-                            <div id="add_warehouse_list" class="d-flex flex-wrap gap-1 mt-1"></div>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label small mb-0">Kassa</label>
-                            <div class="d-flex gap-1">
-                                <select class="form-select form-select-sm flex-grow-1" id="add_cash_register_id">
-                                    <option value="">-- Tanlang --</option>
-                                    {% for c in (cash_registers or []) %}
-                                    <option value="{{ c.id }}">{{ c.name }}</option>
-                                    {% endfor %}
-                                </select>
-                                <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" id="add_btn_cash_register" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                            <div class="tab-pane fade" id="add-pane-cash" role="tabpanel">
+                                <div class="d-flex gap-1 align-items-center">
+                                    <select class="form-select form-select-sm flex-grow-1" id="add_cash_register_id">
+                                        <option value="">-- Tanlang --</option>
+                                        {% for c in (cash_registers or []) %}
+                                        <option value="{{ c.id }}">{{ c.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="add_btn_cash_register" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                                </div>
+                                <div id="add_cash_register_ids_container"></div>
+                                <ul id="add_cash_register_list" class="list-group list-group-flush mt-1 small" style="max-height:120px;overflow-y:auto;"></ul>
                             </div>
-                            <div id="add_cash_register_ids_container"></div>
-                            <div id="add_cash_register_list" class="d-flex flex-wrap gap-1 mt-1"></div>
                         </div>
+                        <small class="text-muted small d-block mt-1" style="font-size:0.7rem">Bo'lim / Ombor / Kassa — tabni bosib ro'yxatdan tanlang. Sotuvchi: bo'lim–ombor → sotuv oynasi.</small>
                     </div>
-                    <small class="text-muted small d-block mb-2" style="font-size:0.7rem">Sotuvchi: bo'lim/ombor → sotuv oynasi; kassa — biriktiriladi.</small>
 
                     <!-- Ruxsatlar (Hisobotlar) -->
                     <div class="mb-2">
@@ -298,14 +312,14 @@
                             inp.name = inputName;
                             inp.value = id;
                             container.appendChild(inp);
-                            var chip = document.createElement('span');
-                            chip.className = 'badge bg-primary small d-inline-flex align-items-center gap-1 py-1 px-2';
-                            chip.innerHTML = name + ' <button type="button" class="btn btn-link p-0 border-0 text-white" style="font-size:0.65rem;line-height:1" aria-label="O\'chirish">&times;</button>';
-                            chip.querySelector('button').addEventListener('click', function() {
+                            var li = document.createElement('li');
+                            li.className = 'list-group-item d-flex justify-content-between align-items-center py-1 px-2';
+                            li.innerHTML = '<span>' + name + '</span> <button type="button" class="btn btn-link p-0 text-danger" style="font-size:0.8rem" aria-label="O\'chirish">&times;</button>';
+                            li.querySelector('button').addEventListener('click', function() {
                                 container.querySelector('input[value="' + id + '"]').remove();
-                                chip.remove();
+                                li.remove();
                             });
-                            listEl.appendChild(chip);
+                            listEl.appendChild(li);
                         }
                         function clearAddLists() {
                             ['add_department_ids_container','add_warehouse_ids_container','add_cash_register_ids_container'].forEach(function(cid) {
@@ -402,49 +416,61 @@
                             <label class="form-check-label small">Faol</label>
                         </div>
                     </div>
-                    <div class="row g-2 mb-2">
-                        <div class="col-md-4">
-                            <label class="form-label small mb-0">Bo'lim</label>
-                            <div class="d-flex gap-1">
-                                <select class="form-select form-select-sm flex-grow-1" id="edit_department_id">
-                                    <option value="">-- Tanlang --</option>
-                                    {% for d in (departments or []) %}
-                                    <option value="{{ d.id }}">{{ d.name }}</option>
-                                    {% endfor %}
-                                </select>
-                                <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" id="edit_btn_department" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                    <!-- Bo'lim, Ombor, Kassa — 1C uslubida tablar: bosganda o'z ro'yxati -->
+                    <div class="mb-2">
+                        <ul class="nav nav-tabs nav-tabs-sm flex-nowrap" id="editUserScopeTabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active py-1 px-2 small" id="edit-tab-department" data-bs-toggle="tab" data-bs-target="#edit-pane-department" type="button" role="tab">Bo'lim</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link py-1 px-2 small" id="edit-tab-warehouse" data-bs-toggle="tab" data-bs-target="#edit-pane-warehouse" type="button" role="tab">Ombor</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link py-1 px-2 small" id="edit-tab-cash" data-bs-toggle="tab" data-bs-target="#edit-pane-cash" type="button" role="tab">Kassa</button>
+                            </li>
+                        </ul>
+                        <div class="tab-content border border-top-0 rounded-bottom p-2 bg-light" id="editUserScopeContent">
+                            <div class="tab-pane fade show active" id="edit-pane-department" role="tabpanel">
+                                <div class="d-flex gap-1 align-items-center">
+                                    <select class="form-select form-select-sm flex-grow-1" id="edit_department_id">
+                                        <option value="">-- Tanlang --</option>
+                                        {% for d in (departments or []) %}
+                                        <option value="{{ d.id }}">{{ d.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="edit_btn_department" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                                </div>
+                                <div id="edit_department_ids_container"></div>
+                                <ul id="edit_department_list" class="list-group list-group-flush mt-1 small" style="max-height:120px;overflow-y:auto;"></ul>
                             </div>
-                            <div id="edit_department_ids_container"></div>
-                            <div id="edit_department_list" class="d-flex flex-wrap gap-1 mt-1"></div>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label small mb-0">Ombor</label>
-                            <div class="d-flex gap-1">
-                                <select class="form-select form-select-sm flex-grow-1" id="edit_warehouse_id">
-                                    <option value="">-- Tanlang --</option>
-                                    {% for w in (warehouses or []) %}
-                                    <option value="{{ w.id }}">{{ w.name }}</option>
-                                    {% endfor %}
-                                </select>
-                                <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" id="edit_btn_warehouse" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                            <div class="tab-pane fade" id="edit-pane-warehouse" role="tabpanel">
+                                <div class="d-flex gap-1 align-items-center">
+                                    <select class="form-select form-select-sm flex-grow-1" id="edit_warehouse_id">
+                                        <option value="">-- Tanlang --</option>
+                                        {% for w in (warehouses or []) %}
+                                        <option value="{{ w.id }}">{{ w.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="edit_btn_warehouse" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                                </div>
+                                <div id="edit_warehouse_ids_container"></div>
+                                <ul id="edit_warehouse_list" class="list-group list-group-flush mt-1 small" style="max-height:120px;overflow-y:auto;"></ul>
                             </div>
-                            <div id="edit_warehouse_ids_container"></div>
-                            <div id="edit_warehouse_list" class="d-flex flex-wrap gap-1 mt-1"></div>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label small mb-0">Kassa</label>
-                            <div class="d-flex gap-1">
-                                <select class="form-select form-select-sm flex-grow-1" id="edit_cash_register_id">
-                                    <option value="">-- Tanlang --</option>
-                                    {% for c in (cash_registers or []) %}
-                                    <option value="{{ c.id }}">{{ c.name }}</option>
-                                    {% endfor %}
-                                </select>
-                                <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" id="edit_btn_cash_register" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                            <div class="tab-pane fade" id="edit-pane-cash" role="tabpanel">
+                                <div class="d-flex gap-1 align-items-center">
+                                    <select class="form-select form-select-sm flex-grow-1" id="edit_cash_register_id">
+                                        <option value="">-- Tanlang --</option>
+                                        {% for c in (cash_registers or []) %}
+                                        <option value="{{ c.id }}">{{ c.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="edit_btn_cash_register" title="Qo'shish"><i class="bi bi-plus-lg"></i></button>
+                                </div>
+                                <div id="edit_cash_register_ids_container"></div>
+                                <ul id="edit_cash_register_list" class="list-group list-group-flush mt-1 small" style="max-height:120px;overflow-y:auto;"></ul>
                             </div>
-                            <div id="edit_cash_register_ids_container"></div>
-                            <div id="edit_cash_register_list" class="d-flex flex-wrap gap-1 mt-1"></div>
                         </div>
+                        <small class="text-muted small d-block mt-1" style="font-size:0.7rem">Bo'lim / Ombor / Kassa — tabni bosib ro'yxatdan tanlang.</small>
                     </div>
                     <!-- Ruxsatlar (Hisobotlar) -->
                     <div class="mb-2">
@@ -573,16 +599,15 @@
                 inp.name = inputName;
                 inp.value = id;
                 container.appendChild(inp);
-                var chip = document.createElement('span');
-                chip.className = 'badge bg-primary small d-inline-flex align-items-center gap-1 py-1 px-2';
-                chip.innerHTML = name + ' <button type="button" class="btn btn-link p-0 border-0 text-white" style="font-size:0.65rem;line-height:1" aria-label="O\'chirish">&times;</button>';
-                chip.querySelector('button').addEventListener('click', function() {
+                var li = document.createElement('li');
+                li.className = 'list-group-item d-flex justify-content-between align-items-center py-1 px-2';
+                li.innerHTML = '<span>' + name + '</span> <button type="button" class="btn btn-link p-0 text-danger" style="font-size:0.8rem" data-id="' + id + '" aria-label="O\'chirish">&times;</button>';
+                li.querySelector('button').addEventListener('click', function() {
                     var rid = this.getAttribute('data-id');
                     container.querySelector('input[value="' + rid + '"]').remove();
-                    this.closest('.badge').remove();
+                    this.closest('.list-group-item').remove();
                 });
-                chip.querySelector('button').setAttribute('data-id', id);
-                listEl.appendChild(chip);
+                listEl.appendChild(li);
             }
         }
         fillList(btn.getAttribute('data-department-ids') || '', btn.getAttribute('data-department-names') || '', 'edit_department_ids_container', 'edit_department_list', 'department_ids');
@@ -606,15 +631,15 @@
             inp.name = inputName;
             inp.value = id;
             container.appendChild(inp);
-            var chip = document.createElement('span');
-            chip.className = 'badge bg-primary small d-inline-flex align-items-center gap-1 py-1 px-2';
-            chip.innerHTML = name + ' <button type="button" class="btn btn-link p-0 border-0 text-white" style="font-size:0.65rem;line-height:1" data-id="' + id + '" aria-label="O\'chirish">&times;</button>';
-            chip.querySelector('button').addEventListener('click', function() {
+            var li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center py-1 px-2';
+            li.innerHTML = '<span>' + name + '</span> <button type="button" class="btn btn-link p-0 text-danger" style="font-size:0.8rem" data-id="' + id + '" aria-label="O\'chirish">&times;</button>';
+            li.querySelector('button').addEventListener('click', function() {
                 var rid = this.getAttribute('data-id');
                 container.querySelector('input[value="' + rid + '"]').remove();
-                this.closest('.badge').remove();
+                this.closest('.list-group-item').remove();
             });
-            listEl.appendChild(chip);
+            listEl.appendChild(li);
         }
         document.getElementById('edit_btn_department').addEventListener('click', function() { addEditToList('edit_department_id', 'edit_department_ids_container', 'edit_department_list', 'department_ids'); });
         document.getElementById('edit_btn_warehouse').addEventListener('click', function() { addEditToList('edit_warehouse_id', 'edit_warehouse_ids_container', 'edit_warehouse_list', 'warehouse_ids'); });
