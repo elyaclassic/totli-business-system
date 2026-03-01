@@ -12,7 +12,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 
 from app.core import templates
-from app.models.database import get_db, Order, Stock, StockMovement, Product, Partner, Warehouse, User, Production, Recipe, StockAdjustmentDoc, StockAdjustmentDocItem, Employee, Purchase, WarehouseTransfer, Payment
+from app.models.database import get_db, Order, OrderItem, Stock, StockMovement, Product, Partner, Warehouse, User, Production, Recipe, StockAdjustmentDoc, StockAdjustmentDocItem, Employee, Purchase, PurchaseItem, WarehouseTransfer, Payment
 from app.deps import get_current_user, require_auth, require_admin
 from app.utils.user_scope import get_warehouses_for_user
 
@@ -865,32 +865,43 @@ def _build_partner_movements(db: Session, partner_id: int, date_from: datetime, 
     for o in q_orders.order_by(Order.date):
         debit = float(o.total or 0) if o.type == "sale" else 0.0
         credit = float(o.total or 0) if o.type == "return_sale" else 0.0
+        doc_label = f"{'Sotuv' if o.type == 'sale' else 'Qaytarish'} {o.number or ''} {o.date.strftime('%d.%m.%Y %H:%M') if o.date else ''}".strip()
         rows.append({
             "date": o.date,
             "doc_type": "Sotuv" if o.type == "sale" else "Qaytarish",
             "doc_number": o.number or "",
+            "doc_label": doc_label,
+            "doc_url": f"/sales/edit/{o.id}",
             "debit": debit,
             "credit": credit,
         })
 
-    # To'lovlar: income = credit (ular bizga to'ladı), expense = debit (biz ularga to'ladık)
+    # To'lovlar: income = credit (ular bizga to'ladı), expense = debit (biz ularga to'ladık) — faqat tasdiqlangan
     q_payments = db.query(Payment).filter(Payment.partner_id == partner_id)
+    if hasattr(Payment, "status"):
+        q_payments = q_payments.filter(or_(Payment.status == "confirmed", Payment.status == None))
     if period_only:
         q_payments = q_payments.filter(Payment.date >= date_from_start, Payment.date <= date_to_end)
     for p in q_payments.order_by(Payment.date):
         if p.type == "income":
+            doc_label = f"To'lov (kirim) {p.number or ''} {p.date.strftime('%d.%m.%Y %H:%M') if p.date else ''}".strip()
             rows.append({
                 "date": p.date,
                 "doc_type": "To'lov (kirim)",
                 "doc_number": p.number or "",
+                "doc_label": doc_label,
+                "doc_url": f"/finance/payment/{p.id}/edit",
                 "debit": 0.0,
                 "credit": float(p.amount or 0),
             })
         else:
+            doc_label = f"To'lov (chiqim) {p.number or ''} {p.date.strftime('%d.%m.%Y %H:%M') if p.date else ''}".strip()
             rows.append({
                 "date": p.date,
                 "doc_type": "To'lov (chiqim)",
                 "doc_number": p.number or "",
+                "doc_label": doc_label,
+                "doc_url": f"/finance/payment/{p.id}/edit",
                 "debit": float(p.amount or 0),
                 "credit": 0.0,
             })
@@ -901,10 +912,13 @@ def _build_partner_movements(db: Session, partner_id: int, date_from: datetime, 
         q_purchases = q_purchases.filter(Purchase.date >= date_from_start, Purchase.date <= date_to_end)
     for p in q_purchases.order_by(Purchase.date):
         total_val = float((p.total or 0) + (p.total_expenses or 0))
+        doc_label = f"Tovarlar kirimi (xarid) {p.number or ''} {p.date.strftime('%d.%m.%Y %H:%M') if p.date else ''}".strip()
         rows.append({
             "date": p.date,
             "doc_type": "Xarid",
             "doc_number": p.number or "",
+            "doc_label": doc_label,
+            "doc_url": f"/purchases/edit/{p.id}",
             "debit": 0.0,
             "credit": total_val,
         })
@@ -953,12 +967,55 @@ async def report_partner_reconciliation(
     opening_debit = opening_credit = 0.0
     total_debit = total_credit = 0.0
     partner_obj = None
+    products_purchased = []  # kontragentdan xarid qilingan mahsulotlar (analitika)
+    products_sold = []       # kontragentga sotilgan mahsulotlar (analitika)
     if partner_id:
         partner_obj = db.query(Partner).filter(Partner.id == partner_id).first()
         if partner_obj:
             rows, opening_debit, opening_credit = _build_partner_movements(db, partner_id, dt_from, dt_to, period_only=False)
             total_debit = sum(r["debit"] for r in rows)
             total_credit = sum(r["credit"] for r in rows)
+            date_from_start = dt_from.replace(hour=0, minute=0, second=0, microsecond=0)
+            date_to_end = dt_to.replace(hour=23, minute=59, second=59, microsecond=999999)
+            # Kontragentdan xarid qilingan mahsulotlar (davr bo'yicha)
+            purchases_in_period = (
+                db.query(PurchaseItem, Product)
+                .join(Purchase, PurchaseItem.purchase_id == Purchase.id)
+                .join(Product, PurchaseItem.product_id == Product.id)
+                .filter(
+                    Purchase.partner_id == partner_id,
+                    Purchase.date >= date_from_start,
+                    Purchase.date <= date_to_end,
+                )
+            ).all()
+            by_product_purchase = {}
+            for pi, prod in purchases_in_period:
+                key = prod.id
+                if key not in by_product_purchase:
+                    by_product_purchase[key] = {"product_name": prod.name or "", "product_code": prod.code or "", "quantity": 0.0, "total": 0.0}
+                by_product_purchase[key]["quantity"] += float(pi.quantity or 0)
+                by_product_purchase[key]["total"] += float(pi.total or 0)
+            products_purchased = sorted(by_product_purchase.values(), key=lambda x: -x["total"])
+            # Kontragentga sotilgan mahsulotlar (davr bo'yicha)
+            orders_in_period = (
+                db.query(OrderItem, Product)
+                .join(Order, OrderItem.order_id == Order.id)
+                .join(Product, OrderItem.product_id == Product.id)
+                .filter(
+                    Order.partner_id == partner_id,
+                    Order.type == "sale",
+                    Order.date >= date_from_start,
+                    Order.date <= date_to_end,
+                )
+            ).all()
+            by_product_sale = {}
+            for oi, prod in orders_in_period:
+                key = prod.id
+                if key not in by_product_sale:
+                    by_product_sale[key] = {"product_name": prod.name or "", "product_code": prod.code or "", "quantity": 0.0, "total": 0.0}
+                by_product_sale[key]["quantity"] += float(oi.quantity or 0)
+                by_product_sale[key]["total"] += float(oi.total or 0)
+            products_sold = sorted(by_product_sale.values(), key=lambda x: -x["total"])
     opening_balance = opening_debit - opening_credit
     closing_balance = opening_balance + total_debit - total_credit
     return templates.TemplateResponse("reports/partner_reconciliation.html", {
@@ -975,6 +1032,8 @@ async def report_partner_reconciliation(
         "total_credit": total_credit,
         "opening_debit": opening_debit,
         "opening_credit": opening_credit,
+        "products_purchased": products_purchased,
+        "products_sold": products_sold,
         "page_title": "Kontragentlar hisob-kitobini solishtirish",
         "current_user": current_user,
     })
@@ -1015,32 +1074,41 @@ async def report_partner_reconciliation_export(
     wb = Workbook()
     ws = wb.active
     ws.title = "Solishtirish"
-    ws["A1"] = "Kontragentlar hisob-kitobini solishtirish"
+    ws["A1"] = "Hisob kitoblarni solishtirish"
     ws["A1"].font = Font(bold=True, size=14)
-    ws["A2"] = partner.name or ""
+    ws["A2"] = f"TOTLI HOLVA va {partner.name or ''}"
     ws["A3"] = f"Davr: {date_from} — {date_to}"
     ws.append([])
-    headers = ["Sana", "Hujjat turi", "Hujjat raqami", "Debet", "Kredit"]
+    headers = ["Hujjatlar", "TOTLI HOLVA DT (so'm)", "TOTLI HOLVA KT (so'm)", f"{partner.name or 'Kontragent'} DT (so'm)", f"{partner.name or 'Kontragent'} KT (so'm)"]
     for c, h in enumerate(headers, 1):
         cell = ws.cell(row=6, column=c, value=h)
         cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         cell.font = Font(bold=True, color="FFFFFF")
-    for i, r in enumerate(rows, 7):
-        ws.cell(row=i, column=1, value=r["date"].strftime("%d.%m.%Y %H:%M") if r["date"] else "")
-        ws.cell(row=i, column=2, value=r["doc_type"])
-        ws.cell(row=i, column=3, value=r["doc_number"])
-        ws.cell(row=i, column=4, value=r["debit"])
-        ws.cell(row=i, column=5, value=r["credit"])
-    nr = 7 + len(rows)
-    ws.cell(row=nr, column=2, value="Jami davr:")
-    ws.cell(row=nr, column=4, value=total_debit)
-    ws.cell(row=nr, column=5, value=total_credit)
-    ws.cell(row=nr + 1, column=2, value="Davomiy qoldiq (oldingi):")
-    ws.cell(row=nr + 1, column=4, value=opening_debit)
-    ws.cell(row=nr + 1, column=5, value=opening_credit)
-    ws.cell(row=nr + 2, column=2, value="Yakuniy qoldiq:")
-    ws.cell(row=nr + 2, column=4, value=closing_balance if closing_balance > 0 else "")
-    ws.cell(row=nr + 2, column=5, value=-closing_balance if closing_balance < 0 else "")
+    row_num = 7
+    ws.cell(row=row_num, column=1, value=f"{date_from} sanaga qoldiq")
+    ws.cell(row=row_num, column=2, value=opening_balance if opening_balance > 0 else None)
+    ws.cell(row=row_num, column=3, value=-opening_balance if opening_balance < 0 else None)
+    ws.cell(row=row_num, column=4, value=-opening_balance if opening_balance < 0 else None)
+    ws.cell(row=row_num, column=5, value=opening_balance if opening_balance > 0 else None)
+    row_num += 1
+    for r in rows:
+        ws.cell(row=row_num, column=1, value=r.get("doc_label") or f"{r.get('doc_type', '')} {r.get('doc_number', '')}")
+        ws.cell(row=row_num, column=2, value=r["debit"] if r["debit"] else None)
+        ws.cell(row=row_num, column=3, value=r["credit"] if r["credit"] else None)
+        ws.cell(row=row_num, column=4, value=r["credit"] if r["credit"] else None)
+        ws.cell(row=row_num, column=5, value=r["debit"] if r["debit"] else None)
+        row_num += 1
+    ws.cell(row=row_num, column=1, value="Jami davr:")
+    ws.cell(row=row_num, column=2, value=total_debit)
+    ws.cell(row=row_num, column=3, value=total_credit)
+    ws.cell(row=row_num, column=4, value=total_credit)
+    ws.cell(row=row_num, column=5, value=total_debit)
+    row_num += 1
+    ws.cell(row=row_num, column=1, value=f"{date_to} sanaga qoldiq")
+    ws.cell(row=row_num, column=2, value=closing_balance if closing_balance > 0 else None)
+    ws.cell(row=row_num, column=3, value=-closing_balance if closing_balance < 0 else None)
+    ws.cell(row=row_num, column=4, value=-closing_balance if closing_balance < 0 else None)
+    ws.cell(row=row_num, column=5, value=closing_balance if closing_balance > 0 else None)
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
