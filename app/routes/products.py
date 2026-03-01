@@ -256,7 +256,7 @@ async def products_list(
         "import_updated": updated,
         "import_error": import_error,
         "import_detail": import_detail,
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) == "admin",
     })
 
 

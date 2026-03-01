@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role == 'admin') %}
 <style>
     .product-results, .add-product-results { box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid #0d6efd; border-radius: 0.25rem; margin-top: 2px; background: white; z-index: 1050; position: fixed; min-width: 280px; max-width: 420px; max-height: 70vh; overflow-y: auto; }
     .product-results .list-group-item, .add-product-results .list-group-item { cursor: pointer; }
@@ -57,7 +58,7 @@
                 </div>
                 <div class="col-md-6">
                     <p class="mb-0"><strong>Holat:</strong> {% if doc.status == 'draft' %}<span class="badge bg-warning text-dark">Qoralama</span>{% else %}<span class="badge bg-success">Tasdiqlangan</span> <small class="text-muted">(tasdiq o'zidan bekor bo'lmaydi — faqat admin bekor qiladi)</small>{% endif %}
-                    &nbsp; <strong>Jami tannarx:</strong> <span class="text-success fw-bold">{{ "{:,.0f}".format(doc.total_tannarx or 0) }}</span> so'm
+                    {% if show_tannarx %}&nbsp; <strong>Jami tannarx:</strong> <span class="text-success fw-bold">{{ "{:,.0f}".format(doc.total_tannarx or 0) }}</span> so'm{% endif %}
                     &nbsp; <strong>Jami sotuv:</strong> <span class="text-primary fw-bold">{{ "{:,.0f}".format(doc.total_sotuv or 0) }}</span> so'm</p>
                 </div>
             </div>
@@ -78,8 +79,7 @@
                             <th class="col-tovar">Tovar</th>
                             <th style="width: 135px;">Ombor</th>
                             <th style="width: 88px;" class="text-end">Qoldiq</th>
-                            <th style="width: 98px;" class="text-end">Tannarx</th>
-                            <th style="width: 108px;" class="text-end">Summa tann.</th>
+                            {% if show_tannarx %}<th style="width: 98px;" class="text-end">Tannarx</th><th style="width: 108px;" class="text-end">Summa tann.</th>{% endif %}
                             <th style="width: 98px;" class="text-end">Sotuv narx</th>
                             <th style="width: 108px;" class="text-end">Sotuv summa</th>
                             {% if doc.status == 'draft' %}<th style="width: 64px;" class="text-center">Amal</th>{% endif %}
@@ -109,10 +109,14 @@
                             <td class="text-end col-number">
                                 <input form="edit-form-{{ item.id }}" type="number" name="quantity" class="form-control form-control-sm text-end" step="0.001" min="0.001" required value="{{ item.quantity }}">
                             </td>
+                            {% if show_tannarx %}
                             <td class="text-end col-number">
                                 <input form="edit-form-{{ item.id }}" type="number" name="cost_price" class="form-control form-control-sm text-end row-cost" step="0.01" min="0" value="{{ item.cost_price or 0 }}">
                             </td>
                             <td class="text-end col-number"><strong class="text-success row-sum-tannarx">{{ "{:,.0f}".format((item.quantity or 0) * (item.cost_price or 0)) }}</strong></td>
+                            {% else %}
+                            <input form="edit-form-{{ item.id }}" type="hidden" name="cost_price" value="{{ item.cost_price or 0 }}">
+                            {% endif %}
                             <td class="text-end col-number">
                                 <input form="edit-form-{{ item.id }}" type="number" name="sale_price" class="form-control form-control-sm text-end row-sale" step="0.01" min="0" value="{{ item.sale_price or 0 }}">
                             </td>
@@ -127,22 +131,24 @@
                             {% else %}
                             <td>{{ item.warehouse.name if item.warehouse else '-' }}</td>
                             <td class="text-end fw-bold col-number">{{ "{:,.3f}".format(item.quantity) }}</td>
+                            {% if show_tannarx %}
                             <td class="text-end col-number">{{ "{:,.0f}".format(item.cost_price or 0) }}</td>
                             <td class="text-end col-number"><strong class="text-success">{{ "{:,.0f}".format((item.quantity or 0) * (item.cost_price or 0)) }}</strong></td>
+                            {% endif %}
                             <td class="text-end col-number">{{ "{:,.0f}".format(item.sale_price or 0) }}</td>
                             <td class="text-end col-number"><strong class="text-primary">{{ "{:,.0f}".format((item.quantity or 0) * (item.sale_price or 0)) }}</strong></td>
                             {% endif %}
                         </tr>
                         {% else %}
-                        <tr><td colspan="{% if doc.status == 'draft' %}9{% else %}8{% endif %}" class="text-muted text-center py-4">Hozircha qatorlar yo'q.</td></tr>
+                        <tr><td colspan="{% if doc.status == 'draft' %}{{ 9 if show_tannarx else 7 }}{% else %}{{ 8 if show_tannarx else 6 }}{% endif %}" class="text-muted text-center py-4">Hozircha qatorlar yo'q.</td></tr>
                         {% endfor %}
                         {% if doc.items %}
                         <tr class="table-info fw-bold table-compact hujjat-jami-row">
                             <td colspan="3" class="text-end py-1">JAMI:</td>
                             <td class="text-end py-1 col-number">{{ "{:,.3f}".format(doc.items|sum(attribute='quantity')) }}</td>
-                            <td class="py-1"></td>
+                            {% if show_tannarx %}<td class="py-1"></td>
                             <td class="text-end py-1 col-number">{{ "{:,.0f}".format(doc.total_tannarx or 0) }}</td>
-                            <td class="py-1"></td>
+                            <td class="py-1"></td>{% endif %}
                             <td class="text-end py-1 col-number">{{ "{:,.0f}".format(doc.total_sotuv or 0) }}</td>
                             {% if doc.status == 'draft' %}<td class="py-1"></td>{% endif %}
                         </tr>
@@ -174,10 +180,14 @@
                     <label class="form-label small">Soni *</label>
                     <input type="number" name="quantity" class="form-control form-control-sm" step="0.01" min="0.01" required placeholder="0">
                 </div>
+                {% if show_tannarx %}
                 <div class="col-md-1">
                     <label class="form-label small">Tannarx</label>
                     <input type="number" name="cost_price" class="form-control form-control-sm" step="0.01" min="0" value="" placeholder="0">
                 </div>
+                {% else %}
+                <input type="hidden" name="cost_price" value="0">
+                {% endif %}
                 <div class="col-md-1">
                     <label class="form-label small">Sotuv narx</label>
                     <input type="number" name="sale_price" class="form-control form-control-sm" step="0.01" min="0" value="" placeholder="0">
@@ -204,7 +214,7 @@
                                 <th>Tovar *</th>
                                 <th>O'mbor *</th>
                                 <th>Soni *</th>
-                                <th>Tannarx (so'm)</th>
+                                {% if show_tannarx %}<th>Tannarx (so'm)</th>{% endif %}
                                 <th>Sotuv narx (so'm)</th>
                                 <th style="width:50px;"></th>
                             </tr>
@@ -226,7 +236,7 @@
                                     </select>
                                 </td>
                                 <td><input type="number" name="quantity" class="form-control form-control-sm" step="0.01" min="0" placeholder="0"></td>
-                                <td><input type="number" name="cost_price" class="form-control form-control-sm" step="0.01" min="0" value="" placeholder="0"></td>
+                                {% if show_tannarx %}<td><input type="number" name="cost_price" class="form-control form-control-sm" step="0.01" min="0" value="" placeholder="0"></td>{% else %}<td style="display:none"><input type="hidden" name="cost_price" value="0"></td>{% endif %}
                                 <td><input type="number" name="sale_price" class="form-control form-control-sm" step="0.01" min="0" value="" placeholder="0"></td>
                                 <td><button type="button" class="btn btn-sm btn-outline-danger remove-row"><i class="bi bi-trash"></i></button></td>
                             </tr>

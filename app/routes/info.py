@@ -4,7 +4,7 @@ bo'limlar, yo'nalishlar, foydalanuvchilar, lavozimlar, hududlar, uskunalar.
 """
 import io
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from fastapi import APIRouter, Request, Depends, Form, File, HTTPException, UploadFile, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session, joinedload
@@ -494,6 +494,9 @@ async def info_price_types_delete(
 async def info_prices(
     request: Request,
     price_type_id: Optional[int] = None,
+    search: Optional[str] = None,
+    type_filter: Optional[str] = None,
+    price_status: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
@@ -510,6 +513,9 @@ async def info_prices(
             "product_tannarx": {},
             "current_user": current_user,
             "page_title": "Narxni o'rnatish",
+            "filter_search": "",
+            "filter_type": "",
+            "filter_price_status": "all",
         })
     current_pt_id = price_type_id or (price_types[0].id if price_types else None)
     products = db.query(Product).options(joinedload(Product.unit)).filter(
@@ -518,6 +524,29 @@ async def info_prices(
     product_prices = db.query(ProductPrice).filter(ProductPrice.price_type_id == current_pt_id).all()
     product_prices_by_type = {pp.product_id: pp.sale_price for pp in product_prices}
     product_tannarx = {p.id: float(p.purchase_price or 0) for p in products}
+
+    # Filtrlar: mahsulot nomi, turi, sotuv narxi holati
+    search_q = (search or "").strip().lower()
+    type_filter_val = (type_filter or "").strip() or None
+    price_status_val = (price_status or "all").strip() or "all"
+    if search_q or type_filter_val or price_status_val != "all":
+        filtered_products = []
+        for p in products:
+            if search_q and search_q not in (p.name or "").lower() and search_q not in (p.barcode or "").lower():
+                continue
+            if type_filter_val and (getattr(p, "type", None) or "") != type_filter_val:
+                continue
+            sale_val = product_prices_by_type.get(p.id)
+            if sale_val is None:
+                sale_val = getattr(p, "sale_price", None)
+            has_sale_price = sale_val is not None and float(sale_val or 0) > 0
+            if price_status_val == "set" and not has_sale_price:
+                continue
+            if price_status_val == "not_set" and has_sale_price:
+                continue
+            filtered_products.append(p)
+        products = filtered_products
+
     return templates.TemplateResponse("info/prices.html", {
         "request": request,
         "products": products,
@@ -527,6 +556,9 @@ async def info_prices(
         "product_tannarx": product_tannarx,
         "current_user": current_user,
         "page_title": "Narxni o'rnatish",
+        "filter_search": search or "",
+        "filter_type": type_filter or "",
+        "filter_price_status": price_status_val,
     })
 
 
@@ -551,6 +583,9 @@ async def info_prices_edit(
     purchase_price: float = Form(0),
     sale_price: float = Form(0),
     price_type_id: Optional[int] = Form(None),
+    redirect_search: Optional[str] = Form(None),
+    redirect_type_filter: Optional[str] = Form(None),
+    redirect_price_status: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
@@ -587,7 +622,17 @@ async def info_prices_edit(
         changed_by_id=current_user.id,
     ))
     db.commit()
-    redirect_url = f"/info/prices?price_type_id={price_type_id}" if price_type_id else "/info/prices"
+    # Saqlashdan keyin filtrlarni saqlab qolish (faqat "Filtrni tozalash" bosilganda tozalash)
+    params = {}
+    if price_type_id is not None:
+        params["price_type_id"] = price_type_id
+    if redirect_search and str(redirect_search).strip():
+        params["search"] = redirect_search.strip()
+    if redirect_type_filter and str(redirect_type_filter).strip():
+        params["type_filter"] = redirect_type_filter.strip()
+    if redirect_price_status and str(redirect_price_status).strip() and redirect_price_status != "all":
+        params["price_status"] = redirect_price_status.strip()
+    redirect_url = "/info/prices" + ("?" + urlencode(params) if params else "")
     return RedirectResponse(url=redirect_url, status_code=303)
 
 
@@ -632,6 +677,7 @@ async def info_prices_history(
         "products": products,
         "current_user": current_user,
         "page_title": "Narx o'zgarishlari tarixi",
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) == "admin",
     })
 
 

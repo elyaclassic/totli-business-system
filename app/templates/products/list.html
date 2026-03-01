@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role in ('admin', 'rahbar', 'raxbar')) %}
+{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role == 'admin') %}
 {% if import_ok == '1' %}
     <div class="alert alert-success alert-dismissible fade show" role="alert">
     <strong>Import muvaffaqiyatli.</strong>

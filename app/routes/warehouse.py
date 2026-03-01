@@ -141,7 +141,7 @@ async def warehouse_list(
         "purchase_docs": purchase_docs,
         "current_user": current_user,
         "page_title": "Ombor qoldiqlari",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) == "admin",
     })
 
 
@@ -362,7 +362,7 @@ async def warehouse_transfer_new(
         "stock_by_warehouse_product": stock_by_warehouse_product,
         "now": datetime.now(),
         "page_title": "Ombordan omborga o'tkazish (yaratish)",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) == "admin",
     })
 
 
@@ -398,7 +398,7 @@ async def warehouse_transfer_edit(
         "stock_by_warehouse_product": stock_by_warehouse_product,
         "now": transfer.date or datetime.now(),
         "page_title": f"O'tkazish {transfer.number}",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) == "admin",
     })
 
 

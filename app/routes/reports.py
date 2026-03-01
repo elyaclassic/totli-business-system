@@ -12,7 +12,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 
 from app.core import templates
-from app.models.database import get_db, Order, Stock, StockMovement, Product, Partner, Warehouse, User, Production, Recipe, StockAdjustmentDoc, StockAdjustmentDocItem, Employee, Purchase, WarehouseTransfer
+from app.models.database import get_db, Order, Stock, StockMovement, Product, Partner, Warehouse, User, Production, Recipe, StockAdjustmentDoc, StockAdjustmentDocItem, Employee, Purchase, WarehouseTransfer, Payment
 from app.deps import get_current_user, require_auth, require_admin
 from app.utils.user_scope import get_warehouses_for_user
 
@@ -25,7 +25,7 @@ def get_allowed_report_types(user: User) -> list:
         return []
     # Admin uchun barcha hisobotlar
     if user.role == "admin":
-        return ["sales", "stock", "debts", "production", "employees", "profit"]
+        return ["sales", "stock", "debts", "production", "employees", "profit", "partner_reconciliation"]
     # allowed_sections bo'sh yoki None bo'lsa, hech narsa ko'rsatilmaydi
     if not user.allowed_sections:
         return []
@@ -38,7 +38,7 @@ def get_allowed_report_types(user: User) -> list:
         for s in sections:
             if isinstance(s, str) and s.startswith("reports_"):
                 report_type = s.replace("reports_", "")
-                if report_type in ["sales", "stock", "debts", "production", "employees", "profit"]:
+                if report_type in ["sales", "stock", "debts", "production", "employees", "profit", "partner_reconciliation"]:
                     report_types.append(report_type)
         return report_types
     except (json.JSONDecodeError, TypeError, AttributeError):
@@ -206,7 +206,7 @@ async def report_stock(
         "today": datetime.now().strftime("%Y-%m-%d"),
         "page_title": "Qoldiq hisoboti",
         "current_user": current_user,
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) == "admin",
     })
 
 
@@ -838,4 +838,215 @@ async def report_debts_export(db: Session = Depends(get_db), current_user: User 
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=qarzdorlik_{datetime.now().strftime('%Y%m%d')}.xlsx"},
+    )
+
+
+def _build_partner_movements(db: Session, partner_id: int, date_from: datetime, date_to: datetime, period_only: bool):
+    """
+    Kontragent uchun harakatlar ro'yxati (1C uslubida).
+    period_only=True: faqat [date_from, date_to] oralig'idagi qatorlar.
+    Qaytadi: (rows, opening_debit, opening_credit) yoki period_only=True bo'lsa (rows, 0, 0).
+    Balans: Debit = kontragent bizga qarzdor (sotuv), Credit = to'lov/xarid/qaytarish.
+    """
+    partner = db.query(Partner).filter(Partner.id == partner_id).first()
+    if not partner:
+        return [], 0.0, 0.0
+    date_from_start = date_from.replace(hour=0, minute=0, second=0, microsecond=0)
+    date_to_end = date_to.replace(hour=23, minute=59, second=59, microsecond=999999)
+    rows = []
+
+    # Sotuvlar (debit) va qaytarishlar (credit)
+    q_orders = db.query(Order).filter(
+        Order.partner_id == partner_id,
+        Order.type.in_(["sale", "return_sale"]),
+    )
+    if period_only:
+        q_orders = q_orders.filter(Order.date >= date_from_start, Order.date <= date_to_end)
+    for o in q_orders.order_by(Order.date):
+        debit = float(o.total or 0) if o.type == "sale" else 0.0
+        credit = float(o.total or 0) if o.type == "return_sale" else 0.0
+        rows.append({
+            "date": o.date,
+            "doc_type": "Sotuv" if o.type == "sale" else "Qaytarish",
+            "doc_number": o.number or "",
+            "debit": debit,
+            "credit": credit,
+        })
+
+    # To'lovlar: income = credit (ular bizga to'ladı), expense = debit (biz ularga to'ladık)
+    q_payments = db.query(Payment).filter(Payment.partner_id == partner_id)
+    if period_only:
+        q_payments = q_payments.filter(Payment.date >= date_from_start, Payment.date <= date_to_end)
+    for p in q_payments.order_by(Payment.date):
+        if p.type == "income":
+            rows.append({
+                "date": p.date,
+                "doc_type": "To'lov (kirim)",
+                "doc_number": p.number or "",
+                "debit": 0.0,
+                "credit": float(p.amount or 0),
+            })
+        else:
+            rows.append({
+                "date": p.date,
+                "doc_type": "To'lov (chiqim)",
+                "doc_number": p.number or "",
+                "debit": float(p.amount or 0),
+                "credit": 0.0,
+            })
+
+    # Xaridlar (biz yetkazuvchiga qarzdormiz — credit)
+    q_purchases = db.query(Purchase).filter(Purchase.partner_id == partner_id)
+    if period_only:
+        q_purchases = q_purchases.filter(Purchase.date >= date_from_start, Purchase.date <= date_to_end)
+    for p in q_purchases.order_by(Purchase.date):
+        total_val = float((p.total or 0) + (p.total_expenses or 0))
+        rows.append({
+            "date": p.date,
+            "doc_type": "Xarid",
+            "doc_number": p.number or "",
+            "debit": 0.0,
+            "credit": total_val,
+        })
+
+    rows.sort(key=lambda r: r["date"])
+    opening_debit = 0.0
+    opening_credit = 0.0
+    if not period_only:
+        # Opening = barcha harakatlar perioddan oldin
+        for r in rows:
+            if r["date"] < date_from_start:
+                opening_debit += r["debit"]
+                opening_credit += r["credit"]
+        rows = [r for r in rows if date_from_start <= r["date"] <= date_to_end]
+    return rows, opening_debit, opening_credit
+
+
+@router.get("/partner-reconciliation", response_class=HTMLResponse)
+async def report_partner_reconciliation(
+    request: Request,
+    partner_id: int = None,
+    date_from: str = None,
+    date_to: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Kontragentlar hisob-kitobini solishtirish hisoboti (1C uslubida)."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    allowed = get_allowed_report_types(current_user)
+    if "partner_reconciliation" not in allowed:
+        return RedirectResponse(url="/reports", status_code=303)
+    partners = db.query(Partner).filter(Partner.is_active == True).order_by(Partner.name).all()
+    today = datetime.now()
+    if not date_from:
+        date_from = (today.replace(day=1)).strftime("%Y-%m-%d")
+    if not date_to:
+        date_to = today.strftime("%Y-%m-%d")
+    try:
+        dt_from = datetime.strptime(date_from, "%Y-%m-%d")
+        dt_to = datetime.strptime(date_to, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        dt_from = today.replace(day=1)
+        dt_to = today
+    rows = []
+    opening_debit = opening_credit = 0.0
+    total_debit = total_credit = 0.0
+    partner_obj = None
+    if partner_id:
+        partner_obj = db.query(Partner).filter(Partner.id == partner_id).first()
+        if partner_obj:
+            rows, opening_debit, opening_credit = _build_partner_movements(db, partner_id, dt_from, dt_to, period_only=False)
+            total_debit = sum(r["debit"] for r in rows)
+            total_credit = sum(r["credit"] for r in rows)
+    opening_balance = opening_debit - opening_credit
+    closing_balance = opening_balance + total_debit - total_credit
+    return templates.TemplateResponse("reports/partner_reconciliation.html", {
+        "request": request,
+        "partners": partners,
+        "partner_id": partner_id,
+        "partner": partner_obj,
+        "date_from": date_from,
+        "date_to": date_to,
+        "rows": rows,
+        "opening_balance": opening_balance,
+        "closing_balance": closing_balance,
+        "total_debit": total_debit,
+        "total_credit": total_credit,
+        "opening_debit": opening_debit,
+        "opening_credit": opening_credit,
+        "page_title": "Kontragentlar hisob-kitobini solishtirish",
+        "current_user": current_user,
+    })
+
+
+@router.get("/partner-reconciliation/export")
+async def report_partner_reconciliation_export(
+    partner_id: int = None,
+    date_from: str = None,
+    date_to: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Kontragent solishtirish hisobotini Excelga eksport."""
+    if not current_user:
+        return RedirectResponse(url="/reports", status_code=303)
+    if not partner_id:
+        return RedirectResponse(url="/reports/partner-reconciliation?error=partner", status_code=303)
+    partner = db.query(Partner).filter(Partner.id == partner_id).first()
+    if not partner:
+        return RedirectResponse(url="/reports/partner-reconciliation", status_code=303)
+    today = datetime.now()
+    if not date_from:
+        date_from = (today.replace(day=1)).strftime("%Y-%m-%d")
+    if not date_to:
+        date_to = today.strftime("%Y-%m-%d")
+    try:
+        dt_from = datetime.strptime(date_from, "%Y-%m-%d")
+        dt_to = datetime.strptime(date_to, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        dt_from = today.replace(day=1)
+        dt_to = today
+    rows, opening_debit, opening_credit = _build_partner_movements(db, partner_id, dt_from, dt_to, period_only=False)
+    total_debit = sum(r["debit"] for r in rows)
+    total_credit = sum(r["credit"] for r in rows)
+    opening_balance = opening_debit - opening_credit
+    closing_balance = opening_balance + total_debit - total_credit
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Solishtirish"
+    ws["A1"] = "Kontragentlar hisob-kitobini solishtirish"
+    ws["A1"].font = Font(bold=True, size=14)
+    ws["A2"] = partner.name or ""
+    ws["A3"] = f"Davr: {date_from} — {date_to}"
+    ws.append([])
+    headers = ["Sana", "Hujjat turi", "Hujjat raqami", "Debet", "Kredit"]
+    for c, h in enumerate(headers, 1):
+        cell = ws.cell(row=6, column=c, value=h)
+        cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        cell.font = Font(bold=True, color="FFFFFF")
+    for i, r in enumerate(rows, 7):
+        ws.cell(row=i, column=1, value=r["date"].strftime("%d.%m.%Y %H:%M") if r["date"] else "")
+        ws.cell(row=i, column=2, value=r["doc_type"])
+        ws.cell(row=i, column=3, value=r["doc_number"])
+        ws.cell(row=i, column=4, value=r["debit"])
+        ws.cell(row=i, column=5, value=r["credit"])
+    nr = 7 + len(rows)
+    ws.cell(row=nr, column=2, value="Jami davr:")
+    ws.cell(row=nr, column=4, value=total_debit)
+    ws.cell(row=nr, column=5, value=total_credit)
+    ws.cell(row=nr + 1, column=2, value="Davomiy qoldiq (oldingi):")
+    ws.cell(row=nr + 1, column=4, value=opening_debit)
+    ws.cell(row=nr + 1, column=5, value=opening_credit)
+    ws.cell(row=nr + 2, column=2, value="Yakuniy qoldiq:")
+    ws.cell(row=nr + 2, column=4, value=closing_balance if closing_balance > 0 else "")
+    ws.cell(row=nr + 2, column=5, value=-closing_balance if closing_balance < 0 else "")
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"kontragent_solishtirish_{partner.id}_{date_from}_{date_to}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )

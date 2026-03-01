@@ -76,7 +76,7 @@
                     </select>
                 </div>
                 <p class="text-muted small mb-2" id="sales_warehouse_hint">Omborni tanlang — shu ombordagi tovarlar ro'yxatda ko'rsatiladi. Tovarga bosib savatga qo'shing. Mahsulot qayerdan keldi? <a href="/qoldiqlar/tarix" target="_blank">Harakat tarixi</a> da ombor va mahsulotni tanlab barcha kirim/chiqim hujjatlarini ko'ring.</p>
-                {% set show_tannarx = current_user and current_user.role in ('admin', 'raxbar') %}
+                {% set show_tannarx = current_user and current_user.role == 'admin' %}
                 <div class="row g-3" id="sales_product_cards" style="display: none;">
                     {% for product in products %}
                     {% set _pt = product_prices_by_type.get(product.id) if product_prices_by_type is defined else none %}

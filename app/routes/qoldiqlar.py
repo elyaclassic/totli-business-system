@@ -76,7 +76,7 @@ async def qoldiqlar_page(
         "kontragent_docs": kontragent_docs,
         "current_user": current_user,
         "page_title": "Qoldiqlar",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) == "admin",
     })
 
 
@@ -492,7 +492,7 @@ async def qoldiqlar_tovar_hujjat_list(
         "docs": docs,
         "current_user": current_user,
         "page_title": "Tovar qoldiqlari hujjatlari",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) == "admin",
     })
 
 
@@ -512,7 +512,7 @@ async def qoldiqlar_tovar_hujjat_new(
         "products": products,
         "current_user": current_user,
         "page_title": "Tovar qoldiqlari — yangi hujjat",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) == "admin",
     })
 
 
@@ -706,7 +706,7 @@ async def qoldiqlar_tovar_hujjat_view(
         "products": products,
         "current_user": current_user,
         "page_title": f"Tovar qoldiqlari {doc.number}",
-        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) in ("admin", "rahbar", "raxbar"),
+        "show_tannarx": (getattr(current_user, "role", None) if current_user else None) == "admin",
     })
 
 

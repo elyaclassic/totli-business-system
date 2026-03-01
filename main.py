@@ -6,8 +6,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response, StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, or_, and_
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, or_, and_, text
+from sqlalchemy.exc import IntegrityError, OperationalError
 from datetime import datetime, timedelta, date
 import uvicorn
 import base64
@@ -1966,6 +1966,9 @@ async def info_price_types_delete(price_type_id: int, db: Session = Depends(get_
 async def info_prices(
     request: Request,
     price_type_id: Optional[int] = None,
+    search: Optional[str] = None,
+    type_filter: Optional[str] = None,
+    price_status: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth)
 ):
@@ -1982,7 +1985,10 @@ async def info_prices(
             "product_prices_by_type": {},
             "product_tannarx": {},
             "current_user": current_user,
-            "page_title": "Narxni o'rnatish"
+            "page_title": "Narxni o'rnatish",
+            "filter_search": "",
+            "filter_type": "",
+            "filter_price_status": "all",
         })
     current_pt_id = price_type_id or (price_types[0].id if price_types else None)
     products = db.query(Product).options(joinedload(Product.unit)).filter(
@@ -2039,6 +2045,28 @@ async def info_prices(
     except Exception:
         db.rollback()
 
+    # Filtrlar: mahsulot nomi, turi, sotuv narxi holati
+    search_q = (search or "").strip().lower()
+    type_filter_val = (type_filter or "").strip() or None
+    price_status_val = (price_status or "all").strip() or "all"
+    if search_q or type_filter_val or price_status_val != "all":
+        filtered_products = []
+        for p in products:
+            if search_q and search_q not in (p.name or "").lower() and search_q not in (p.barcode or "").lower():
+                continue
+            if type_filter_val and (p.type or "") != type_filter_val:
+                continue
+            sale_val = product_prices_by_type.get(p.id)
+            if sale_val is None:
+                sale_val = getattr(p, "sale_price", None)
+            has_sale_price = sale_val is not None and float(sale_val or 0) > 0
+            if price_status_val == "set" and not has_sale_price:
+                continue
+            if price_status_val == "not_set" and has_sale_price:
+                continue
+            filtered_products.append(p)
+        products = filtered_products
+
     return templates.TemplateResponse("info/prices.html", {
         "request": request,
         "products": products,
@@ -2047,7 +2075,10 @@ async def info_prices(
         "product_prices_by_type": product_prices_by_type,
         "product_tannarx": product_tannarx,
         "current_user": current_user,
-        "page_title": "Narxni o'rnatish"
+        "page_title": "Narxni o'rnatish",
+        "filter_search": search or "",
+        "filter_type": type_filter or "",
+        "filter_price_status": price_status_val,
     })
 
 
@@ -7014,38 +7045,243 @@ async def sales_return_confirm(
 # MOLIYA
 # ==========================================
 
+def _ensure_payments_status_column(db: Session) -> None:
+    """Agar payments jadvalida status ustuni bo'lmasa, qo'shadi (xato bo'lmasin)."""
+    try:
+        db.execute(text("ALTER TABLE payments ADD COLUMN status VARCHAR(20) DEFAULT 'confirmed'"))
+        db.commit()
+    except OperationalError as e:
+        db.rollback()
+        if "duplicate column" not in str(e).lower():
+            raise
+    except Exception:
+        db.rollback()
+
+
 @app.get("/finance", response_class=HTMLResponse)
 async def finance(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
     """Moliya - kassa"""
+    _ensure_payments_status_column(db)
     cash_registers = db.query(CashRegister).all()
-    
-    # So'nggi to'lovlar
-    payments = db.query(Payment).order_by(Payment.date.desc()).limit(50).all()
-    
-    # Bugungi statistika
+    partners = db.query(Partner).filter(Partner.is_active == True).order_by(Partner.name).all()
+    # So'nggi to'lovlar (kontragent bilan hisob-kitob uchun joinedload)
+    payments = (
+        db.query(Payment)
+        .options(joinedload(Payment.partner))
+        .order_by(Payment.date.desc())
+        .limit(50)
+        .all()
+    )
+    # Bugungi statistika — faqat tasdiqlangan to'lovlar
     today = datetime.now().date()
-    today_income = db.query(Payment).filter(
-        Payment.type == "income",
-        Payment.date >= today
-    ).all()
-    today_expense = db.query(Payment).filter(
-        Payment.type == "expense",
-        Payment.date >= today
-    ).all()
-    
+    try:
+        _status_ok = or_(Payment.status == "confirmed", Payment.status == None)
+        today_income = db.query(Payment).filter(
+            Payment.type == "income",
+            Payment.date >= today,
+            _status_ok
+        ).all()
+        today_expense = db.query(Payment).filter(
+            Payment.type == "expense",
+            Payment.date >= today,
+            _status_ok
+        ).all()
+    except OperationalError:
+        today_income = db.query(Payment).filter(Payment.type == "income", Payment.date >= today).all()
+        today_expense = db.query(Payment).filter(Payment.type == "expense", Payment.date >= today).all()
     stats = {
         "today_income": sum(p.amount for p in today_income),
         "today_expense": sum(p.amount for p in today_expense),
     }
-    
     return templates.TemplateResponse("finance/index.html", {
         "request": request,
         "cash_registers": cash_registers,
+        "partners": partners,
         "payments": payments,
         "stats": stats,
         "current_user": current_user,
         "page_title": "Moliya"
     })
+
+
+@app.post("/finance/payment")
+async def finance_payment_post(
+    request: Request,
+    type: str = Form(...),
+    amount: float = Form(...),
+    cash_register_id: int = Form(...),
+    partner_id: Optional[int] = Form(None),
+    description: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Kassa kirim/chiqim kiritish (Moliya sahifasidagi «To'lov kiritish» formasi). Kontragent — kimga/kimdan (hisob-kitob uchun)."""
+    _ensure_payments_status_column(db)
+    if type not in ("income", "expense"):
+        return RedirectResponse(url="/finance?error=type", status_code=303)
+    cash = db.query(CashRegister).filter(CashRegister.id == cash_register_id).first()
+    if not cash:
+        return RedirectResponse(url="/finance?error=cash", status_code=303)
+    amount = float(amount)
+    if amount <= 0:
+        return RedirectResponse(url="/finance?error=amount", status_code=303)
+    pid = None
+    if partner_id is not None and int(partner_id) > 0:
+        p = db.query(Partner).filter(Partner.id == int(partner_id)).first()
+        if p:
+            pid = p.id
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    pay_count = db.query(Payment).filter(Payment.created_at >= today_start).count()
+    pay_number = f"PAY-{datetime.now().strftime('%Y%m%d')}-{pay_count + 1:04d}"
+    desc = (description or "").strip() or ("Kirim" if type == "income" else "Chiqim")
+    db.add(Payment(
+        number=pay_number,
+        type=type,
+        cash_register_id=cash_register_id,
+        partner_id=pid,
+        order_id=None,
+        amount=amount,
+        payment_type="cash",
+        category="other",
+        description=desc,
+        user_id=current_user.id if current_user else None,
+        status="confirmed",
+    ))
+    cash.balance = (cash.balance or 0) + (amount if type == "income" else -amount)
+    db.commit()
+    return RedirectResponse(url="/finance?success=1", status_code=303)
+
+
+def _payment_apply_balance(db: Session, payment: Payment, sign: int):
+    """payment ga muvofiq kassa balansini o'zgartirish. sign=1 kirim, sign=-1 chiqim."""
+    cash = db.query(CashRegister).filter(CashRegister.id == payment.cash_register_id).first()
+    if cash and payment.amount:
+        delta = (payment.amount or 0) * sign * (1 if payment.type == "income" else -1)
+        cash.balance = (cash.balance or 0) + delta
+
+
+@app.post("/finance/payment/{payment_id}/confirm")
+async def finance_payment_confirm(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """To'lovni tasdiqlash — bekor qilingan bo'lsa kassaga qayta hisoblaydi."""
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="To'lov topilmadi")
+    status = getattr(payment, "status", "confirmed")
+    if status == "confirmed":
+        return RedirectResponse(url="/finance?msg=already_confirmed", status_code=303)
+    payment.status = "confirmed"
+    _payment_apply_balance(db, payment, 1)
+    db.commit()
+    return RedirectResponse(url="/finance?success=confirmed", status_code=303)
+
+
+@app.post("/finance/payment/{payment_id}/cancel")
+async def finance_payment_cancel(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Tasdiqni bekor qilish — kassa balansidan chiqaradi, hujjat bekor qilingan bo'ladi."""
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="To'lov topilmadi")
+    status = getattr(payment, "status", "confirmed")
+    if status == "cancelled":
+        return RedirectResponse(url="/finance?msg=already_cancelled", status_code=303)
+    payment.status = "cancelled"
+    _payment_apply_balance(db, payment, -1)
+    db.commit()
+    return RedirectResponse(url="/finance?success=cancelled", status_code=303)
+
+
+@app.get("/finance/payment/{payment_id}/edit", response_class=HTMLResponse)
+async def finance_payment_edit_page(
+    payment_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """To'lovni tahrirlash sahifasi (admin)."""
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="To'lov topilmadi")
+    partners = db.query(Partner).filter(Partner.is_active == True).order_by(Partner.name).all()
+    cash_registers = db.query(CashRegister).filter(CashRegister.is_active == True).all()
+    return templates.TemplateResponse("finance/payment_edit.html", {
+        "request": request,
+        "payment": payment,
+        "partners": partners,
+        "cash_registers": cash_registers,
+        "current_user": current_user,
+        "page_title": "To'lovni tahrirlash",
+    })
+
+
+@app.post("/finance/payment/{payment_id}/edit")
+async def finance_payment_edit_post(
+    payment_id: int,
+    type: str = Form(...),
+    amount: float = Form(...),
+    cash_register_id: int = Form(...),
+    partner_id: Optional[int] = Form(None),
+    description: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """To'lovni saqlash (admin). Eski balansni bekor qilib yangi qiymatni qo'llaydi."""
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="To'lov topilmadi")
+    if type not in ("income", "expense"):
+        return RedirectResponse(url=f"/finance/payment/{payment_id}/edit?error=type", status_code=303)
+    amount = float(amount)
+    if amount <= 0:
+        return RedirectResponse(url=f"/finance/payment/{payment_id}/edit?error=amount", status_code=303)
+    cash_new = db.query(CashRegister).filter(CashRegister.id == cash_register_id).first()
+    if not cash_new:
+        return RedirectResponse(url=f"/finance/payment/{payment_id}/edit?error=cash", status_code=303)
+    pid = None
+    if partner_id is not None and int(partner_id) > 0:
+        p = db.query(Partner).filter(Partner.id == int(partner_id)).first()
+        if p:
+            pid = p.id
+    status = getattr(payment, "status", "confirmed")
+    # Eski balansni ortga qaytarish (agar tasdiqlangan bo'lsa)
+    if status == "confirmed":
+        _payment_apply_balance(db, payment, -1)
+    # Yangi qiymatlar
+    payment.type = type
+    payment.amount = amount
+    payment.cash_register_id = cash_register_id
+    payment.partner_id = pid
+    payment.description = (description or "").strip() or ("Kirim" if type == "income" else "Chiqim")
+    # Yangi balansni qo'llash (agar tasdiqlangan bo'lsa)
+    if status == "confirmed":
+        _payment_apply_balance(db, payment, 1)
+    db.commit()
+    return RedirectResponse(url="/finance?success=edited", status_code=303)
+
+
+@app.post("/finance/payment/{payment_id}/delete")
+async def finance_payment_delete(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """To'lovni o'chirish (admin). Tasdiqlangan bo'lsa kassa balansini qaytaradi."""
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="To'lov topilmadi")
+    status = getattr(payment, "status", "confirmed")
+    if status == "confirmed":
+        _payment_apply_balance(db, payment, -1)
+    db.delete(payment)
+    db.commit()
+    return RedirectResponse(url="/finance?success=deleted", status_code=303)
 
 
 # ==========================================

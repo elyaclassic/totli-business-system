@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role == 'admin') %}
 <div class="container-fluid">
     <div class="row mb-3">
         <div class="col-12">
@@ -53,8 +54,7 @@
                             <th>Sana / vaqt</th>
                             <th>Mahsulot</th>
                             <th>Narx turi</th>
-                            <th class="text-end">Avvalgi tannarx</th>
-                            <th class="text-end">Yangi tannarx</th>
+                            {% if show_tannarx %}<th class="text-end">Avvalgi tannarx</th><th class="text-end">Yangi tannarx</th>{% endif %}
                             <th class="text-end">Avvalgi sotuv narxi</th>
                             <th class="text-end">Yangi sotuv narxi</th>
                             <th>Kim tomonidan</th>
@@ -67,15 +67,14 @@
                             <td>{{ h.changed_at.strftime('%d.%m.%Y %H:%M') if h.changed_at else '—' }}</td>
                             <td>{{ h.product.name if h.product else '—' }}</td>
                             <td>{{ h.price_type.name if h.price_type else 'Umumiy' }}</td>
-                            <td class="text-end">{{ "{:,.2f}".format(h.old_purchase_price or 0) }}</td>
-                            <td class="text-end">{{ "{:,.2f}".format(h.new_purchase_price or 0) }}</td>
+                            {% if show_tannarx %}<td class="text-end">{{ "{:,.2f}".format(h.old_purchase_price or 0) }}</td><td class="text-end">{{ "{:,.2f}".format(h.new_purchase_price or 0) }}</td>{% endif %}
                             <td class="text-end">{{ "{:,.0f}".format(h.old_sale_price or 0) }}</td>
                             <td class="text-end fw-bold">{{ "{:,.0f}".format(h.new_sale_price or 0) }}</td>
                             <td>{{ h.changed_by.full_name or h.changed_by.username if h.changed_by else '—' }}</td>
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="9" class="text-center text-muted py-5">
+                            <td colspan="{{ 9 if show_tannarx else 7 }}" class="text-center text-muted py-5">
                                 <i class="bi bi-inbox fs-1 d-block mb-2"></i>
                                 Narx o'zgarishlari bo'yicha hujjatlar yo'q. <a href="/info/prices">Narxni o'rnatish</a> sahifasida narx saqlaganingizda shu yerda paydo bo'ladi.
                             </td>

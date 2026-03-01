@@ -1,6 +1,17 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% if request.query_params.get('success') == 'confirmed' %}
+<div class="alert alert-success"><i class="bi bi-check-circle"></i> To'lov tasdiqlandi.</div>
+{% elif request.query_params.get('success') == 'cancelled' %}
+<div class="alert alert-info"><i class="bi bi-info-circle"></i> Tasdiq bekor qilindi.</div>
+{% elif request.query_params.get('success') == 'edited' %}
+<div class="alert alert-success"><i class="bi bi-check-circle"></i> To'lov saqlandi.</div>
+{% elif request.query_params.get('success') == 'deleted' %}
+<div class="alert alert-success"><i class="bi bi-check-circle"></i> To'lov o'chirildi.</div>
+{% elif request.query_params.get('success') == '1' %}
+<div class="alert alert-success"><i class="bi bi-check-circle"></i> To'lov kiritildi.</div>
+{% endif %}
 <!-- Kassa statistikasi -->
 <div class="row g-4 mb-4">
     <div class="col-md-4">
@@ -92,7 +103,7 @@
                 <i class="bi bi-clock-history"></i> So'nggi to'lovlar
             </div>
             <div class="card-body p-0">
-                <table class="table table-hover">
+                <table class="table table-hover mb-0">
                     <thead class="table-light">
                         <tr>
                             <th width="50">#</th>
@@ -101,14 +112,19 @@
                             <th>Kontragent</th>
                             <th>Izoh</th>
                             <th>Summa</th>
+                            {% if current_user.role == 'admin' %}
+                            <th>Holat</th>
+                            <th width="200">Amallar</th>
+                            {% endif %}
                         </tr>
                     </thead>
                     <tbody>
                         {% if payments %}
                             {% for payment in payments %}
-                            <tr>
+                            {% set p_status = payment.status|default('confirmed', true) %}
+                            <tr class="{% if p_status == 'cancelled' %}table-secondary opacity-75{% endif %}">
                                 <td>{{ loop.index }}</td>
-                                <td>{{ payment.date.strftime('%d.%m.%Y %H:%M') }}</td>
+                                <td>{{ payment.date.strftime('%d.%m.%Y %H:%M') if payment.date else '-' }}</td>
                                 <td>
                                     {% if payment.type == 'income' %}
                                         <span class="badge bg-success">Kirim</span>
@@ -119,13 +135,37 @@
                                 <td>{{ payment.partner.name if payment.partner else '-' }}</td>
                                 <td>{{ payment.description or '-' }}</td>
                                 <td class="{% if payment.type == 'income' %}text-success{% else %}text-danger{% endif %} fw-bold">
-                                    {% if payment.type == 'income' %}+{% else %}-{% endif %}{{ "{:,.0f}".format(payment.amount) }}
+                                    {% if payment.type == 'income' %}+{% else %}-{% endif %}{{ "{:,.0f}".format(payment.amount or 0) }}
                                 </td>
+                                {% if current_user.role == 'admin' %}
+                                <td>
+                                    {% if p_status == 'cancelled' %}
+                                        <span class="badge bg-secondary">Bekor qilindi</span>
+                                    {% else %}
+                                        <span class="badge bg-success">Tasdiqlangan</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if p_status == 'cancelled' %}
+                                    <form method="post" action="/finance/payment/{{ payment.id }}/confirm" class="d-inline" onsubmit="return confirm('Tasdiqlash — kassa balansiga qayta hisoblanadi.');">
+                                        <button type="submit" class="btn btn-sm btn-success" title="Tasdiqlash"><i class="bi bi-check-circle"></i></button>
+                                    </form>
+                                    {% else %}
+                                    <form method="post" action="/finance/payment/{{ payment.id }}/cancel" class="d-inline" onsubmit="return confirm('Tasdiqni bekor qilish — kassa balansidan chiqariladi. Davom etasizmi?');">
+                                        <button type="submit" class="btn btn-sm btn-warning" title="Tasdiqni bekor qilish"><i class="bi bi-x-circle"></i></button>
+                                    </form>
+                                    {% endif %}
+                                    <a href="/finance/payment/{{ payment.id }}/edit" class="btn btn-sm btn-outline-primary" title="Tahrirlash"><i class="bi bi-pencil"></i></a>
+                                    <form method="post" action="/finance/payment/{{ payment.id }}/delete" class="d-inline" onsubmit="return confirm('Ushbu to\'lovni o\'chirmoqchimisiz? Kassa balansi yangilanadi.');">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="O'chirish"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                </td>
+                                {% endif %}
                             </tr>
                             {% endfor %}
                         {% else %}
                             <tr>
-                                <td colspan="6" class="text-center text-muted py-5">
+                                <td colspan="{% if current_user.role == 'admin' %}8{% else %}6{% endif %}" class="text-center text-muted py-5">
                                     <i class="bi bi-cash-stack fs-1 d-block mb-2"></i>
                                     Hozircha to'lovlar yo'q
                                 </td>
@@ -163,6 +203,16 @@
                             <input type="number" class="form-control form-control-lg" name="amount" required step="1000">
                         </div>
                         <div class="col-12">
+                            <label class="form-label">Kontragent</label>
+                            <select class="form-select" name="partner_id">
+                                <option value="">— Kimga / kimdan (ixtiyoriy) —</option>
+                                {% for p in partners or [] %}
+                                <option value="{{ p.id }}">{{ p.name }}{% if p.code %} ({{ p.code }}){% endif %}</option>
+                                {% endfor %}
+                            </select>
+                            <small class="text-muted">Chiqim qaysi kontragentga yoki kirim qaysi kontragentdan — hisob-kitob va solishtirish uchun.</small>
+                        </div>
+                        <div class="col-12">
                             <label class="form-label">Kassa</label>
                             <select class="form-select" name="cash_register_id">
                                 {% for cash in cash_registers %}
@@ -172,7 +222,7 @@
                         </div>
                         <div class="col-12">
                             <label class="form-label">Izoh</label>
-                            <textarea class="form-control" name="description" rows="2"></textarea>
+                            <textarea class="form-control" name="description" rows="2" placeholder="Masalan: xarid to'lovi, ofis xarajati"></textarea>
                         </div>
                     </div>
                 </div>

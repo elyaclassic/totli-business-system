@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role in ('admin', 'raxbar')) %}
+{% set show_tannarx = show_tannarx if show_tannarx is defined else (current_user and current_user.role == 'admin') %}
 <div class="pos-premium">
 <!-- To'liq ekran taklifi (sahifa ochilganda bir marta ko'rsatiladi) -->
 <div id="posFullscreenPrompt" class="pos-fullscreen-prompt" style="display: none;">
@@ -160,7 +160,9 @@
                         {% if products %}
                         <div class="row g-3" id="posProductGrid">
                             {% for product in products %}
-                            {% set display_price = (product_prices.get(product.id) if product_prices else none) or (product.sale_price or (product.purchase_price if show_tannarx else 0) or 0) %}
+                            {% set sale_price_val = (product_prices.get(product.id) if product_prices else none) or product.sale_price or 0 %}
+                            {% set has_sale_price = (sale_price_val or 0)|float > 0 %}
+                            {% set display_price = (sale_price_val if has_sale_price else (product.purchase_price if show_tannarx else 0) or 0) %}
                             {% set stock_qty = stock_by_product.get(product.id) if stock_by_product is defined else None %}
                             <div class="col-6 col-md-4 col-lg-3 pos-product-item" data-product-id="{{ product.id }}" data-name="{{ (product.name or '')|lower }}" data-barcode="{{ (product.barcode or '')|lower }}" data-category-id="{{ product.category_id or '' }}">
                                 <div class="card h-100 pos-product-card" style="cursor: pointer;" data-product-id="{{ product.id }}" data-name="{{ product.name|e }}" data-price="{{ display_price }}" data-barcode="{{ product.barcode or '' }}" data-stock="{{ stock_qty if stock_qty is not none else 0 }}">
@@ -174,9 +176,16 @@
                                         </div>
                                         <h6 class="pos-product-name mb-1 text-truncate" title="{{ product.name }}">{{ product.name }}</h6>
                                         <p class="pos-product-price mb-0 mt-auto">
-                                            <span class="fw-bold">{{ "{:,.0f}".format(display_price) }}</span>
+                                            {% if has_sale_price %}
+                                            <span class="fw-bold">{{ "{:,.0f}".format(sale_price_val) }}</span>
                                             <small class="text-muted">so'm</small>
+                                            {% else %}
+                                            <span class="text-muted small">Narx o'rnatilmagan</span>
+                                            {% endif %}
                                         </p>
+                                        {% if show_tannarx and (product.purchase_price or 0) > 0 %}
+                                        <p class="mb-0 mt-0 small text-muted">Tannarx: {{ "{:,.0f}".format(product.purchase_price or 0) }} so'm</p>
+                                        {% endif %}
                                         {% if stock_by_product is defined and stock_qty is not none %}
                                         {% set _uc = (product.unit.code or '')|lower if product.unit else '' %}
                                         {% set _is_dona = _uc in ['dona', 'pc', 'pcs', 'ta', 'шт'] %}

@@ -759,6 +759,7 @@ class Payment(Base):
     category = Column(String(50))  # sale, purchase, salary, rent, other
     description = Column(Text)
     user_id = Column(Integer, ForeignKey("users.id"))
+    status = Column(String(20), default="confirmed")  # confirmed, cancelled — admin tasdiqlash/bekor qilish
     created_at = Column(DateTime, default=datetime.now)
     
     partner = relationship("Partner", back_populates="payments")
