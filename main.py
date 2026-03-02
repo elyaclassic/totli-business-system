@@ -8760,10 +8760,19 @@ async def production_orders(
             .order_by(Production.date.desc())
         )
         if role in ("admin", "rahbar", "raxbar"):
-            # Admin/rahbar/raxbar: operator tanlangan bo'lsa shu operator, aks holda barcha buyurtmalar
+            # Admin/rahbar/raxbar: operator tanlangan bo'lsa — operator_id yoki shu xodimga bog'langan user orqali kiritilgan buyurtmalar
             if operator_id and operator_id > 0:
-                qry = qry.filter(Production.operator_id == operator_id)
-            # operator tanlanmagan: filterni qo'shamiz — barcha buyurtmalar ko'rinadi
+                emp = db.query(Employee).filter(Employee.id == operator_id).first()
+                if emp and getattr(emp, "user_id", None):
+                    qry = qry.filter(
+                        or_(
+                            Production.operator_id == operator_id,
+                            Production.user_id == emp.user_id,
+                        )
+                    )
+                else:
+                    qry = qry.filter(Production.operator_id == operator_id)
+            # operator tanlanmagan: barcha buyurtmalar ko'rinadi
         else:
             qry = qry.filter(Production.user_id == current_user.id)
 
@@ -8900,6 +8909,14 @@ async def production_by_operator(
     productions = list(seen.values())
     productions.sort(key=lambda x: (x.date or datetime.min), reverse=True)
 
+    # User_id -> employee_id: user orqali ism ko'rinadigan operatorlarni ham link qilish uchun
+    user_ids_from_productions = {p.user_id for p in productions if p.user_id and not p.operator_id}
+    user_to_employee = {}
+    if user_ids_from_productions:
+        for emp in db.query(Employee).filter(Employee.user_id.in_(user_ids_from_productions)).all():
+            if emp.user_id:
+                user_to_employee[emp.user_id] = emp.id
+
     # Operator bo'yicha jami (kg) — har bir buyurtma faqat bir marta, qiyom hisobga olinmaydi
     totals_by_name = defaultdict(float)
     name_to_employee_id = {}
@@ -8914,6 +8931,11 @@ async def production_by_operator(
                 name_to_employee_id[op_name] = p.operator_id
         elif p.user:
             op_name = getattr(p.user, "full_name", None) or str(p.user_id)
+            # User orqali ko'rinadigan ism uchun ham employee_id topilsa link qilamiz
+            if p.user_id and op_name != "—":
+                emp_id = user_to_employee.get(p.user_id)
+                if emp_id:
+                    name_to_employee_id[op_name] = emp_id
         kg = (p.quantity or 0) * _kg_per_unit_from_recipe(p.recipe)
         totals_by_name[op_name] += kg
     operator_totals = sorted(totals_by_name.items(), key=lambda x: -x[1])
@@ -8924,6 +8946,7 @@ async def production_by_operator(
         "productions": productions,
         "operator_totals": operator_totals,
         "name_to_employee_id": name_to_employee_id,
+        "user_to_employee": user_to_employee,
         "filter_date_from": (date_from or "").strip()[:10],
         "filter_date_to": (date_to or "").strip()[:10],
         "page_title": "Operator bo'yicha ishlab chiqarish",

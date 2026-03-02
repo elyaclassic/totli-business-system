@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core import templates
 from app.models.database import (
     get_db, User, Product, Partner, Order, Stock,
-    CashRegister, Employee,
+    CashRegister, Employee, Production,
 )
 from app.deps import get_current_user, require_auth
 
@@ -58,8 +58,11 @@ async def home(
         today_sales = db.query(Order).filter(Order.type == "sale", Order.date >= today_start).all()
         stats["today_sales"] = sum(s.total for s in today_sales)
         stats["today_orders"] = len(today_sales)
-        cash = db.query(CashRegister).first()
-        stats["cash_balance"] = cash.balance if cash else 0
+        today_productions = db.query(Production).filter(
+            Production.date >= today_start,
+            Production.status == "completed",
+        ).all()
+        stats["today_production"] = sum(p.quantity for p in today_productions if p.quantity)
         debtors = db.query(Partner).filter(Partner.balance > 0).all()
         stats["total_debt"] = sum(p.balance for p in debtors)
         recent_sales = (
@@ -92,7 +95,7 @@ async def home(
         stats = {
             "tayyor_count": 0, "yarim_tayyor_count": 0, "hom_ashyo_count": 0,
             "partners_count": 0, "employees_count": 0, "products_count": 0, "materials_count": 0,
-            "today_sales": 0, "today_orders": 0, "cash_balance": 0, "total_debt": 0,
+            "today_sales": 0, "today_orders": 0, "total_debt": 0, "today_production": 0,
         }
         recent_sales = []
         low_stock_count = 0

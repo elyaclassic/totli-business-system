@@ -75,7 +75,12 @@
                             {% if prod.operator %}
                             <a href="/production/orders?operator_id={{ prod.operator.id }}&date_from={{ filter_date_from or '' }}&date_to={{ filter_date_to or '' }}" class="text-primary text-decoration-none"><strong>{{ prod.operator.full_name }}</strong></a>
                             {% elif prod.user %}
-                            <span class="text-muted">{{ prod.user.full_name }}</span>
+                            {% set emp_id = (user_to_employee or {}).get(prod.user_id) %}
+                            {% if emp_id %}
+                            <a href="/production/orders?operator_id={{ emp_id }}&date_from={{ filter_date_from or '' }}&date_to={{ filter_date_to or '' }}" class="text-primary text-decoration-none"><strong>{{ prod.user.full_name }}</strong></a>
+                            {% else %}
+                            <strong>{{ prod.user.full_name }}</strong>
+                            {% endif %}
                             {% else %}
                             <span class="text-muted">—</span>
                             {% endif %}

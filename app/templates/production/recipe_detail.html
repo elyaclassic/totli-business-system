@@ -127,12 +127,12 @@
                 {% for item in recipe.items %}
                     {% if item.product %}
                         {% set unit_price = item_recipe_costs.get(item.product_id) if item_recipe_costs and item.product_id in item_recipe_costs else (item.product.purchase_price or 0) %}
-                        {% set ns.total_cost = ns.total_cost + (item.quantity * unit_price) %}
+                        {% set ns.total_cost = ns.total_cost + (item.quantity * unit_price)|round(0) %}
                     {% endif %}
                 {% endfor %}
                 <h4 class="text-center text-primary">{{ "{:,.0f}".format(ns.total_cost) }} so'm</h4>
                 {% set _out_unit = (recipe.product.unit.name or recipe.product.unit.code if recipe.product and recipe.product.unit else 'kg') %}
-                <p class="text-center text-muted mb-0">1 {{ _out_unit }} uchun: {{ "{:,.0f}".format(ns.total_cost / recipe.output_quantity if recipe.output_quantity > 0 else 0) }} so'm</p>
+                <p class="text-center text-muted mb-0">1 {{ _out_unit }} uchun: {{ "{:,.0f}".format((ns.total_cost / recipe.output_quantity)|round(0) if recipe.output_quantity > 0 else 0) }} so'm</p>
             </div>
         </div>
     </div>
@@ -161,6 +161,7 @@
                     <tbody>
                         {% for item in recipe.items %}
                         {% set unit_price = item_recipe_costs.get(item.product_id) if item_recipe_costs and item.product_id in item_recipe_costs else (item.product.purchase_price if item.product else 0) %}
+                        {% set row_sum = ((item.quantity * unit_price)|round(0)) if item.product else 0 %}
                         <tr>
                             <td>{{ loop.index }}</td>
                             <td>
@@ -169,7 +170,7 @@
                             </td>
                             <td>{{ item.quantity }} {{ (item.product.unit.name or item.product.unit.code if item.product and item.product.unit else 'kg') }}</td>
                             <td>{{ "{:,.0f}".format(unit_price) }} so'm</td>
-                            <td><strong>{{ "{:,.0f}".format(item.quantity * unit_price) }} so'm</strong></td>
+                            <td><strong>{{ "{:,.0f}".format(row_sum) }} so'm</strong></td>
                             <td>
                                 <button type="button" class="btn btn-sm btn-outline-primary" title="Tahrirlash"
                                     onclick="editItem({{ item.id }}, {{ item.product_id if item.product_id else 0 }}, {{ item.quantity }})">
@@ -210,7 +211,7 @@
                                     {% for item in recipe.items %}
                                         {% if item.product %}
                                             {% set up = item_recipe_costs.get(item.product_id) if item_recipe_costs and item.product_id in item_recipe_costs else (item.product.purchase_price or 0) %}
-                                            {% set total.value = total.value + (item.quantity * up) %}
+                                            {% set total.value = total.value + (item.quantity * up)|round(0) %}
                                         {% endif %}
                                     {% endfor %}
                                     {{ "{:,.0f}".format(total.value) }} so'm

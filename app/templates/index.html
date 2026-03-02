@@ -22,66 +22,57 @@
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 {% endif %}
-<!-- Statistika kartalar -->
-<div class="row row-cols-1 row-cols-md-4 g-4 mb-4">
+<!-- Statistika kartalar: bosilganda tegishli sahifaga o'tadi -->
+<div class="row row-cols-1 row-cols-md-3 g-4 mb-4">
     <div class="col">
-        <div class="stat-card">
-            <div class="d-flex justify-content-between">
-                <div>
-                    <p>Bugungi savdo</p>
-                    <h3>{{ "{:,.0f}".format(stats.today_sales) }}</h3>
-                    <small class="text-success">{{ stats.today_orders }} ta buyurtma</small>
-                </div>
-                <div class="icon green">
-                    <i class="bi bi-cash-coin"></i>
+        <a href="/sales" class="text-decoration-none text-body d-block">
+            <div class="stat-card h-100" style="cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <p>Bugungi savdo</p>
+                        <h3>{{ "{:,.0f}".format(stats.today_sales) }}</h3>
+                        <small class="text-success">{{ stats.today_orders }} ta buyurtma</small>
+                    </div>
+                    <div class="icon green">
+                        <i class="bi bi-cash-coin"></i>
+                    </div>
                 </div>
             </div>
-        </div>
+        </a>
     </div>
 
     <div class="col">
-        <div class="stat-card">
-            <div class="d-flex justify-content-between">
-                <div>
-                    <p>Kassa qoldig'i</p>
-                    <h3>{{ "{:,.0f}".format(stats.cash_balance) }}</h3>
-                    <small class="text-muted">so'm</small>
-                </div>
-                <div class="icon blue">
-                    <i class="bi bi-wallet2"></i>
+        <a href="/reports/debts" class="text-decoration-none text-body d-block">
+            <div class="stat-card h-100" style="cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <p>Qarzdorlik</p>
+                        <h3>{{ "{:,.0f}".format(stats.total_debt) }}</h3>
+                        <small class="text-danger">olish kerak</small>
+                    </div>
+                    <div class="icon red">
+                        <i class="bi bi-exclamation-triangle"></i>
+                    </div>
                 </div>
             </div>
-        </div>
+        </a>
     </div>
 
     <div class="col">
-        <div class="stat-card">
-            <div class="d-flex justify-content-between">
-                <div>
-                    <p>Qarzdorlik</p>
-                    <h3>{{ "{:,.0f}".format(stats.total_debt) }}</h3>
-                    <small class="text-danger">olish kerak</small>
-                </div>
-                <div class="icon red">
-                    <i class="bi bi-exclamation-triangle"></i>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="col">
-        <div class="stat-card">
-            <div class="d-flex justify-content-between">
-                <div>
-                    <p>Mahsulotlar</p>
-                    <h3>{{ stats.products_count }}</h3>
-                    <small class="text-muted">{{ stats.materials_count }} xom ashyo</small>
-                </div>
-                <div class="icon orange">
-                    <i class="bi bi-box-seam"></i>
+        <a href="/production/orders" class="text-decoration-none text-body d-block">
+            <div class="stat-card h-100" style="cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <p>Bugungi ishlab chiqarish</p>
+                        <h3>{{ "{:,.0f}".format(stats.today_production|default(0)) }} <small class="fs-6 text-muted">kg</small></h3>
+                        <small class="text-muted">tugallangan buyurtmalar</small>
+                    </div>
+                    <div class="icon blue">
+                        <i class="bi bi-gear-fill"></i>
+                    </div>
                 </div>
             </div>
-        </div>
+        </a>
     </div>
 </div>
 

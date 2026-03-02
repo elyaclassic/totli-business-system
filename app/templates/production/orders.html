@@ -25,6 +25,8 @@
     .production-orders-wrap .production-order-card .prod-actions { flex-wrap: wrap; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; }
     .production-orders-wrap .production-order-card select.form-select-sm { min-width: 120px; }
     #production-error-alert .production-error-detail { font-size: 1rem; }
+    .production-orders-wrap .filter-card .card-header { background: #f8f9fa; border-bottom: 1px solid #eee; font-weight: 500; }
+    .production-orders-wrap .production-table-wrap .card-header { background: #f8f9fa; border-bottom: 1px solid #eee; }
 </style>
 {% if error == "insufficient_stock" %}
 <div id="production-error-alert" class="alert alert-danger alert-dismissible fade show mb-0" role="alert">
@@ -59,13 +61,13 @@
 </div>
 {% endif %}
 <div class="container-fluid production-page production-orders-wrap">
-<div class="page-header">
-    <h4><i class="bi bi-clipboard-check"></i> Ishlab chiqarish buyurtmalari</h4>
-    <div class="btn-group-wrap">
+<div class="page-header d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
+    <h4 class="mb-0"><i class="bi bi-clipboard-check"></i> Ishlab chiqarish buyurtmalari</h4>
+    <div class="d-flex flex-wrap align-items-center gap-2">
         {% if current_user and (current_user.role or '')|lower in ['admin', 'rahbar', 'raxbar'] %}
         <a href="/production/by-operator" class="btn btn-outline-primary btn-sm"><i class="bi bi-person-badge"></i> Operator bo'yicha</a>
         <form method="post" action="/production/orders/fix-dates-from-numbers" class="d-inline" onsubmit="return confirm('Barcha ishlab chiqarish hujjatlarida sana hujjat raqamidan (PR-YYYYMMDD) o\'rnatiladi. Davom etasizmi?');">
-            <button type="submit" class="btn btn-outline-secondary btn-sm" title="Tasdiqni bekor qilib qayta tasdiqlaganda sana o'zgargan hujjatlar uchun"><i class="bi bi-calendar-event"></i> Sanani hujjat raqamidan tuzatish</button>
+            <button type="submit" class="btn btn-outline-secondary btn-sm" title="Tasdiqni bekor qilib qayta tasdiqlaganda sana o\'zgargan hujjatlar uchun"><i class="bi bi-calendar-event"></i> Sanani tuzatish</button>
         </form>
         {% endif %}
         <a href="/production/new" class="btn btn-success btn-sm"><i class="bi bi-plus-circle"></i> Yaratish</a>
@@ -73,28 +75,31 @@
 </div>
 
 <!-- Filtrlar -->
-<div class="card filter-card mb-2">
-    <div class="card-body">
-        <form method="get" action="/production/orders" class="d-flex flex-wrap align-items-center gap-2 mb-1" id="productionOrdersFilterForm">
+<div class="card filter-card mb-3">
+    <div class="card-header py-2 px-3">
+        <span class="small text-muted"><i class="bi bi-funnel"></i> Filtrlar</span>
+    </div>
+    <div class="card-body pt-2 pb-3">
+        <form method="get" action="/production/orders" class="d-flex flex-wrap align-items-center gap-2 mb-3" id="productionOrdersFilterForm">
             <label class="form-label mb-0 small text-muted">Sana:</label>
             <input type="date" name="date_from" class="form-control form-control-sm" style="width: auto;" value="{{ filter_date_from or '' }}" title="Dan">
             <span class="small text-muted">—</span>
             <input type="date" name="date_to" class="form-control form-control-sm" style="width: auto;" value="{{ filter_date_to or '' }}" title="Gacha">
             {% if current_user and (current_user.role or '')|lower in ['admin', 'rahbar', 'raxbar'] %}
-            <label class="form-label mb-0 small text-muted ms-2">Operator:</label>
-            <select name="operator_id" class="form-select form-select-sm" style="width: auto; max-width: 220px;" onchange="this.form.submit()">
-                <option value="">— Barchasi —</option>
+            <label class="form-label mb-0 small text-muted ms-1">Operator:</label>
+            <select name="operator_id" class="form-select form-select-sm" style="width: auto; max-width: 200px;" onchange="this.form.submit()">
+                <option value="">Barchasi</option>
                 {% for emp in employees %}
                 <option value="{{ emp.id }}" {% if filter_operator_id == emp.id %}selected{% endif %}>{{ emp.full_name }}</option>
                 {% endfor %}
             </select>
             {% endif %}
-            <span class="small text-muted ms-2">Qidiruv:</span>
-            <input type="text" name="q" class="form-control form-control-sm" style="width: 140px;" value="{{ filter_q or '' }}" autocomplete="off" placeholder="Raqam, retsept...">
-            <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-search"></i> Qidirish</button>
+            <label class="form-label mb-0 small text-muted ms-1">Qidiruv:</label>
+            <input type="text" name="q" class="form-control form-control-sm" style="width: 160px;" value="{{ filter_q or '' }}" autocomplete="off" placeholder="Raqam, retsept...">
+            <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-search"></i> Qidirish</button>
             <a href="/production/orders?clear=1" class="btn btn-sm btn-outline-secondary">Tozalash</a>
         </form>
-        <div class="d-flex gap-2 mb-0 flex-wrap" id="statusFilterWrap">
+        <div class="d-flex gap-2 flex-wrap align-items-center" id="statusFilterWrap">
             <button type="button" class="btn btn-sm btn-outline-secondary status-filter-btn active" data-status="all" onclick="filterStatus('all', this)">
                 Barchasi ({{ productions|length }})
             </button>
@@ -116,6 +121,10 @@
 
 <!-- Jadval (desktop) -->
 <div class="card production-table-wrap">
+    <div class="card-header py-2 px-3 d-flex justify-content-between align-items-center">
+        <span class="small fw-semibold"><i class="bi bi-list-ul"></i> Buyurtmalar</span>
+        <span class="badge bg-secondary">{{ productions|length }} ta</span>
+    </div>
     <div class="card-body p-0">
         <div class="table-responsive">
         <table class="table table-hover mb-0">
@@ -209,7 +218,7 @@
                     </td>
                     <td>
                         {% if prod.status == 'completed' %}
-                        <span class="badge bg-success">Yakunlandi</span>
+                        <span class="badge bg-success">Yakunlangan</span>
                         {% elif prod.status == 'in_progress' %}
                         <span class="badge bg-info">Jarayonda</span>
                         {% elif prod.status == 'draft' %}
@@ -312,7 +321,7 @@
                 <strong>{{ "%.2f"|format(prod.quantity) }} {{ unit_name }}</strong>{% if unit_name|lower != 'kg' %}<span class="text-muted small">({{ "%.2f"|format(qty_kg) }} kg)</span>{% endif %}
             </div>
             <div class="prod-row">
-                {% if prod.status == 'completed' %}<span class="badge bg-success">Yakunlandi</span>
+                {% if prod.status == 'completed' %}<span class="badge bg-success">Yakunlangan</span>
                 {% elif prod.status == 'in_progress' %}<span class="badge bg-info">Jarayonda</span>
                 {% elif prod.status == 'draft' %}<span class="badge bg-warning">Kutilmoqda</span>
                 {% else %}<span class="badge bg-danger">Bekor</span>{% endif %}

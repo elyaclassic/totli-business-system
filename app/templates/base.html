@@ -432,52 +432,6 @@
             {% endif %}
 
             {% if full_menu %}
-            <!-- DASHBOARDS (yigiladigan) - admin, manager, user -->
-            <li class="nav-item mt-2">
-                <a class="nav-link" data-bs-toggle="collapse" href="#dashboardsMenu" role="button"
-                    aria-expanded="false">
-                    <i class="bi bi-speedometer2"></i> DASHBOARDS
-                    <i class="bi bi-chevron-down ms-auto"></i>
-                </a>
-                <div class="collapse" id="dashboardsMenu">
-                    <ul class="nav flex-column ms-3">
-                        <li class="nav-item">
-                            <a class="nav-link {% if 'Dashboard' in page_title %}active{% endif %}"
-                                href="/test/dashboard/executive">
-                                <i class="bi bi-speedometer2"></i> Rahbariyat
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if 'Savdo' in page_title %}active{% endif %}" href="/dashboard/sales">
-                                <i class="bi bi-cart-check"></i> Savdo
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if 'Agent' in page_title %}active{% endif %}" href="/dashboard/agent">
-                                <i class="bi bi-person-badge"></i> Agentlar
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if 'Ishlab chiqarish' in page_title %}active{% endif %}"
-                                href="/dashboard/production">
-                                <i class="bi bi-gear-fill"></i> Ishlab chiqarish
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if 'Ombor' in page_title %}active{% endif %}" href="/dashboard/warehouse">
-                                <i class="bi bi-box-seam"></i> Ombor
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if 'Yetkazib berish' in page_title %}active{% endif %}"
-                                href="/dashboard/delivery">
-                                <i class="bi bi-truck"></i> Yetkazib berish
-                            </a>
-                        </li>
-                    </ul>
-                </div>
-            </li>
-
             <!-- MA'LUMOTLAR (Reference Data) -->
             <li class="nav-item mt-2">
                 <small class="text-light opacity-50 px-3">MA'LUMOTLAR</small>
@@ -801,21 +755,6 @@
 
             {% else %}
             <!-- Noma'lum rol: to'liq menyu ko'rsatiladi -->
-            <li class="nav-item mt-2">
-                <a class="nav-link" data-bs-toggle="collapse" href="#dashboardsMenu" role="button" aria-expanded="false">
-                    <i class="bi bi-speedometer2"></i> DASHBOARDS <i class="bi bi-chevron-down ms-auto"></i>
-                </a>
-                <div class="collapse" id="dashboardsMenu">
-                    <ul class="nav flex-column ms-3">
-                        <li class="nav-item"><a class="nav-link" href="/test/dashboard/executive"><i class="bi bi-speedometer2"></i> Rahbariyat</a></li>
-                        <li class="nav-item"><a class="nav-link" href="/dashboard/sales"><i class="bi bi-cart-check"></i> Savdo</a></li>
-                        <li class="nav-item"><a class="nav-link" href="/dashboard/agent"><i class="bi bi-person-badge"></i> Agentlar</a></li>
-                        <li class="nav-item"><a class="nav-link" href="/dashboard/production"><i class="bi bi-gear-fill"></i> Ishlab chiqarish</a></li>
-                        <li class="nav-item"><a class="nav-link" href="/dashboard/warehouse"><i class="bi bi-box-seam"></i> Ombor</a></li>
-                        <li class="nav-item"><a class="nav-link" href="/dashboard/delivery"><i class="bi bi-truck"></i> Yetkazib berish</a></li>
-                    </ul>
-                </div>
-            </li>
             <li class="nav-item"><a class="nav-link" href="/production"><i class="bi bi-gear-fill"></i> Ishlab chiqarish</a></li>
             <li class="nav-item"><a class="nav-link" href="/sales"><i class="bi bi-cart3"></i> Sotuvlar</a></li>
             <li class="nav-item"><a class="nav-link" href="/reports"><i class="bi bi-bar-chart-line"></i> Hisobotlar</a></li>
