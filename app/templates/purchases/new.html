@@ -198,6 +198,17 @@
                     <i class="bi bi-plus-circle"></i> Xarajat qo'shish
                 </button>
 
+                <!-- Umumiy summa -->
+                <div class="card bg-light mb-4">
+                    <div class="card-body py-3">
+                        <div class="row g-2">
+                            <div class="col-md-4"><strong>Tovarlar jami:</strong> <span id="purchaseProductsTotal">0</span> so'm</div>
+                            <div class="col-md-4"><strong>Xarajatlar jami:</strong> <span id="purchaseExpensesTotal">0</span> so'm</div>
+                            <div class="col-md-4"><strong>Jami (tovarlar + xarajatlar):</strong> <span id="purchaseGrandTotal">0</span> so'm</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="d-flex gap-2">
                     <button type="submit" class="btn btn-success">
                         <i class="bi bi-check-circle"></i> Saqlash
@@ -475,6 +486,34 @@
         console.error('product_select element not found - product search will not work');
     }
 
+    // Umumiy summani hisoblash va ko'rsatish
+    function formatSum(n) {
+        return (n || 0).toLocaleString('uz-UZ', { maximumFractionDigits: 0 });
+    }
+    function updatePurchaseTotal() {
+        var productsTotal = 0;
+        document.querySelectorAll('#productsTableBody .product-row').forEach(function(row) {
+            var qty = parseFloat(row.querySelector('input[name="quantity"]') && row.querySelector('input[name="quantity"]').value) || 0;
+            var price = parseFloat(row.querySelector('input[name="price"]') && row.querySelector('input[name="price"]').value) || 0;
+            productsTotal += qty * price;
+        });
+        var expensesTotal = 0;
+        document.querySelectorAll('#expensesTableBody .expense-row input[name="expense_amount"]').forEach(function(inp) {
+            expensesTotal += parseFloat(inp.value) || 0;
+        });
+        var grand = productsTotal + expensesTotal;
+        var elProducts = document.getElementById('purchaseProductsTotal');
+        var elExpenses = document.getElementById('purchaseExpensesTotal');
+        var elGrand = document.getElementById('purchaseGrandTotal');
+        if (elProducts) elProducts.textContent = formatSum(productsTotal);
+        if (elExpenses) elExpenses.textContent = formatSum(expensesTotal);
+        if (elGrand) elGrand.textContent = formatSum(grand);
+    }
+    // Input o'zgarganda umumiy summani yangilash
+    document.getElementById('purchaseCreateForm').addEventListener('input', updatePurchaseTotal);
+    document.getElementById('purchaseCreateForm').addEventListener('change', updatePurchaseTotal);
+    updatePurchaseTotal();
+
     document.getElementById('purchaseCreateForm').addEventListener('submit', function(e) {
         if (!(partnerIdHidden && partnerIdHidden.value)) {
             e.preventDefault();
@@ -500,7 +539,7 @@
     document.querySelectorAll('#productsTableBody .remove-product-row').forEach(function(btn) {
         btn.addEventListener('click', function() {
             var tbody = document.getElementById('productsTableBody');
-            if (tbody.querySelectorAll('.product-row').length > 1) btn.closest('tr').remove();
+            if (tbody.querySelectorAll('.product-row').length > 1) { btn.closest('tr').remove(); updatePurchaseTotal(); }
         });
     });
 
@@ -515,10 +554,11 @@
         newRow.querySelector('input[name="price"]').value = '';
         tbody.appendChild(newRow);
         newRow.querySelector('.remove-product-row').addEventListener('click', function() {
-            if (tbody.querySelectorAll('.product-row').length > 1) newRow.remove();
+            if (tbody.querySelectorAll('.product-row').length > 1) { newRow.remove(); updatePurchaseTotal(); }
         });
         // Yangi qator uchun qidirishni ishga tushirish
         initProductSearch(newRow);
+        updatePurchaseTotal();
         
         // Yangi qator uchun narxni avtomatik to'ldirish funksiyasini qo'shish
         const newHiddenInput = newRow.querySelector('.product-id-hidden');
@@ -554,7 +594,7 @@
     document.querySelectorAll('#expensesTableBody .remove-expense-row').forEach(function(btn) {
         btn.addEventListener('click', function() {
             var tbody = document.getElementById('expensesTableBody');
-            if (tbody.querySelectorAll('.expense-row').length > 1) btn.closest('tr').remove();
+            if (tbody.querySelectorAll('.expense-row').length > 1) { btn.closest('tr').remove(); updatePurchaseTotal(); }
         });
     });
 
@@ -567,8 +607,9 @@
         newRow.querySelector('input[name="expense_amount"]').value = '';
         tbody.appendChild(newRow);
         newRow.querySelector('.remove-expense-row').addEventListener('click', function() {
-            if (tbody.querySelectorAll('.expense-row').length > 1) newRow.remove();
+            if (tbody.querySelectorAll('.expense-row').length > 1) { newRow.remove(); updatePurchaseTotal(); }
         });
+        updatePurchaseTotal();
     });
 
     document.getElementById('addPartnerForm').addEventListener('submit', function(e) {

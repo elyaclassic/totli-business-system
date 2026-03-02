@@ -6255,6 +6255,7 @@ async def sales_pos(
             "product_prices": {},
             "stock_by_product": {},
             "pos_categories": [],
+            "pos_all_categories": [],
             "success": request.query_params.get("success"),
             "error": err,
             "error_detail": detail_msg,
@@ -6294,6 +6295,7 @@ async def sales_pos(
         if cat_ids:
             for c in db.query(Category).filter(Category.id.in_(cat_ids)).order_by(Category.name).all():
                 pos_categories.append({"id": c.id, "name": c.name or c.code or ""})
+    pos_all_categories = [{"id": c.id, "name": c.name or c.code or ""} for c in db.query(Category).order_by(Category.name).all()]
     from urllib.parse import unquote
     success = request.query_params.get("success")
     error = request.query_params.get("error")
@@ -6314,6 +6316,7 @@ async def sales_pos(
         "stock_by_product": stock_by_product,
         "price_type": price_type,
         "pos_categories": pos_categories,
+        "pos_all_categories": pos_all_categories,
         "pos_partners": pos_partners,
         "default_partner_id": default_partner_id,
         "success": success,
@@ -8150,6 +8153,92 @@ async def employee_advance_add(
     return RedirectResponse(url="/employees/advances?added=1", status_code=303)
 
 
+@app.get("/employees/advances/edit/{advance_id}", response_class=HTMLResponse)
+async def employee_advance_edit_page(
+    advance_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Avansni tahrirlash sahifasi"""
+    adv = db.query(EmployeeAdvance).options(joinedload(EmployeeAdvance.employee)).filter(EmployeeAdvance.id == advance_id).first()
+    if not adv:
+        return RedirectResponse(url="/employees/advances?error=Avans topilmadi", status_code=303)
+    employees = db.query(Employee).filter(Employee.is_active == True).order_by(Employee.full_name).all()
+    if adv.employee and not any(e.id == adv.employee_id for e in employees):
+        employees = [adv.employee] + list(employees)
+    return templates.TemplateResponse("employees/advance_edit.html", {
+        "request": request,
+        "advance": adv,
+        "employees": employees,
+        "current_user": current_user,
+        "page_title": "Avansni tahrirlash",
+    })
+
+
+@app.post("/employees/advances/edit/{advance_id}")
+async def employee_advance_edit_save(
+    advance_id: int,
+    request: Request,
+    employee_id: int = Form(...),
+    amount: float = Form(...),
+    advance_date: str = Form(...),
+    note: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Avansni saqlash (tahrirlash)"""
+    adv = db.query(EmployeeAdvance).filter(EmployeeAdvance.id == advance_id).first()
+    if not adv:
+        return RedirectResponse(url="/employees/advances?error=Avans topilmadi", status_code=303)
+    try:
+        adv_date = datetime.strptime(advance_date, "%Y-%m-%d").date()
+    except ValueError:
+        return RedirectResponse(url=f"/employees/advances/edit/{advance_id}?error=Noto'g'ri sana", status_code=303)
+    if amount <= 0:
+        return RedirectResponse(url=f"/employees/advances/edit/{advance_id}?error=Summa 0 dan katta bo'lishi kerak", status_code=303)
+    emp = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not emp:
+        return RedirectResponse(url=f"/employees/advances/edit/{advance_id}?error=Xodim topilmadi", status_code=303)
+    adv.employee_id = employee_id
+    adv.amount = amount
+    adv.advance_date = adv_date
+    adv.note = note or None
+    adv.confirmed_at = datetime.now()  # Saqlashda avtomatik tasdiqlash
+    db.commit()
+    return RedirectResponse(url="/employees/advances?edited=1", status_code=303)
+
+
+@app.post("/employees/advances/confirm/{advance_id}")
+async def employee_advance_confirm(
+    advance_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Avansni tasdiqlash"""
+    adv = db.query(EmployeeAdvance).filter(EmployeeAdvance.id == advance_id).first()
+    if not adv:
+        return RedirectResponse(url="/employees/advances?error=Avans topilmadi", status_code=303)
+    adv.confirmed_at = datetime.now()
+    db.commit()
+    return RedirectResponse(url="/employees/advances?confirmed=1", status_code=303)
+
+
+@app.post("/employees/advances/unconfirm/{advance_id}")
+async def employee_advance_unconfirm(
+    advance_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Avans tasdiqini bekor qilish"""
+    adv = db.query(EmployeeAdvance).filter(EmployeeAdvance.id == advance_id).first()
+    if not adv:
+        return RedirectResponse(url="/employees/advances?error=Avans topilmadi", status_code=303)
+    adv.confirmed_at = None
+    db.commit()
+    return RedirectResponse(url="/employees/advances?unconfirmed=1", status_code=303)
+
+
 @app.post("/employees/advances/delete/{advance_id}")
 async def employee_advance_delete(
     advance_id: int,
@@ -8351,12 +8440,10 @@ async def production_index_page(request: Request, db: Session = Depends(get_db),
         .options(
             joinedload(Production.recipe).joinedload(Recipe.product).joinedload(Product.unit),
         )
-        .order_by(Production.date.desc())
-        .limit(10)
     )
     if user_or_operator_filter is not None:
         recent_qry = recent_qry.filter(user_or_operator_filter)
-    recent_productions = recent_qry.all()
+    recent_productions = recent_qry.order_by(Production.date.desc()).limit(10).all()
 
     # Operator / ishlab chiqarish / qadoqlash uchun "Retseptlar" ro'yxati blokini yashirish
     _operator_type_roles = ("operator", "production", "qadoqlash")

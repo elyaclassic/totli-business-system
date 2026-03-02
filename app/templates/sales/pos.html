@@ -146,7 +146,16 @@
                 <div class="card pos-card pos-card-products">
                     <div class="card-header pos-card-header d-flex flex-wrap gap-2 align-items-center">
                         <span class="pos-card-title"><i class="bi bi-grid-3x3-gap-fill me-2"></i>Tovarlar</span>
-                        <input type="text" class="form-control form-control-sm pos-input-search ms-auto" id="posSearch" placeholder="Nom bo'yicha qidirish..." style="max-width: 220px;">
+                        <label class="mb-0 d-flex align-items-center gap-1 small text-muted ms-auto me-1">
+                            <i class="bi bi-funnel"></i> Kategoriya:
+                        </label>
+                        <select class="form-select form-select-sm" id="posCategoryFilter" style="max-width: 180px;" title="Kategoriya bo'yicha filtrlash">
+                            <option value="">Barcha kategoriyalar</option>
+                            {% for cat in (pos_all_categories or []) %}
+                            <option value="{{ cat.id }}">{{ cat.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <input type="text" class="form-control form-control-sm pos-input-search" id="posSearch" placeholder="Nom bo'yicha qidirish..." style="max-width: 220px;">
                         <input type="text" class="form-control form-control-sm pos-input-barcode" id="posBarcode" placeholder="Barkod skaner" style="max-width: 180px;" title="Barkodni kiriting va Enter bosing">
                     </div>
                     <div class="card-body pos-card-body">
@@ -244,7 +253,7 @@
                             <div class="row g-2 mt-2 align-items-end">
                                 <div class="col-6">
                                     <label class="form-label small text-muted mb-0">Skidka</label>
-                                    <input type="number" id="posDiscountInput" class="form-control form-control-sm" value="0" min="0" step="0.01" placeholder="0" style="width:100%;">
+                                    <input type="number" id="posDiscountInput" class="form-control form-control-sm" value="" min="0" step="1" placeholder="0" style="width:100%;">
                                 </div>
                                 <div class="col-6">
                                     <label class="form-label small text-muted mb-0">&nbsp;</label>
@@ -565,9 +574,21 @@
         });
         var posDiscountInputEl = document.getElementById('posDiscountInput');
         var posDiscountTypeEl = document.getElementById('posDiscountType');
+        function normalizeDiscountInput() {
+            if (!posDiscountInputEl) return;
+            var v = (posDiscountInputEl.value || '').trim();
+            if (/^0\d+$/.test(v)) {
+                posDiscountInputEl.value = parseFloat(v) || 0;
+            } else if (/^0\d*\.\d*$/.test(v) === false && v !== '' && v !== '0') {
+                var num = parseFloat(v);
+                if (!isNaN(num) && num >= 0 && String(num) !== v) {
+                    posDiscountInputEl.value = num;
+                }
+            }
+        }
         if (posDiscountInputEl) {
-            posDiscountInputEl.addEventListener('input', function() { renderCart(); });
-            posDiscountInputEl.addEventListener('change', function() { renderCart(); });
+            posDiscountInputEl.addEventListener('input', function() { normalizeDiscountInput(); renderCart(); });
+            posDiscountInputEl.addEventListener('change', function() { normalizeDiscountInput(); renderCart(); });
         }
         cartEmpty.style.display = cart.length ? 'none' : 'block';
         saveCartToStorage();
@@ -648,27 +669,53 @@
     })();
     var posDiscountInputEl = document.getElementById('posDiscountInput');
     var posDiscountTypeEl = document.getElementById('posDiscountType');
+    function normalizeDiscountInput() {
+        if (!posDiscountInputEl) return;
+        var v = (posDiscountInputEl.value || '').trim();
+        if (/^0\d+$/.test(v)) {
+            posDiscountInputEl.value = parseFloat(v) || 0;
+        } else if (v !== '' && v !== '0') {
+            var num = parseFloat(v);
+            if (!isNaN(num) && num >= 0 && String(num) !== v && v.indexOf('.') === -1) {
+                posDiscountInputEl.value = num;
+            }
+        }
+    }
     if (posDiscountInputEl) {
-        posDiscountInputEl.addEventListener('input', function() { renderCart(); });
-        posDiscountInputEl.addEventListener('change', function() { renderCart(); });
+        posDiscountInputEl.addEventListener('input', function() { normalizeDiscountInput(); renderCart(); });
+        posDiscountInputEl.addEventListener('change', function() { normalizeDiscountInput(); renderCart(); });
     }
     if (posDiscountTypeEl) {
         posDiscountTypeEl.addEventListener('change', function() { renderCart(); });
     }
 
+    function applyCategoryFilter(catValue) {
+        catValue = (catValue || '').toString();
+        document.querySelectorAll('.pos-category-pill').forEach(function(p) {
+            var pCat = (p.getAttribute('data-category') || '').toString();
+            p.classList.toggle('active', pCat === catValue);
+        });
+        document.querySelectorAll('.pos-product-item').forEach(function(el) {
+            var elCat = (el.getAttribute('data-category-id') || '').toString();
+            var show = (catValue === '' && true) || (elCat === catValue);
+            el.style.display = show ? '' : 'none';
+        });
+        var sel = document.getElementById('posCategoryFilter');
+        if (sel) sel.value = catValue;
+        if (posSearch) posSearch.dispatchEvent(new Event('input'));
+    }
     document.querySelectorAll('.pos-category-pill').forEach(function(pill) {
         pill.addEventListener('click', function() {
-            document.querySelectorAll('.pos-category-pill').forEach(function(p) { p.classList.remove('active'); });
-            this.classList.add('active');
             var cat = (this.getAttribute('data-category') || '').toString();
-            document.querySelectorAll('.pos-product-item').forEach(function(el) {
-                var elCat = (el.getAttribute('data-category-id') || '').toString();
-                var show = (cat === '' && true) || (elCat === cat);
-                el.style.display = show ? '' : 'none';
-            });
-            if (posSearch) posSearch.dispatchEvent(new Event('input'));
+            applyCategoryFilter(cat);
         });
     });
+    var posCategoryFilterEl = document.getElementById('posCategoryFilter');
+    if (posCategoryFilterEl) {
+        posCategoryFilterEl.addEventListener('change', function() {
+            applyCategoryFilter(this.value || '');
+        });
+    }
 
     if (posSearch) {
         posSearch.addEventListener('input', function() {

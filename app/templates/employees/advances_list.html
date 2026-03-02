@@ -14,6 +14,24 @@
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% endif %}
+    {% if request.query_params.get('edited') %}
+    <div class="alert alert-success alert-dismissible fade show py-2 small">
+        <i class="bi bi-pencil"></i> Avans tahrirlandi.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if request.query_params.get('confirmed') %}
+    <div class="alert alert-success alert-dismissible fade show py-2 small">
+        <i class="bi bi-check-circle"></i> Avans tasdiqlandi.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if request.query_params.get('unconfirmed') %}
+    <div class="alert alert-info alert-dismissible fade show py-2 small">
+        <i class="bi bi-x-circle"></i> Avans tasdiqi bekor qilindi.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
     {% if request.query_params.get('error') %}
     <div class="alert alert-danger alert-dismissible fade show py-2 small">
         {{ request.query_params.get('error') }}
@@ -69,7 +87,8 @@
                             <th>Xodim</th>
                             <th>Summa (so'm)</th>
                             <th>Izoh</th>
-                            <th width="90">Amallar</th>
+                            <th>Holat</th>
+                            <th width="140">Amallar</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -80,13 +99,30 @@
                             <td class="text-success fw-bold">{{ "{:,.0f}".format(a.amount) }}</td>
                             <td><small>{{ a.note or '-' }}</small></td>
                             <td>
+                                {% if a.confirmed_at %}
+                                <span class="badge bg-success">Tasdiqlangan</span>
+                                {% else %}
+                                <span class="badge bg-secondary">Tasdiqlanmagan</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <a href="/employees/advances/edit/{{ a.id }}" class="btn btn-sm btn-outline-primary" title="Tahrirlash"><i class="bi bi-pencil"></i></a>
+                                {% if a.confirmed_at %}
+                                <form method="post" action="/employees/advances/unconfirm/{{ a.id }}" class="d-inline" onsubmit="return confirm('Tasdiqni bekor qilmoqchimisiz?');">
+                                    <button type="submit" class="btn btn-sm btn-outline-warning" title="Tasdiqni bekor qilish"><i class="bi bi-x-circle"></i></button>
+                                </form>
+                                {% else %}
+                                <form method="post" action="/employees/advances/confirm/{{ a.id }}" class="d-inline" onsubmit="return confirm('Ushbu avansni tasdiqlashni xohlaysizmi?');">
+                                    <button type="submit" class="btn btn-sm btn-outline-success" title="Tasdiqlash"><i class="bi bi-check-circle"></i></button>
+                                </form>
+                                {% endif %}
                                 <form method="post" action="/employees/advances/delete/{{ a.id }}" class="d-inline" onsubmit="return confirm('Ushbu avansni ro\'yxatdan o\'chirmoqchimisiz?');">
                                     <button type="submit" class="btn btn-sm btn-outline-danger" title="O'chirish"><i class="bi bi-trash"></i></button>
                                 </form>
                             </td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="5" class="text-center text-muted py-4">Avanslar yo'q.</td></tr>
+                        <tr><td colspan="6" class="text-center text-muted py-4">Avanslar yo'q.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

@@ -854,6 +854,7 @@ class EmployeeAdvance(Base):
     amount = Column(Float, default=0)
     advance_date = Column(Date, nullable=False)
     note = Column(String(500), nullable=True)
+    confirmed_at = Column(DateTime, nullable=True)  # Tasdiqlangan vaqti
     created_at = Column(DateTime, default=datetime.now)
     
     employee = relationship("Employee", backref="advances")
@@ -1210,6 +1211,10 @@ def ensure_attendance_advance_tables():
                 created_at DATETIME
             )
         """))
+        r = conn.execute(text("PRAGMA table_info(employee_advances)"))
+        adv_cols = [row[1] for row in r]
+        if "confirmed_at" not in adv_cols:
+            conn.execute(text("ALTER TABLE employee_advances ADD COLUMN confirmed_at DATETIME"))
         r = conn.execute(text("PRAGMA table_info(salaries)"))
         cols = [row[1] for row in r]
         if "advance_deduction" not in cols:
