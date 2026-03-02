@@ -23,6 +23,23 @@
         </div>
     </div>
 
+    {% if current_user and current_user.role == 'admin' %}
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <form method="post" action="/employees/attendance/form/confirm" class="d-flex gap-2 align-items-end flex-wrap">
+                <div>
+                    <label class="form-label small mb-1">Kunni tasdiqlash (tabel hujjati)</label>
+                    <input type="date" name="date" class="form-control form-control-sm" value="{{ start_date }}" style="width: auto;" required>
+                </div>
+                <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Tanlangan kun uchun tabel hujjati yaratilsinmi?');">
+                    <i class="bi bi-check-circle"></i> Tasdiqlash
+                </button>
+            </form>
+            <small class="text-muted">Shu sana uchun davomat yozuvlari bo‘lsa, tabel hujjati yaratiladi va kun tasdiqlangan hisoblanadi.</small>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center">
             <span>Qo'lda qo'shish</span>

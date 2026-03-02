@@ -7826,29 +7826,48 @@ async def attendance_docs_list(
     request: Request,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    sort: Optional[str] = None,
+    order: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Kunlik tabel hujjatları ro'yxati"""
-    from datetime import datetime as dt
+    """Kunlik tabel hujjatlari ro'yxati — saralash: number, date, count, confirmed_at"""
     today = date.today()
     start_date = start_date or (today - timedelta(days=30)).strftime("%Y-%m-%d")
     end_date = end_date or today.strftime("%Y-%m-%d")
-    docs = (
+    sort = (sort or "date").strip().lower()
+    order = (order or "asc").strip().lower()
+    if order not in ("asc", "desc"):
+        order = "asc"
+    query = (
         db.query(AttendanceDoc)
         .filter(AttendanceDoc.date >= start_date, AttendanceDoc.date <= end_date)
-        .order_by(AttendanceDoc.date.desc())
-        .all()
     )
+    if sort == "number":
+        query = query.order_by(AttendanceDoc.number.desc() if order == "desc" else AttendanceDoc.number.asc())
+    elif sort == "date":
+        query = query.order_by(AttendanceDoc.date.desc() if order == "desc" else AttendanceDoc.date.asc())
+    elif sort == "confirmed_at":
+        query = query.order_by(
+            AttendanceDoc.confirmed_at.desc() if order == "desc" else AttendanceDoc.confirmed_at.asc()
+        )
+    else:
+        query = query.order_by(AttendanceDoc.date.desc())
+    docs = query.all()
     count_by_doc = {}
     for doc in docs:
         count_by_doc[doc.id] = db.query(Attendance).filter(Attendance.date == doc.date).count()
+    if sort == "count":
+        reverse = order == "desc"
+        docs = sorted(docs, key=lambda d: count_by_doc.get(d.id, 0), reverse=reverse)
     return templates.TemplateResponse("employees/attendance_docs_list.html", {
         "request": request,
         "docs": docs,
         "count_by_doc": count_by_doc,
         "start_date": start_date,
         "end_date": end_date,
+        "sort": sort,
+        "order": order,
         "current_user": current_user,
         "page_title": "Kunlik tabellar",
     })
@@ -7957,7 +7976,7 @@ async def attendance_sync_hikvision(
 @app.post("/employees/attendance/form/confirm")
 async def attendance_form_confirm(
     request: Request,
-    date_param: str = Form(...),
+    date_param: str = Form(..., alias="date"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
@@ -7968,13 +7987,18 @@ async def attendance_form_confirm(
         return RedirectResponse(url="/employees/attendance/form?error=Noto'g'ri sana", status_code=303)
     existing = db.query(AttendanceDoc).filter(AttendanceDoc.date == doc_date).first()
     if existing:
-        return RedirectResponse(url=f"/employees/attendance/form?date={date_param}", status_code=303)
+        if existing.confirmed_at:
+            return RedirectResponse(url="/employees/attendance?already=1", status_code=303)
+        existing.confirmed_at = datetime.now()
+        existing.user_id = current_user.id
+        db.commit()
+        return RedirectResponse(url="/employees/attendance?confirmed=1", status_code=303)
     count = db.query(AttendanceDoc).filter(AttendanceDoc.date >= doc_date.replace(day=1)).count()
     number = f"TBL-{doc_date.strftime('%Y%m%d')}-{count + 1:04d}"
     doc = AttendanceDoc(number=number, date=doc_date, user_id=current_user.id, confirmed_at=datetime.now())
     db.add(doc)
     db.commit()
-    return RedirectResponse(url=f"/employees/attendance/form?date={date_param}", status_code=303)
+    return RedirectResponse(url="/employees/attendance?confirmed=1", status_code=303)
 
 
 @app.get("/employees/attendance/doc/{doc_id}", response_class=HTMLResponse)
