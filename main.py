@@ -7875,12 +7875,29 @@ async def attendance_form(
         .order_by(Attendance.employee_id)
         .all()
     )
+    attendance_by_employee = {a.employee_id: a for a in attendances}
+    # Barcha faol xodimlar + shu kunda davomat bo‘lgan (lekin ro‘yxatda bo‘lmagan) xodimlar
+    employees_active = (
+        db.query(Employee)
+        .filter(Employee.is_active == True)
+        .order_by(Employee.full_name)
+        .all()
+    )
+    employee_ids_in_rows = {e.id for e in employees_active}
+    attendance_rows = [{"employee": e, "attendance": attendance_by_employee.get(e.id)} for e in employees_active]
+    for att in attendances:
+        if att.employee_id not in employee_ids_in_rows:
+            emp = db.query(Employee).filter(Employee.id == att.employee_id).first()
+            if emp:
+                attendance_rows.append({"employee": emp, "attendance": att})
+                employee_ids_in_rows.add(emp.id)
     doc = db.query(AttendanceDoc).filter(AttendanceDoc.date == form_date).first()
     return templates.TemplateResponse("employees/attendance_form.html", {
         "request": request,
         "form_date": form_date,
         "form_date_str": form_date_str,
         "attendances": attendances,
+        "attendance_rows": attendance_rows,
         "doc": doc,
         "current_user": current_user,
         "page_title": "Tabel formasi",

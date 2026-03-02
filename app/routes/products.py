@@ -409,7 +409,7 @@ async def product_bulk_update(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Faqat admin: tanlangan tovarlarga gruppaviy o'zgartirish (turi, o'lchov birligi)."""
+    """Faqat admin: tanlangan tovarlarga gruppaviy o'zgartirish (turi, kategoriya, o'lchov birligi)."""
     form = await request.form()
     ids = form.getlist("product_ids")
     new_type = (form.get("type") or "").strip()
@@ -418,6 +418,14 @@ async def product_bulk_update(
     if unit_id_raw is not None and str(unit_id_raw).strip() and str(unit_id_raw).strip() != "0":
         try:
             new_unit_id = int(unit_id_raw)
+        except (ValueError, TypeError):
+            pass
+    category_id_raw = form.get("category_id")
+    new_category_id = None  # None = o'zgartirmaslik; 0 yoki bo'sh = tanlanmagan (tozalash)
+    if category_id_raw is not None and str(category_id_raw).strip() != "":
+        try:
+            v = int(category_id_raw)
+            new_category_id = v if v > 0 else -1  # -1 = tozalash (category_id = None)
         except (ValueError, TypeError):
             pass
     updated = 0
@@ -430,6 +438,9 @@ async def product_bulk_update(
             changed = False
             if new_type in ("tayyor", "yarim_tayyor", "hom_ashyo"):
                 product.type = new_type
+                changed = True
+            if new_category_id is not None:
+                product.category_id = new_category_id if new_category_id > 0 else None
                 changed = True
             if new_unit_id is not None:
                 product.unit_id = new_unit_id

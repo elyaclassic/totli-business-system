@@ -45,7 +45,7 @@
                 <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#hikvisionModal">
                     <i class="bi bi-cloud-download"></i> Hikvision'dan yuklash
                 </button>
-                <span class="text-muted small">Tanlangan sana: {{ form_date.strftime('%d.%m.%Y') }} bo'yicha yuklanadi.</span>
+                <span class="text-muted small">Hozir ko‘rilayotgan sana: {{ form_date.strftime('%d.%m.%Y') }}. Hikvision modali orqali «Dan»–«Gacha» oralig‘ida yuklab, keyin «Sana» orqali kunma-kun filtrlab ko‘rishingiz mumkin.</span>
                 <div class="d-flex align-items-center gap-2 ms-auto" id="autoSyncBlock">
                     <label class="form-check-label small mb-0">
                         <input type="checkbox" class="form-check-input" id="autoSyncCheck" title="Hikvision bilan doimiy aloqa — har N daqiqada avtomatik yuklash">
@@ -141,11 +141,18 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Yuklash sanasi *</label>
-                        <input type="date" class="form-control" id="hikvisionUploadDate" value="{{ form_date_str }}" required
-                               title="Qaysi kun uchun davomat yuklanadi">
-                        <small class="text-muted">Yuklashdan oldin sanani o'zgartirishingiz mumkin.</small>
+                    <p class="small text-muted mb-2">Belgilangan vaqtdan belgilangan vaqtgacha Hikvision'dan davomat yuklanadi; har bir kun alohida saqlanadi. Keyin yuqoridagi «Sana» orqali kunma-kun ko‘rishingiz mumkin.</p>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label">Dan (sana) *</label>
+                            <input type="date" class="form-control" id="hikvisionStartDateInput" value="{{ form_date_str }}" required
+                                   title="Qaysi sanadan davomat yuklanadi">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Gacha (sana) *</label>
+                            <input type="date" class="form-control" id="hikvisionEndDateInput" value="{{ form_date_str }}" required
+                                   title="Qaysi sanagacha davomat yuklanadi">
+                        </div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Hikvision IP *</label>
@@ -186,7 +193,6 @@
 <script>
 (function() {
     var btn = document.getElementById('toggleHikvisionPassword');
-<<<<<<< Current (Your changes)
     if (btn) {
         var inp = document.getElementById('hikvisionPassword');
         var icon = document.getElementById('hikvisionPasswordIcon');
@@ -206,24 +212,38 @@
             });
         }
     }
-    // Yuklashdan oldin: modaldagi sana hidden start_date, end_date va redirect ga yoziladi
+    // Yuklashdan oldin: modaldagi Dan/Gacha hidden start_date, end_date va redirect ga yoziladi
     var form = document.getElementById('hikvisionSyncForm');
-    var uploadDate = document.getElementById('hikvisionUploadDate');
+    var startDateInput = document.getElementById('hikvisionStartDateInput');
+    var endDateInput = document.getElementById('hikvisionEndDateInput');
     var startInput = document.getElementById('hikvisionStartDate');
     var endInput = document.getElementById('hikvisionEndDate');
     var redirectInput = document.getElementById('hikvisionRedirectUrl');
-    if (form && uploadDate && startInput && endInput && redirectInput) {
-        function syncHikvisionDate() {
-            var d = uploadDate.value;
-            if (d) {
-                startInput.value = d;
-                endInput.value = d;
-                redirectInput.value = '/employees/attendance/form?date=' + d;
-            }
+    if (form && startDateInput && endDateInput && startInput && endInput && redirectInput) {
+        function syncHikvisionDateRange() {
+            var d1 = startDateInput.value;
+            var d2 = endDateInput.value;
+            if (d1) startInput.value = d1;
+            if (d2) endInput.value = d2;
+            if (d1) redirectInput.value = '/employees/attendance/form?date=' + d1;
         }
-        uploadDate.addEventListener('change', syncHikvisionDate);
-        form.addEventListener('submit', function() {
-            syncHikvisionDate();
+        startDateInput.addEventListener('change', function() {
+            if (endDateInput.value && endDateInput.value < this.value) endDateInput.value = this.value;
+            syncHikvisionDateRange();
+        });
+        endDateInput.addEventListener('change', function() {
+            if (startDateInput.value && startDateInput.value > this.value) startDateInput.value = this.value;
+            syncHikvisionDateRange();
+        });
+        form.addEventListener('submit', function(e) {
+            var d1 = startDateInput.value;
+            var d2 = endDateInput.value;
+            if (d1 && d2 && d2 < d1) {
+                e.preventDefault();
+                alert('«Gacha» sanasi «Dan» sanasidan oldin bo\'lmasin.');
+                return false;
+            }
+            syncHikvisionDateRange();
             var host = form.querySelector('input[name="hikvision_host"]');
             var port = form.querySelector('input[name="hikvision_port"]');
             var user = form.querySelector('input[name="hikvision_username"]');
@@ -305,25 +325,6 @@
             autoSyncTimer = setInterval(runAutoSync, mins * 60 * 1000);
         });
     }
-=======
-    if (!btn) return;
-    var inp = document.getElementById('hikvisionPassword');
-    var icon = document.getElementById('hikvisionPasswordIcon');
-    if (!inp || !icon) return;
-    btn.addEventListener('click', function() {
-        if (inp.type === 'password') {
-            inp.type = 'text';
-            icon.classList.remove('bi-eye');
-            icon.classList.add('bi-eye-slash');
-            btn.title = 'Parolni yashirish';
-        } else {
-            inp.type = 'password';
-            icon.classList.remove('bi-eye-slash');
-            icon.classList.add('bi-eye');
-            btn.title = 'Parolni ko\'rsatish';
-        }
-    });
->>>>>>> Incoming (Background Agent changes)
 })();
 </script>
 {% endblock %}
