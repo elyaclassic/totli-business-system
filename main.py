@@ -1,7 +1,7 @@
 
 # --- Barcha importlar ---
 
-from fastapi import FastAPI, Request, Depends, HTTPException, Form, Cookie, File, UploadFile
+from fastapi import FastAPI, Request, Depends, HTTPException, Form, Cookie, File, UploadFile, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response, StreamingResponse, JSONResponse
@@ -7854,13 +7854,13 @@ async def attendance_docs_list(
 @app.get("/employees/attendance/form", response_class=HTMLResponse)
 async def attendance_form(
     request: Request,
-    date_param: Optional[str] = None,
+    date_param: Optional[str] = Query(None, alias="date"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Tabel formasi — sana tanlash, shu kundagi yozuvlar, Hikvision yuklash"""
+    """Tabel formasi — sana tanlash, shu kundagi yozuvlar, Hikvision yuklash. Sana query ?date=YYYY-MM-DD orqali olinadi."""
     today = date.today()
-    form_date_str = date_param or today.strftime("%Y-%m-%d")
+    form_date_str = (date_param or "").strip() or today.strftime("%Y-%m-%d")
     try:
         form_date = datetime.strptime(form_date_str, "%Y-%m-%d").date()
     except ValueError:
@@ -8150,6 +8150,21 @@ async def employee_advance_add(
     return RedirectResponse(url="/employees/advances?added=1", status_code=303)
 
 
+@app.post("/employees/advances/delete/{advance_id}")
+async def employee_advance_delete(
+    advance_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Avansni ro'yxatdan o'chirish"""
+    adv = db.query(EmployeeAdvance).filter(EmployeeAdvance.id == advance_id).first()
+    if not adv:
+        return RedirectResponse(url="/employees/advances?error=Avans topilmadi", status_code=303)
+    db.delete(adv)
+    db.commit()
+    return RedirectResponse(url="/employees/advances?deleted=1", status_code=303)
+
+
 # ==========================================
 # OYLIK HISOBLASH
 # ==========================================
@@ -8291,12 +8306,15 @@ async def production_index_page(request: Request, db: Session = Depends(get_db),
 
     today = datetime.now().date()
     total_recipes = db.query(Recipe).filter(Recipe.is_active == True).count()
-    # Faqat joriy foydalanuvchiga tegishli: user_id yoki operator_id (xodim bog'langan bo'lsa)
+    # Operator/ishlab chiqarish rollari uchun faqat o'zining; admin/manager uchun barcha buyurtmalar
+    _operator_roles = ("production", "qadoqlash", "rahbar", "raxbar", "operator")
+    role = (getattr(current_user, "role", None) or "").strip().lower() if current_user else ""
+    filter_by_user = role in _operator_roles
     current_user_employee = None
     if current_user and getattr(current_user, "id", None):
         current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first()
     user_or_operator_filter = None
-    if current_user and getattr(current_user, "id", None):
+    if filter_by_user and current_user and getattr(current_user, "id", None):
         if current_user_employee:
             user_or_operator_filter = or_(
                 Production.user_id == current_user.id,
@@ -8305,28 +8323,40 @@ async def production_index_page(request: Request, db: Session = Depends(get_db),
         else:
             user_or_operator_filter = Production.user_id == current_user.id
 
-    today_productions = db.query(Production).filter(
-        Production.date >= today,
-        Production.status == "completed"
+    today_start = datetime.combine(today, datetime.min.time())
+    today_productions = (
+        db.query(Production)
+        .options(joinedload(Production.recipe))
+        .filter(
+            Production.date >= today_start,
+            Production.status == "completed"
+        )
     )
     if user_or_operator_filter is not None:
         today_productions = today_productions.filter(user_or_operator_filter)
     today_productions = today_productions.all()
-    today_quantity = sum((p.quantity or 0) for p in today_productions)
+    # Qiyom (oralama mahsulot) hisobga olinmaydi — faqat yarim tayyor / tayyor / dona; kg ga o'tkazamiz
+    today_quantity = 0.0
+    for p in today_productions:
+        if _is_qiyom_recipe(p.recipe):
+            continue
+        kg_per = _kg_per_unit_from_recipe(p.recipe) if p.recipe else 1.0
+        today_quantity += (p.quantity or 0) * (kg_per if kg_per and kg_per > 0 else 1.0)
     pending_productions = db.query(Production).filter(Production.status == "draft")
     if user_or_operator_filter is not None:
         pending_productions = pending_productions.filter(user_or_operator_filter)
     pending_productions = pending_productions.count()
-    recent_productions = (
+    recent_qry = (
         db.query(Production)
         .options(
             joinedload(Production.recipe).joinedload(Recipe.product).joinedload(Product.unit),
         )
-        .filter(user_or_operator_filter)
         .order_by(Production.date.desc())
         .limit(10)
-        .all()
-    ) if user_or_operator_filter is not None else []
+    )
+    if user_or_operator_filter is not None:
+        recent_qry = recent_qry.filter(user_or_operator_filter)
+    recent_productions = recent_qry.all()
 
     # Operator / ishlab chiqarish / qadoqlash uchun "Retseptlar" ro'yxati blokini yashirish
     _operator_type_roles = ("operator", "production", "qadoqlash")

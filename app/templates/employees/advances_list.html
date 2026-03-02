@@ -8,6 +8,12 @@
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% endif %}
+    {% if request.query_params.get('deleted') %}
+    <div class="alert alert-info alert-dismissible fade show py-2 small">
+        <i class="bi bi-trash"></i> Avans ro'yxatdan o'chirildi.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
     {% if request.query_params.get('error') %}
     <div class="alert alert-danger alert-dismissible fade show py-2 small">
         {{ request.query_params.get('error') }}
@@ -35,7 +41,7 @@
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small">Summa (so'm) *</label>
-                    <input type="number" name="amount" class="form-control form-control-sm" step="1000" min="1" required>
+                    <input type="number" name="amount" class="form-control form-control-sm" step="1" min="1" placeholder="Summa" required>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small">Sana *</label>
@@ -63,6 +69,7 @@
                             <th>Xodim</th>
                             <th>Summa (so'm)</th>
                             <th>Izoh</th>
+                            <th width="90">Amallar</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -72,9 +79,14 @@
                             <td>{{ a.employee.full_name }} <small class="text-muted">({{ a.employee.code }})</small></td>
                             <td class="text-success fw-bold">{{ "{:,.0f}".format(a.amount) }}</td>
                             <td><small>{{ a.note or '-' }}</small></td>
+                            <td>
+                                <form method="post" action="/employees/advances/delete/{{ a.id }}" class="d-inline" onsubmit="return confirm('Ushbu avansni ro\'yxatdan o\'chirmoqchimisiz?');">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="O'chirish"><i class="bi bi-trash"></i></button>
+                                </form>
+                            </td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="4" class="text-center text-muted py-4">Avanslar yo'q.</td></tr>
+                        <tr><td colspan="5" class="text-center text-muted py-4">Avanslar yo'q.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
