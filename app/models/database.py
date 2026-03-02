@@ -17,6 +17,13 @@ engine = create_engine(
     echo=False,
 )
 
+employee_piecework_tasks = Table(
+    "employee_piecework_tasks",
+    Base.metadata,
+    Column("employee_id", Integer, ForeignKey("employees.id"), primary_key=True),
+    Column("task_id", Integer, ForeignKey("piecework_tasks.id"), primary_key=True),
+)
+
 
 def _set_sqlite_pragma(conn, _):
     """Har bir ulanishda SQLite tezligini oshirish uchun PRAGMA."""
@@ -578,6 +585,20 @@ class Machine(Base):
     operator = relationship("Employee", foreign_keys=[operator_id])
 
 
+class PieceworkTask(Base):
+    """Bajariladigan ishlar (bo'lak narxi) — 1 birlik ish narxi."""
+    __tablename__ = "piecework_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(50), unique=True, index=True, nullable=True)
+    name = Column(String(200), nullable=True)
+    price_per_unit = Column(Float, default=0)
+    unit_name = Column(String(50), nullable=True)  # dona, kg, m
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+
 # ==========================================
 # KONTRAGENTLAR (MIJOZLAR, YETKAZUVCHILAR)
 # ==========================================
@@ -785,12 +806,15 @@ class Employee(Base):
     hire_date = Column(Date)
     birth_date = Column(Date, nullable=True)  # Tug'ilgan kun (bosh sahifa bildirishnomalari uchun)
     salary = Column(Float, default=0)
+    salary_type = Column(String(50), nullable=True)  # oylik, soatlik, bo'lak
+    piecework_task_id = Column(Integer, ForeignKey("piecework_tasks.id"), nullable=True)  # Bo'lak turi uchun ish
     is_active = Column(Boolean, default=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     hikvision_id = Column(String(50))  # Hikvision tizimidagi ID
     created_at = Column(DateTime, default=datetime.now)
 
     salaries = relationship("Salary", back_populates="employee")
+    piecework_tasks = relationship("PieceworkTask", secondary=employee_piecework_tasks, backref="employees")
 
 
 class Salary(Base):
@@ -861,18 +885,23 @@ class EmployeeAdvance(Base):
 
 
 class EmploymentDoc(Base):
-    """Ishga qabul qilish hujjati"""
+    """Ishga qabul qilish hujjati (Mehnat shartnomasi tamoyillari bo'yicha — O'zR Mehnat kodeksi, gov.uz)"""
     __tablename__ = "employment_docs"
     
     id = Column(Integer, primary_key=True, index=True)
     number = Column(String(50), unique=True, index=True)
     employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
-    doc_date = Column(Date, nullable=False)   # Hujjat sanasi
-    hire_date = Column(Date, nullable=True)   # Ishga kirgan sana
-    position = Column(String(100), nullable=True)
-    department = Column(String(100), nullable=True)
-    salary = Column(Float, default=0)
-    note = Column(String(500), nullable=True)
+    doc_date = Column(Date, nullable=False)   # Hujjat sanasi (imzolangan sana)
+    hire_date = Column(Date, nullable=True)   # Ishning boshlanish kuni
+    position = Column(String(100), nullable=True)   # Lavozim (mehnat vazifasi)
+    department = Column(String(100), nullable=True)   # Ish joyi (korxona/bo'lim)
+    salary = Column(Float, default=0)   # Mehnat haqi miqdori
+    salary_type = Column(String(50), nullable=True)   # oylik, soatlik, bo'lak — ish haqi turi
+    piecework_task_ids = Column(Text, nullable=True)  # Bo'lak turlari snapshot (vergul bilan)
+    # Mehnat shartnomasi muddati (gov.uz: nomuayyan / muayyan muddatga max 5 yil / muayyan ish)
+    contract_type = Column(String(50), nullable=True)   # indefinite, fixed, task
+    contract_end_date = Column(Date, nullable=True)   # Muayyan muddatga bo'lsa — amal qilish tugash sanasi
+    note = Column(String(500), nullable=True)   # Mehnatning boshqa shartlari
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     confirmed_at = Column(DateTime, nullable=True)   # Tasdiqlangan vaqti
     created_at = Column(DateTime, default=datetime.now)
@@ -1166,10 +1195,66 @@ def ensure_cash_register_payment_type():
 
 
 # Bazani yaratish — faqat jadvallar yaratiladi, mavjud ma'lumotlar o'chirilmaydi (saqlanadi)
+def ensure_employee_salary_type():
+    """employees jadvalida salary_type ustuni bo'lishini ta'minlash."""
+    try:
+        with engine.begin() as conn:
+            r = conn.execute(text("PRAGMA table_info(employees)"))
+            cols = [row[1] for row in r]
+            if "salary_type" not in cols:
+                conn.execute(text("ALTER TABLE employees ADD COLUMN salary_type VARCHAR(50)"))
+            if "piecework_task_id" not in cols:
+                conn.execute(text("ALTER TABLE employees ADD COLUMN piecework_task_id INTEGER REFERENCES piecework_tasks(id)"))
+    except Exception as e:
+        print(f"ensure_employee_salary_type: {e}")
+
+
+def ensure_employee_piecework_tasks_table():
+    """employee_piecework_tasks jadvali mavjudligini ta'minlash."""
+    try:
+        with engine.begin() as conn:
+            r = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='employee_piecework_tasks'"))
+            if r.fetchone() is None:
+                conn.execute(text("""
+                    CREATE TABLE employee_piecework_tasks (
+                        employee_id INTEGER NOT NULL REFERENCES employees(id),
+                        task_id INTEGER NOT NULL REFERENCES piecework_tasks(id),
+                        PRIMARY KEY (employee_id, task_id)
+                    )
+                """))
+    except Exception as e:
+        print(f"ensure_employee_piecework_tasks_table: {e}")
+
+
+def ensure_piecework_tasks_table():
+    """piecework_tasks jadvali mavjudligini ta'minlash."""
+    try:
+        with engine.begin() as conn:
+            r = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='piecework_tasks'"))
+            if r.fetchone() is None:
+                conn.execute(text("""
+                    CREATE TABLE piecework_tasks (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        code VARCHAR(50) UNIQUE,
+                        name VARCHAR(200),
+                        price_per_unit FLOAT DEFAULT 0,
+                        unit_name VARCHAR(50),
+                        description TEXT,
+                        is_active BOOLEAN DEFAULT 1,
+                        created_at DATETIME
+                    )
+                """))
+    except Exception as e:
+        print(f"ensure_piecework_tasks_table: {e}")
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     ensure_recipe_warehouse_columns()
     ensure_cash_register_payment_type()
+    ensure_piecework_tasks_table()
+    ensure_employee_salary_type()
+    ensure_employee_piecework_tasks_table()
     print("Database tayyor (mavjud ma'lumotlar saqlanadi).")
 
 
@@ -1239,6 +1324,11 @@ def ensure_attendance_advance_tables():
         ed_cols = [row[1] for row in r]
         if "confirmed_at" not in ed_cols:
             conn.execute(text("ALTER TABLE employment_docs ADD COLUMN confirmed_at DATETIME"))
+        for col, sql in [("contract_type", "VARCHAR(50)"), ("contract_end_date", "DATE"), ("salary_type", "VARCHAR(50)"), ("piecework_task_ids", "TEXT")]:
+            r = conn.execute(text("PRAGMA table_info(employment_docs)"))
+            ed_cols = [row[1] for row in r]
+            if col not in ed_cols:
+                conn.execute(text(f"ALTER TABLE employment_docs ADD COLUMN {col} {sql}"))
 
 
 if __name__ == "__main__":

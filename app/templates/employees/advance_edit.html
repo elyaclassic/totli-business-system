@@ -20,7 +20,8 @@
             <form method="post" action="/employees/advances/edit/{{ advance.id }}" class="row g-3">
                 <div class="col-md-3">
                     <label class="form-label small">Xodim *</label>
-                    <select name="employee_id" class="form-select form-select-sm" required>
+                    <select name="employee_id" class="form-select form-select-sm select-employee-searchable" required>
+                        <option value="">— Xodimni tanlang —</option>
                         {% for e in employees %}
                         <option value="{{ e.id }}" {% if e.id == advance.employee_id %}selected{% endif %}>{{ e.full_name }} ({{ e.code or e.id }})</option>
                         {% endfor %}

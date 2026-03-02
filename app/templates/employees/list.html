@@ -63,6 +63,7 @@
                             <th>Bo'lim</th>
                             <th>Telefon</th>
                             <th>Oylik</th>
+                            <th>Ish haqi turi</th>
                             <th width="160"></th>
                         </tr>
                     </thead>
@@ -81,6 +82,7 @@
                             <td>{{ emp.department or '-' }}</td>
                             <td>{{ emp.phone or '-' }}</td>
                             <td class="text-success">{{ "{:,.0f}".format(emp.salary) }}</td>
+                            <td><small>{% if emp.salary_type == 'oylik' %}Oylik{% elif emp.salary_type == 'soatlik' %}Soatlik{% elif emp.salary_type == "bo'lak" %}Bo'lak{% else %}—{% endif %}</small></td>
                             <td>
                                 <a href="/employees/hiring-doc/create?employee_id={{ emp.id }}" class="btn btn-sm btn-outline-secondary" title="Ishga qabul hujjati"><i class="bi bi-file-earmark-person"></i></a>
                                 <a href="/employees/edit/{{ emp.id }}" class="btn btn-sm btn-outline-primary" title="Tahrirlash">
@@ -141,15 +143,50 @@
                             <label class="form-label">Oylik</label>
                             <input type="number" class="form-control" name="salary" value="0" step="100000">
                         </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Ish haqi turi</label>
+                            <select class="form-select" name="salary_type">
+                                <option value="">— Tanlang —</option>
+                                <option value="oylik">Oylik</option>
+                                <option value="soatlik">Soatlik</option>
+                                <option value="bo'lak">Bo'lak</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Bo'lak ish</label>
+                            <div class="border rounded p-2" style="max-height: 160px; overflow:auto;">
+                                {% for t in piecework_tasks %}
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="piecework_task_ids" value="{{ t.id }}" id="emp_pw_{{ t.id }}">
+                                    <label class="form-check-label" for="emp_pw_{{ t.id }}">
+                                        {{ t.name or t.code or t.id }} — {{ "{:,.0f}".format(t.price_per_unit or 0) }} so'm/{{ t.unit_name or 'birlik' }}
+                                    </label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            <small class="text-muted">Ish haqi turi "Bo'lak" bo'lsa, bir nechta bo'lak ishlarni belgilash mumkin. Oylik = ishlab chiqarilgan miqdor × (belgilangan bo'lak stavkalari yig'indisi).</small>
+                        </div>
 
                         <!-- Oddiy xodim uchun -->
                         <div class="col-md-4 regular-fields">
                             <label class="form-label">Lavozimi</label>
-                            <input type="text" class="form-control" name="position">
+                            <select class="form-select" name="position">
+                                <option value="">— Tanlang —</option>
+                                {% for p in positions %}
+                                <option value="{{ p.name }}">{{ p.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <small class="text-muted">Ro'yxatda yo'q bo'lsa <a href="/info/positions" target="_blank">Lavozimlar</a> da qo'shing</small>
                         </div>
                         <div class="col-md-4 regular-fields">
                             <label class="form-label">Bo'lim</label>
-                            <input type="text" class="form-control" name="department">
+                            <select class="form-select" name="department">
+                                <option value="">— Tanlang —</option>
+                                {% for d in departments %}
+                                <option value="{{ d.name }}">{{ d.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <small class="text-muted">Ro'yxatda yo'q bo'lsa <a href="/info/departments" target="_blank">Bo'limlar</a> da qo'shing</small>
                         </div>
                         <div class="col-md-4 regular-fields">
                             <label class="form-label">Telefon</label>

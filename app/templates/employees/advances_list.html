@@ -50,7 +50,7 @@
             <form method="post" action="/employees/advances/add" class="row g-2 align-items-end">
                 <div class="col-md-3">
                     <label class="form-label small">Xodim *</label>
-                    <select name="employee_id" class="form-select form-select-sm" required>
+                    <select name="employee_id" class="form-select form-select-sm select-employee-searchable" required>
                         <option value="">Tanlang...</option>
                         {% for e in employees %}
                         <option value="{{ e.id }}">{{ e.full_name }} ({{ e.code }})</option>

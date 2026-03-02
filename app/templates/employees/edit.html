@@ -25,6 +25,30 @@
                         <label class="form-label">Oylik</label>
                         <input type="number" class="form-control" name="salary" value="{{ emp.salary or 0 }}" step="100000">
                     </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Ish haqi turi</label>
+                        <select class="form-select" name="salary_type">
+                            <option value="">— Tanlang —</option>
+                            <option value="oylik" {% if emp.salary_type == 'oylik' %}selected{% endif %}>Oylik</option>
+                            <option value="soatlik" {% if emp.salary_type == 'soatlik' %}selected{% endif %}>Soatlik</option>
+                            <option value="bo'lak" {% if emp.salary_type == "bo'lak" %}selected{% endif %}>Bo'lak</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Bo'lak ishlar (bir nechta tanlash mumkin)</label>
+                        <div class="border rounded p-2" style="max-height: 180px; overflow:auto;">
+                            {% for t in piecework_tasks %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="piecework_task_ids" value="{{ t.id }}" id="edit_pw_{{ t.id }}"
+                                    {% if emp.piecework_tasks and (t in emp.piecework_tasks) %}checked{% endif %}>
+                                <label class="form-check-label" for="edit_pw_{{ t.id }}">
+                                    {{ t.name or t.code or t.id }} — {{ "{:,.0f}".format(t.price_per_unit or 0) }} so'm/{{ t.unit_name or 'birlik' }}
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <small class="text-muted">Ish haqi turi "Bo'lak" bo'lsa, oylik = ishlab chiqarilgan miqdor × (tanlangan bo'lak stavkalari yig'indisi).</small>
+                    </div>
                     <div class="col-md-4">
                         <label class="form-label">Lavozimi</label>
                         <input type="text" class="form-control" name="position" value="{{ emp.position or '' }}">
