@@ -332,12 +332,14 @@ class StockAdjustmentDoc(Base):
     id = Column(Integer, primary_key=True, index=True)
     number = Column(String(50), unique=True, index=True)
     date = Column(DateTime, default=datetime.now)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)  # Inventarizatsiya: bitta hujjat = bitta ombor
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     status = Column(String(20), default="draft")  # draft, confirmed
     total_tannarx = Column(Float, default=0)   # Jami summa tannarx (so'm)
     total_sotuv = Column(Float, default=0)     # Jami sotuv summa (so'm)
     created_at = Column(DateTime, default=datetime.now)
 
+    warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
     user = relationship("User")
     items = relationship("StockAdjustmentDocItem", back_populates="doc", cascade="all, delete-orphan")
 
@@ -349,7 +351,8 @@ class StockAdjustmentDocItem(Base):
     doc_id = Column(Integer, ForeignKey("stock_adjustment_docs.id"))
     product_id = Column(Integer, ForeignKey("products.id"))
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"))
-    quantity = Column(Float)
+    quantity = Column(Float)                    # Haqiqiy (yangilangan) qoldiq
+    previous_quantity = Column(Float, nullable=True)  # Tasdiqlashdan oldingi qoldiq (bekor qilish uchun)
     cost_price = Column(Float, default=0)   # Tannarx (so'm)
     sale_price = Column(Float, default=0)     # Sotuv narxi (so'm)
 

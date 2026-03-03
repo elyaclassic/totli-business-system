@@ -7,25 +7,31 @@
     </div>
 </div>
 
+{% if error_message %}
+<div class="alert alert-danger mb-3" role="alert">
+    <strong>Xatolik:</strong> {{ error_message }}
+</div>
+{% endif %}
+
 <div class="card">
     <div class="card-header">
         <i class="bi bi-clock-history"></i> Mahsulot harakati tarixi — qayerdan keldi / qayerga ketdi
     </div>
     <div class="card-body">
-        <p class="text-muted small mb-3">1C dagi qoldiqlar bo'limidagi kabi: tanlangan ombor va mahsulot uchun barcha kirim/chiqim harakatlari (hujjat turi, raqam, sana, o'zgarish, qoldiq) ko'rinadi.</p>
+        <p class="text-muted small mb-3">Tanlanmasa barcha mahsulotlar harakati ko'rinadi. Ma'lum ombor yoki mahsulotni tekshirish kerak bo'lsa — filtrni to'ldiring va «Ko'rish» bosing.</p>
         <form method="get" action="/qoldiqlar/tarix" class="row g-3 align-items-end" id="tarixForm">
             <div class="col-md-4">
-                <label class="form-label">Ombor</label>
-                <select name="warehouse_id" class="form-select" required id="tarix_warehouse_select">
-                    <option value="">Tanlang</option>
+                <label class="form-label">Ombor (ixtiyoriy)</label>
+                <select name="warehouse_id" class="form-select" id="tarix_warehouse_select">
+                    <option value="">— Barchasi —</option>
                     {% for wh in warehouses or [] %}
                     <option value="{{ wh.id }}" {% if selected_warehouse_id and selected_warehouse_id == wh.id %}selected{% endif %}>{{ wh.name }}</option>
                     {% endfor %}
                 </select>
             </div>
             <div class="col-md-4 position-relative">
-                <label class="form-label">Mahsulot</label>
-                <input type="text" class="form-control" id="tarix_product_input" placeholder="Nomi yoki kod bo'yicha yozib qidiring..." autocomplete="off" value="">
+                <label class="form-label">Mahsulot (ixtiyoriy)</label>
+                <input type="text" class="form-control" id="tarix_product_input" placeholder="Nomi yoki kod bo'yicha qidirish..." autocomplete="off" value="">
                 <input type="hidden" name="product_id" id="tarix_product_id_hidden" value="{{ selected_product_id or '' }}">
                 <div id="tarix_product_results" class="list-group position-absolute bg-white border" style="z-index: 1000; max-height: 280px; overflow-y: auto; display: none; left: 0; right: 0; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border-radius: 0.25rem; margin-top: 2px;"></div>
                 <select id="tarix_product_select" style="display: none;" aria-hidden="true">
@@ -37,9 +43,49 @@
             </div>
             <div class="col-md-4">
                 <button type="submit" class="btn btn-primary"><i class="bi bi-eye"></i> Ko'rish</button>
+                {% if selected_warehouse_id and selected_product_id %}
+                <a href="/reports/stock/source?warehouse_id={{ selected_warehouse_id }}&product_id={{ selected_product_id }}" class="btn btn-outline-info btn-sm ms-2" target="_blank">Batafsil (qoldiq harakatdan keyin)</a>
+                {% endif %}
             </div>
         </form>
     </div>
+    {% if movements is defined and movements %}
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Sana</th>
+                        <th>Ombor</th>
+                        <th>Mahsulot</th>
+                        <th>Hujjat turi</th>
+                        <th>Hujjat raqami</th>
+                        <th class="text-end">O'zgarish (+/−)</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in movements %}
+                    <tr>
+                        <td>{{ m.date }}</td>
+                        <td>{{ m.warehouse_name }}</td>
+                        <td>{{ m.product_name }}{% if m.product_code %} <small class="text-muted">({{ m.product_code }})</small>{% endif %}</td>
+                        <td>{{ m.doc_type_label }}</td>
+                        <td><code>{{ m.doc_number }}</code></td>
+                        <td class="text-end {% if m.quantity_change >= 0 %}text-success{% else %}text-danger{% endif %}">{{ "{:+,.3f}".format(m.quantity_change) }}</td>
+                        <td>{% if m.warehouse_id is not none and m.product_id is not none %}<a href="/reports/stock/source?warehouse_id={{ m.warehouse_id }}&product_id={{ m.product_id }}" class="btn btn-sm btn-outline-secondary" title="Bu ombor + mahsulot uchun batafsil tarix"><i class="bi bi-box-arrow-up-right"></i></a>{% else %}—{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="text-muted small px-3 py-2 mb-0">Oxirgi 500 ta harakat. Aniqlashtirish uchun ombor yoki mahsulotni tanlang.</p>
+    </div>
+    {% else %}
+    <div class="card-body">
+        <p class="text-muted mb-0">Harakatlar topilmadi. Filtrni o'zgartiring yoki boshqa ombor/mahsulot tanlang.</p>
+    </div>
+    {% endif %}
 </div>
 
 <style>
@@ -111,19 +157,7 @@
         });
     }
 
-    if (form) {
-        form.addEventListener('submit', function(e) {
-            if (!(productIdHidden && productIdHidden.value)) {
-                e.preventDefault();
-                if (productInput) {
-                    productInput.focus();
-                    productInput.select();
-                }
-                alert('Mahsulotni yozib qidirib tanlang.');
-                return false;
-            }
-        });
-    }
+    // Filtr ixtiyoriy — tanlanmasa ham forma yuboriladi, barcha harakatlar ko'rinadi
 })();
 </script>
 {% endblock %}

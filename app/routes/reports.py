@@ -168,6 +168,7 @@ async def report_stock(
     merged: int = None,
     cleared: int = None,
     recalculated: int = None,
+    cleanup: int = None,
     msg: str = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
@@ -202,6 +203,7 @@ async def report_stock(
         "merged": merged,
         "cleared": cleared,
         "recalculated": recalculated,
+        "cleanup": cleanup,
         "msg": msg,
         "today": datetime.now().strftime("%Y-%m-%d"),
         "page_title": "Qoldiq hisoboti",
@@ -261,7 +263,7 @@ async def report_stock_source(
             StockMovement.warehouse_id == warehouse_id,
             StockMovement.product_id == product_id,
         )
-        .order_by(StockMovement.created_at.desc())
+        .order_by(StockMovement.created_at.asc())
         .all()
     )
     # Faqat tasdiqlangan qoldiq tuzatish hujjatlarini ko'rsatamiz; qoralama/o'chirilganlarni olib tashlaymiz
@@ -340,14 +342,14 @@ async def report_stock_source(
         if abs(expected - change) > 0.001:
             r["quantity_mismatch"] = True
             r["document_quantity"] = expected
-    # Qoldiq (harakatdan keyin) — ketma-ket yig'indi (eng eski harakatdan boshlab), eski yozuvlardagi xatolarni bartaraf etish
+    # Tartib: birinchi qator = eng eski harakat (birinchi qoldiq tushuriladi), oxirgi = eng so'nggi harakat
+    rows.sort(key=lambda r: (r.get("date") or "", r.get("document_id") or 0))
+    # Qoldiq (harakatdan keyin) — ketma-ket yig'indi
     if rows:
-        chronological = list(reversed(rows))
         balance = 0.0
-        for r in chronological:
+        for r in rows:
             balance += r["quantity_change"]
             r["quantity_after"] = round(balance, 6)
-        rows = list(reversed(chronological))
     current_stock = db.query(Stock).filter(
         Stock.warehouse_id == warehouse_id,
         Stock.product_id == product_id,
@@ -498,6 +500,47 @@ async def report_stock_clear(
         url=f"/reports/stock?cleared={deleted}&msg=" + quote("Stock jadvali tozalandi. Qoldiq hisoboti endi bo'sh."),
         status_code=303,
     )
+
+
+@router.post("/stock/cleanup-orphans")
+async def report_stock_cleanup_orphans(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """O'chirilgan ma'lumotlarni tozalash: Product yoki Warehouse mavjud bo'lmagan Stock, StockMovement, StockAdjustmentDocItem yozuvlarini o'chirish (faqat admin)."""
+    from urllib.parse import quote
+    valid_product_ids = {r[0] for r in db.query(Product.id).all()}
+    valid_warehouse_ids = {r[0] for r in db.query(Warehouse.id).all()}
+    valid_doc_ids = {r[0] for r in db.query(StockAdjustmentDoc.id).all()}
+
+    # Stock: product_id yoki warehouse_id mavjud emas
+    deleted_stock = 0
+    for s in db.query(Stock).all():
+        if (s.product_id not in valid_product_ids) or (s.warehouse_id not in valid_warehouse_ids):
+            db.delete(s)
+            deleted_stock += 1
+
+    # StockMovement: product_id yoki warehouse_id mavjud emas
+    deleted_movements = 0
+    for m in db.query(StockMovement).all():
+        if (m.product_id not in valid_product_ids) or (m.warehouse_id not in valid_warehouse_ids):
+            db.delete(m)
+            deleted_movements += 1
+
+    # StockAdjustmentDocItem: product_id, warehouse_id yoki doc_id mavjud emas
+    deleted_items = 0
+    for it in db.query(StockAdjustmentDocItem).all():
+        if (
+            (it.product_id is not None and it.product_id not in valid_product_ids)
+            or (it.warehouse_id is not None and it.warehouse_id not in valid_warehouse_ids)
+            or (it.doc_id is not None and it.doc_id not in valid_doc_ids)
+        ):
+            db.delete(it)
+            deleted_items += 1
+
+    db.commit()
+    msg = f"Tozalandi: Stock {deleted_stock}, StockMovement {deleted_movements}, Qoldiq hujjat qatorlari {deleted_items}."
+    return RedirectResponse(url=f"/reports/stock?cleanup=1&msg=" + quote(msg), status_code=303)
 
 
 def _stock_report_filtered(db: Session, wh_id: int = None):

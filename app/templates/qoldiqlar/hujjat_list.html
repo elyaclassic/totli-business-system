@@ -11,6 +11,13 @@
         <a href="/qoldiqlar/tovar/hujjat/new" class="btn btn-success"><i class="bi bi-plus-circle"></i> Yaratish</a>
     </div>
 
+    {% if reverted %}
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        Tasdiqlash bekor qilindi. Hujjat qoralamaga o'tkazildi.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
     <div class="card">
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -43,6 +50,12 @@
                             </td>
                             <td>
                                 <a href="/qoldiqlar/tovar/hujjat/{{ d.id }}" class="btn btn-sm btn-outline-primary">Ochish</a>
+                                {% if current_user.role == 'admin' and d.status != 'draft' %}
+                                <form method="post" action="{% if d.warehouse_id %}/inventory/{{ d.id }}/revoke{% else %}/qoldiqlar/tovar/hujjat/{{ d.id }}/revert{% endif %}" class="d-inline ms-1" onsubmit="return confirm('Tasdiqni bekor qilishni xohlaysizmi? Ombordagi qoldiq qayta hisoblanadi.');">
+                                    {% if d.warehouse_id %}<input type="hidden" name="return_to" value="list">{% endif %}
+                                    <button type="submit" class="btn btn-sm btn-outline-warning" title="Tasdiqlashni bekor qilish">Tasdiqni bekor qilish</button>
+                                </form>
+                                {% endif %}
                             </td>
                         </tr>
                         {% else %}

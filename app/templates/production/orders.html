@@ -48,6 +48,12 @@
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 {% endif %}
+{% if error in ("not_found", "forbidden", "invalid") and error_detail %}
+<div id="production-error-alert" class="alert alert-warning alert-dismissible fade show" role="alert">
+    {{ error_detail|e }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
 {% if request.query_params.get('operator_set') %}
 <div class="alert alert-success alert-dismissible fade show py-2 small">
     <i class="bi bi-check-circle"></i> Operator belgilandi. Oylik hisoblash sahifasida shu oy uchun kg avtomatik chiqadi.

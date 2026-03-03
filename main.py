@@ -2292,33 +2292,104 @@ async def qoldiqlar_page(request: Request, db: Session = Depends(get_db), curren
     })
 
 
+def _tarix_doc_type_label(doc_type: str) -> str:
+    """Hujjat turi uchun o'qiladigan nom (tarix sahifasi)."""
+    labels = {
+        "Purchase": "Kirim",
+        "Production": "Ishlab chiqarish",
+        "WarehouseTransfer": "Ombordan omborga",
+        "StockAdjustmentDoc": "Qoldiq tuzatish",
+        "Sale": "Sotuv",
+        "SaleReturn": "Qaytish",
+    }
+    return labels.get(doc_type or "", doc_type or "—")
+
+
 @app.get("/qoldiqlar/tarix", response_class=HTMLResponse)
 async def qoldiqlar_tarix(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
-    warehouse_id: Optional[int] = None,
-    product_id: Optional[int] = None,
+    warehouse_id: Optional[str] = None,
+    product_id: Optional[str] = None,
 ):
-    """Mahsulot harakati tarixi — ombor va mahsulot tanlash; tanlansa Qoldiq manbai hisobotiga yo'naltirish."""
-    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
-    products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
-    if warehouse_id and product_id:
-        return RedirectResponse(
-            url=f"/reports/stock/source?warehouse_id={warehouse_id}&product_id={product_id}",
-            status_code=303,
-        )
-    selected_product_id = int(product_id) if product_id else None
-    selected_warehouse_id = int(warehouse_id) if warehouse_id else None
-    return templates.TemplateResponse("qoldiqlar/tarix.html", {
-        "request": request,
-        "current_user": current_user,
-        "warehouses": warehouses,
-        "products": products,
-        "selected_product_id": selected_product_id,
-        "selected_warehouse_id": selected_warehouse_id,
-        "page_title": "Qoldiqlar — Mahsulot harakati tarixi",
-    })
+    """Mahsulot harakati tarixi — tanlanmasa barcha harakatlar; filtr ixtiyoriy (ombor/mahsulot)."""
+    try:
+        warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
+        products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
+        try:
+            selected_warehouse_id = int(warehouse_id) if (warehouse_id and str(warehouse_id).strip()) else None
+        except (ValueError, TypeError):
+            selected_warehouse_id = None
+        try:
+            selected_product_id = int(product_id) if (product_id and str(product_id).strip()) else None
+        except (ValueError, TypeError):
+            selected_product_id = None
+
+        q = db.query(StockMovement)
+        if selected_warehouse_id:
+            q = q.filter(StockMovement.warehouse_id == selected_warehouse_id)
+        if selected_product_id:
+            q = q.filter(StockMovement.product_id == selected_product_id)
+        q = q.order_by(StockMovement.created_at.desc()).limit(500)
+        movements = q.all()
+
+        movement_rows = []
+        warehouse_ids = [m.warehouse_id for m in movements if m.warehouse_id is not None]
+        product_ids = [m.product_id for m in movements if m.product_id is not None]
+        wh_by_id = {}
+        if warehouse_ids:
+            for w in db.query(Warehouse).filter(Warehouse.id.in_(list(set(warehouse_ids)))).all():
+                wh_by_id[w.id] = w
+        prod_by_id = {}
+        if product_ids:
+            for p in db.query(Product).filter(Product.id.in_(list(set(product_ids)))).all():
+                prod_by_id[p.id] = p
+        for m in movements:
+            wh = wh_by_id.get(m.warehouse_id) if m.warehouse_id is not None else None
+            pr = prod_by_id.get(m.product_id) if m.product_id is not None else None
+            movement_rows.append({
+                "date": m.created_at.strftime("%d.%m.%Y %H:%M") if m.created_at else "—",
+                "warehouse_name": (getattr(wh, "name", None) if wh else None) or (f"#{m.warehouse_id}" if m.warehouse_id is not None else "—"),
+                "product_name": (getattr(pr, "name", None) if pr else None) or (f"#{m.product_id}" if m.product_id is not None else "—"),
+                "product_code": (getattr(pr, "code", None) or "") if pr else "",
+                "doc_type_label": _tarix_doc_type_label(m.document_type or ""),
+                "doc_number": m.document_number or (f"{m.document_type or ''}-{m.document_id}" if m.document_id else "—"),
+                "quantity_change": float(m.quantity_change or 0),
+                "warehouse_id": m.warehouse_id,
+                "product_id": m.product_id,
+            })
+
+        return templates.TemplateResponse("qoldiqlar/tarix.html", {
+            "request": request,
+            "current_user": current_user,
+            "warehouses": warehouses,
+            "products": products,
+            "selected_product_id": selected_product_id,
+            "selected_warehouse_id": selected_warehouse_id,
+            "movements": movement_rows,
+            "page_title": "Qoldiqlar — Mahsulot harakati tarixi",
+        })
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("qoldiqlar_tarix: %s", e)
+        try:
+            _wh = db.query(Warehouse).filter(Warehouse.is_active == True).all()
+            _pr = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
+        except Exception:
+            _wh = []
+            _pr = []
+        return templates.TemplateResponse("qoldiqlar/tarix.html", {
+            "request": request,
+            "current_user": current_user,
+            "warehouses": _wh,
+            "products": _pr,
+            "selected_product_id": None,
+            "selected_warehouse_id": None,
+            "movements": [],
+            "page_title": "Qoldiqlar — Mahsulot harakati tarixi",
+            "error_message": str(e),
+        }, status_code=500)
 
 
 @app.post("/qoldiqlar/kassa/{cash_id}")
@@ -2940,11 +3011,13 @@ async def qoldiqlar_tovar_hujjat_list(
         .limit(200)
         .all()
     )
+    reverted = request.query_params.get("reverted") == "1"
     return templates.TemplateResponse("qoldiqlar/hujjat_list.html", {
         "request": request,
         "docs": docs,
         "current_user": current_user,
         "page_title": "Tovar qoldiqlari hujjatlari",
+        "reverted": reverted,
     })
 
 
@@ -3373,9 +3446,10 @@ async def qoldiqlar_tovar_hujjat_revert(
             if stock.quantity < 0:
                 stock.quantity = 0
             stock.updated_at = datetime.now()
+    delete_stock_movements_for_document(db, "StockAdjustmentDoc", doc_id)
     doc.status = "draft"
     db.commit()
-    return RedirectResponse(url=f"/qoldiqlar/tovar/hujjat/{doc_id}", status_code=303)
+    return RedirectResponse(url="/qoldiqlar/tovar/hujjat?reverted=1", status_code=303)
 
 
 @app.post("/qoldiqlar/tovar/hujjat/{doc_id}/delete")
@@ -4359,13 +4433,27 @@ def create_stock_movement(
     user_id: int = None,
     note: str = None
 ):
-    """Har bir operatsiya uchun StockMovement yozuvini yaratish"""
-    # Stock ni topish yoki yaratish
-    stock = db.query(Stock).filter(
+    """Har bir operatsiya uchun StockMovement yozuvini yaratish.
+    Chiqim (quantity_change < 0) bo'lganda avval bitta ombor+mahsulot uchun barcha Stock qatorlarini birlashtiradi."""
+    rows = db.query(Stock).filter(
         Stock.warehouse_id == warehouse_id,
         Stock.product_id == product_id
-    ).first()
-    
+    ).all()
+    # Bir nechta qator bo'lsa (dublikat) — bitta qatorga yig'ib, qolganini o'chirish (ayniqsa chiqimda muhim)
+    if len(rows) > 1:
+        total = sum(float(r.quantity or 0) for r in rows)
+        keep = rows[0]
+        keep.quantity = total
+        keep.updated_at = datetime.now()
+        for r in rows[1:]:
+            db.delete(r)
+        db.flush()
+        stock = keep
+    elif len(rows) == 1:
+        stock = rows[0]
+    else:
+        stock = None
+
     # Qoldiqni yangilash
     if stock:
         stock.quantity = (stock.quantity or 0) + quantity_change
@@ -4402,6 +4490,558 @@ def create_stock_movement(
     )
     db.add(movement)
     return movement
+
+
+def delete_stock_movements_for_document(db: Session, document_type: str, document_id: int) -> int:
+    """Hujjat tasdiqi bekor qilinganda shu hujjatga tegishli StockMovement yozuvlarini o'chiradi.
+    Natijada «Mahsulot harakati tarixi» da bekor qilingan harakatlar ko'rinmaydi."""
+    deleted = db.query(StockMovement).filter(
+        StockMovement.document_type == document_type,
+        StockMovement.document_id == document_id,
+    ).delete(synchronize_session=False)
+    return deleted
+
+
+# ==========================================
+# INVENTARIZATSIYA
+# ==========================================
+
+def _ensure_inventory_columns(db: Session) -> None:
+    """SQLite: stock_adjustment_docs.warehouse_id va stock_adjustment_doc_items.previous_quantity ustunlari yo'q bo'lsa qo'shadi."""
+    try:
+        r = db.execute(text("PRAGMA table_info(stock_adjustment_docs)"))
+        cols_doc = [row[1] for row in r.fetchall()]
+        if "warehouse_id" not in cols_doc:
+            db.execute(text("ALTER TABLE stock_adjustment_docs ADD COLUMN warehouse_id INTEGER REFERENCES warehouses(id)"))
+            db.commit()
+        r = db.execute(text("PRAGMA table_info(stock_adjustment_doc_items)"))
+        cols_item = [row[1] for row in r.fetchall()]
+        if "previous_quantity" not in cols_item:
+            db.execute(text("ALTER TABLE stock_adjustment_doc_items ADD COLUMN previous_quantity REAL"))
+            db.commit()
+    except Exception:
+        db.rollback()
+
+
+@app.get("/inventory", response_class=HTMLResponse)
+async def inventory_list_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Inventarizatsiya hujjatlari ro'yxati (warehouse_id to'ldirilgan hujjatlar)."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    migration_warning = None
+    try:
+        docs = (
+            db.query(StockAdjustmentDoc)
+            .filter(StockAdjustmentDoc.warehouse_id.isnot(None))
+            .order_by(StockAdjustmentDoc.created_at.desc())
+            .limit(200)
+            .all()
+        )
+    except Exception:
+        try:
+            _ensure_inventory_columns(db)
+            docs = (
+                db.query(StockAdjustmentDoc)
+                .filter(StockAdjustmentDoc.warehouse_id.isnot(None))
+                .order_by(StockAdjustmentDoc.created_at.desc())
+                .limit(200)
+                .all()
+            )
+        except Exception:
+            docs = []
+            migration_warning = "Inventarizatsiya uchun bazada warehouse_id ustuni kerak. Loyiha ildizida: alembic upgrade head"
+    message = request.query_params.get("message", "").strip()
+    return templates.TemplateResponse("inventory/list.html", {
+        "request": request,
+        "docs": docs,
+        "current_user": current_user,
+        "page_title": "Inventarizatsiya",
+        "migration_warning": migration_warning,
+        "message": message,
+    })
+
+
+@app.get("/inventory/new", response_class=HTMLResponse)
+async def inventory_new_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Yangi inventarizatsiya hujjati — avval ombor tanlash, keyin bo'sh hujjat yaratib tahrirlashga yo'naltirish."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
+    return templates.TemplateResponse("inventory/new.html", {
+        "request": request,
+        "warehouses": warehouses,
+        "current_user": current_user,
+        "page_title": "Inventarizatsiya — yangi hujjat",
+    })
+
+
+@app.post("/inventory/create-draft")
+async def inventory_create_draft(
+    warehouse_id: int = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Bo'sh qoralama hujjat yaratish va tahrirlash sahifasiga yo'naltirish."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    wh = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+    if not wh:
+        return RedirectResponse(url="/inventory/new?message=Ombor topilmadi.", status_code=303)
+    today = datetime.now()
+    count = db.query(StockAdjustmentDoc).filter(
+        StockAdjustmentDoc.date >= today.replace(hour=0, minute=0, second=0)
+    ).count()
+    number = f"INV-{today.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
+    doc = StockAdjustmentDoc(
+        number=number,
+        date=today,
+        warehouse_id=warehouse_id,
+        user_id=current_user.id,
+        status="draft",
+        total_tannarx=0,
+        total_sotuv=0,
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return RedirectResponse(url=f"/inventory/{doc.id}/edit", status_code=303)
+
+
+@app.get("/inventory/{doc_id}/edit", response_class=HTMLResponse)
+async def inventory_edit_page(
+    doc_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Inventarizatsiya hujjatini tahrirlash (faqat qoralama)."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Hujjat topilmadi")
+    if doc.status != "draft":
+        return RedirectResponse(url=f"/inventory/{doc_id}", status_code=303)
+    if not doc.warehouse_id:
+        return RedirectResponse(url="/inventory", status_code=303)
+    warehouse = doc.warehouse
+    wh_id = doc.warehouse_id
+    # Hisobiy qoldiq = hozirgi Stock yig'indisi (har bir mahsulot uchun)
+    stocks_by_product = {}
+    for s in db.query(Stock).filter(Stock.warehouse_id == wh_id).all():
+        pid = s.product_id
+        stocks_by_product[pid] = stocks_by_product.get(pid, 0) + float(s.quantity or 0)
+    by_product = {}
+    for item in doc.items:
+        pid = item.product_id
+        if pid not in by_product:
+            prod = item.product
+            by_product[pid] = {
+                "item_id": item.id,
+                "product_id": pid,
+                "product_name": (prod.name or "") if prod else "",
+                "product_code": (prod.code or "") if prod else "",
+                "current_quantity": stocks_by_product.get(pid, 0),
+                "actual_quantity": float(item.quantity or 0),
+                "cost_price": float(item.cost_price or 0),
+                "sale_price": float(item.sale_price or 0),
+            }
+    product_ids_in_doc = set(by_product.keys())
+    if product_ids_in_doc:
+        products_to_add = db.query(Product).filter(Product.is_active == True).filter(~Product.id.in_(product_ids_in_doc)).order_by(Product.name).all()
+    else:
+        products_to_add = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
+    products_data = sorted(by_product.values(), key=lambda x: (x["product_name"].lower(), x["product_id"]))
+    show_tannarx = getattr(current_user, "role", None) == "admin"
+    return templates.TemplateResponse("inventory/edit.html", {
+        "request": request,
+        "doc": doc,
+        "warehouse": warehouse,
+        "products_data": products_data,
+        "products_to_add": products_to_add,
+        "show_tannarx": show_tannarx,
+        "current_user": current_user,
+        "page_title": "Inventarizatsiya — tahrirlash",
+    })
+
+
+@app.post("/inventory/{doc_id}/load")
+async def inventory_load_warehouse(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Shu ombor qoldiq tovarlarini hujjatga yuklash (dublikatlarni birlashtirib)."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
+    if not doc or doc.status != "draft" or not doc.warehouse_id:
+        return RedirectResponse(url="/inventory", status_code=303)
+    wh_id = doc.warehouse_id
+    stocks = (
+        db.query(Stock, Product, Unit)
+        .join(Product, Stock.product_id == Product.id)
+        .outerjoin(Unit, Product.unit_id == Unit.id)
+        .filter(Stock.warehouse_id == wh_id)
+        .filter(Product.is_active == True)
+        .all()
+    )
+    by_product = {}
+    for stock, product, unit in stocks:
+        pid = product.id
+        qty = float(stock.quantity or 0)
+        if pid not in by_product:
+            by_product[pid] = qty
+        else:
+            by_product[pid] += qty
+    existing_ids = {item.product_id for item in doc.items}
+    for pid, qty in by_product.items():
+        if qty is None or float(qty or 0) <= 0:
+            continue
+        if pid in existing_ids:
+            continue
+        product = db.query(Product).filter(Product.id == pid).first()
+        if not product:
+            continue
+        cost = float(product.purchase_price or 0)
+        sale = float(product.sale_price or 0)
+        if (product.sale_price or 0) <= 0:
+            pp = db.query(ProductPrice).filter(ProductPrice.product_id == pid).first()
+            if pp:
+                sale = float(pp.sale_price or 0)
+        db.add(StockAdjustmentDocItem(
+            doc_id=doc_id,
+            product_id=pid,
+            warehouse_id=wh_id,
+            quantity=qty,
+            cost_price=cost,
+            sale_price=sale,
+        ))
+        existing_ids.add(pid)
+    db.commit()
+    return RedirectResponse(url=f"/inventory/{doc_id}/edit?message=Qoldiq tovarlar yuklandi.", status_code=303)
+
+
+@app.post("/inventory/{doc_id}/add-product")
+async def inventory_add_product(
+    doc_id: int,
+    product_id: int = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Hujjatga bitta tovar qo'shish (qoldiq 0)."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
+    if not doc or doc.status != "draft" or not doc.warehouse_id:
+        return RedirectResponse(url="/inventory", status_code=303)
+    if any(item.product_id == product_id for item in doc.items):
+        return RedirectResponse(url=f"/inventory/{doc_id}/edit?message=Ushbu tovar allaqachon jadvalda.", status_code=303)
+    product = db.query(Product).filter(Product.id == product_id, Product.is_active == True).first()
+    if not product:
+        return RedirectResponse(url=f"/inventory/{doc_id}/edit?message=Tovar topilmadi.", status_code=303)
+    cost = float(product.purchase_price or 0)
+    sale = float(product.sale_price or 0)
+    if (product.sale_price or 0) <= 0:
+        pp = db.query(ProductPrice).filter(ProductPrice.product_id == product_id).first()
+        if pp:
+            sale = float(pp.sale_price or 0)
+    db.add(StockAdjustmentDocItem(
+        doc_id=doc_id,
+        product_id=product_id,
+        warehouse_id=doc.warehouse_id,
+        quantity=0,
+        cost_price=cost,
+        sale_price=sale,
+    ))
+    db.commit()
+    return RedirectResponse(url=f"/inventory/{doc_id}/edit?message=Tovar qo'shildi.", status_code=303)
+
+
+@app.post("/inventory/{doc_id}/remove-zero-balance")
+async def inventory_remove_zero_balance(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Hujjatdan shu omborda hozirgi qoldig'i 0 bo'lgan qatorlarni olib tashlash (o'tkazilgan tovarlar ro'yxatda qolmasin)."""
+    from urllib.parse import quote
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
+    if not doc or doc.status != "draft" or not doc.warehouse_id:
+        return RedirectResponse(url="/inventory", status_code=303)
+    wh_id = doc.warehouse_id
+    removed = 0
+    for item in list(doc.items):
+        total = sum(
+            float(s.quantity or 0)
+            for s in db.query(Stock).filter(
+                Stock.warehouse_id == wh_id,
+                Stock.product_id == item.product_id,
+            ).all()
+        )
+        if total <= 0:
+            db.delete(item)
+            removed += 1
+    db.commit()
+    msg = f"0 qoldiqli {removed} ta qator olib tashlandi." if removed else "0 qoldiqli qatorlar yo'q."
+    return RedirectResponse(url=f"/inventory/{doc_id}/edit?message=" + quote(msg), status_code=303)
+
+
+@app.post("/inventory/{doc_id}/save")
+async def inventory_save_draft(
+    doc_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Qoralama hujjatni saqlash (haqiqiy qoldiqlarni yangilash)."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
+    if not doc or doc.status != "draft":
+        return RedirectResponse(url="/inventory", status_code=303)
+    form = await request.form()
+    item_ids = form.getlist("item_id")
+    quantities = form.getlist("actual_quantity")
+    total_tannarx = 0.0
+    total_sotuv = 0.0
+    for i, iid in enumerate(item_ids):
+        if not iid:
+            continue
+        try:
+            item_id = int(iid)
+            qty = float(quantities[i]) if i < len(quantities) and str(quantities[i]).strip() != "" else 0
+        except (TypeError, ValueError):
+            continue
+        item = db.query(StockAdjustmentDocItem).filter(
+            StockAdjustmentDocItem.id == item_id,
+            StockAdjustmentDocItem.doc_id == doc_id,
+        ).first()
+        if item:
+            item.quantity = qty
+            total_tannarx += qty * float(item.cost_price or 0)
+            total_sotuv += qty * float(item.sale_price or 0)
+    doc.total_tannarx = total_tannarx
+    doc.total_sotuv = total_sotuv
+    db.commit()
+    return RedirectResponse(url=f"/inventory/{doc_id}/edit?message=Saqlandi.", status_code=303)
+
+
+@app.get("/inventory/{doc_id}", response_class=HTMLResponse)
+async def inventory_view_page(
+    doc_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Inventarizatsiya hujjatini ko'rish (tasdiqlangan: faqat ko'rish + bekor qilish; qoralama: tahrirlashga yo'naltirish)."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Hujjat topilmadi")
+    if doc.status == "draft":
+        return RedirectResponse(url=f"/inventory/{doc_id}/edit", status_code=303)
+    if not doc.warehouse_id:
+        return RedirectResponse(url="/inventory", status_code=303)
+    warehouse = doc.warehouse
+    rows = []
+    for item in doc.items:
+        prod = item.product
+        rows.append({
+            "product_name": (prod.name or "") if prod else "",
+            "product_code": (prod.code or "") if prod else "",
+            "quantity": float(item.quantity or 0),
+            "cost_price": float(item.cost_price or 0),
+            "sale_price": float(item.sale_price or 0),
+        })
+    show_tannarx = getattr(current_user, "role", None) == "admin"
+    return templates.TemplateResponse("inventory/view.html", {
+        "request": request,
+        "doc": doc,
+        "warehouse": warehouse,
+        "rows": rows,
+        "show_tannarx": show_tannarx,
+        "current_user": current_user,
+        "page_title": "Inventarizatsiya — " + (doc.number or ""),
+    })
+
+
+@app.post("/inventory/{doc_id}/confirm")
+async def inventory_confirm(
+    doc_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Hujjatni tasdiqlash — formadagi haqiqiy qoldiqlarni saqlab, ombor qoldiqlarini yangilash."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
+    if not doc or doc.status != "draft" or not doc.warehouse_id:
+        return RedirectResponse(url="/inventory", status_code=303)
+    if not doc.items:
+        return RedirectResponse(url=f"/inventory/{doc_id}/edit?message=Jadval bo'sh. Avval qoldiq tovarlarni yuklang yoki tovar qo'shing.", status_code=303)
+    form = await request.form()
+    item_ids = form.getlist("item_id")
+    quantities = form.getlist("actual_quantity")
+    for i, iid in enumerate(item_ids):
+        if not iid:
+            continue
+        try:
+            item_id = int(iid)
+            qty = float(quantities[i]) if i < len(quantities) and str(quantities[i]).strip() != "" else 0
+        except (TypeError, ValueError):
+            continue
+        item = db.query(StockAdjustmentDocItem).filter(
+            StockAdjustmentDocItem.id == item_id,
+            StockAdjustmentDocItem.doc_id == doc_id,
+        ).first()
+        if item:
+            item.quantity = qty
+    total_tannarx = sum(float(it.quantity or 0) * float(it.cost_price or 0) for it in doc.items)
+    total_sotuv = sum(float(it.quantity or 0) * float(it.sale_price or 0) for it in doc.items)
+    doc.total_tannarx = total_tannarx
+    doc.total_sotuv = total_sotuv
+    db.commit()
+    db.refresh(doc)
+    pairs = set((item.warehouse_id, item.product_id) for item in doc.items)
+    for wh_id, prod_id in pairs:
+        rows = db.query(Stock).filter(Stock.warehouse_id == wh_id, Stock.product_id == prod_id).all()
+        if len(rows) > 1:
+            total = sum(float(r.quantity or 0) for r in rows)
+            keep = rows[0]
+            keep.quantity = total
+            if hasattr(keep, "updated_at"):
+                keep.updated_at = datetime.now()
+            for r in rows[1:]:
+                db.delete(r)
+    db.commit()
+    for item in doc.items:
+        stocks = db.query(Stock).filter(
+            Stock.warehouse_id == item.warehouse_id,
+            Stock.product_id == item.product_id,
+        ).all()
+        old_qty = sum(float(s.quantity or 0) for s in stocks)
+        new_qty = float(item.quantity or 0)
+        if hasattr(item, "previous_quantity"):
+            item.previous_quantity = old_qty
+        quantity_change = new_qty - old_qty
+        if abs(quantity_change) > 1e-9:
+            create_stock_movement(
+                db=db,
+                warehouse_id=item.warehouse_id,
+                product_id=item.product_id,
+                quantity_change=quantity_change,
+                operation_type="adjustment",
+                document_type="StockAdjustmentDoc",
+                document_id=doc.id,
+                document_number=doc.number,
+                user_id=current_user.id,
+                note=f"Inventarizatsiya: {doc.number}",
+            )
+    doc.status = "confirmed"
+    db.commit()
+    return RedirectResponse(url=f"/inventory/{doc_id}?message=Tasdiqlandi.", status_code=303)
+
+
+@app.post("/inventory/{doc_id}/revoke")
+async def inventory_revoke(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+    return_to: Optional[str] = Form(None),
+):
+    """Tasdiqlashni bekor qilish — qoldiqlarni oldingi holatga qaytarish (faqat admin)."""
+    doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Hujjat topilmadi")
+    if doc.status != "confirmed":
+        if return_to == "list":
+            return RedirectResponse(url="/qoldiqlar/tovar/hujjat", status_code=303)
+        return RedirectResponse(url=f"/inventory/{doc_id}", status_code=303)
+    for item in doc.items:
+        stock = db.query(Stock).filter(
+            Stock.warehouse_id == item.warehouse_id,
+            Stock.product_id == item.product_id,
+        ).first()
+        prev = getattr(item, "previous_quantity", None)
+        if stock is not None and prev is not None:
+            stock.quantity = prev
+            if hasattr(stock, "updated_at"):
+                stock.updated_at = datetime.now()
+    delete_stock_movements_for_document(db, "StockAdjustmentDoc", doc_id)
+    doc.status = "draft"
+    db.commit()
+    if return_to == "list":
+        return RedirectResponse(url="/qoldiqlar/tovar/hujjat?reverted=1", status_code=303)
+    return RedirectResponse(url=f"/inventory/{doc_id}/edit?message=Tasdiqlash bekor qilindi.", status_code=303)
+
+
+@app.post("/inventory/{doc_id}/delete")
+async def inventory_delete(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Qoralama inventarizatsiya hujjatini o'chirish (faqat draft)."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Hujjat topilmadi")
+    if doc.status != "draft":
+        return RedirectResponse(url="/inventory?message=Faqat qoralama hujjat o'chiriladi.", status_code=303)
+    for item in list(doc.items):
+        db.delete(item)
+    db.delete(doc)
+    db.commit()
+    return RedirectResponse(url="/inventory?message=Hujjat o'chirildi.", status_code=303)
+
+
+@app.get("/inventory/{doc_id}/print", response_class=HTMLResponse)
+async def inventory_print_page(
+    doc_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Inventarizatsiya hujjatini chop etish uchun sahifa."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Hujjat topilmadi")
+    warehouse = doc.warehouse
+    rows = []
+    for item in doc.items:
+        prod = item.product
+        rows.append({
+            "product_name": (prod.name or "") if prod else "",
+            "product_code": (prod.code or "") if prod else "",
+            "quantity": float(item.quantity or 0),
+            "cost_price": float(item.cost_price or 0),
+            "sale_price": float(item.sale_price or 0),
+        })
+    show_tannarx = getattr(current_user, "role", None) == "admin"
+    return templates.TemplateResponse("inventory/print.html", {
+        "request": request,
+        "doc": doc,
+        "warehouse": warehouse,
+        "rows": rows,
+        "show_tannarx": show_tannarx,
+        "current_user": current_user,
+    })
 
 
 @app.get("/warehouse", response_class=HTMLResponse)
@@ -4801,6 +5441,71 @@ async def warehouse_transfers_list(request: Request, db: Session = Depends(get_d
     })
 
 
+def _parse_doc_date(s: str):
+    """Sana matnini parse qiladi: YYYY-MM-DDTHH:MM, dd.mm.yyyy HH:MM, dd.mm.yyyy va boshqa formatlar."""
+    if not s or not str(s).strip():
+        return None
+    s = str(s).strip()
+    # ISO / datetime-local
+    try:
+        return datetime.fromisoformat(s.replace("Z", "")[:19])
+    except (ValueError, TypeError):
+        pass
+    # dd.mm.yyyy HH:MM yoki dd.mm.yyyy H:M
+    import re
+    m = re.match(r"(\d{1,2})[./](\d{1,2})[./](\d{4})\s+(\d{1,2}):(\d{2})", s)
+    if m:
+        try:
+            return datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)), int(m.group(4)), int(m.group(5)))
+        except (ValueError, TypeError):
+            pass
+    # dd.mm.yyyy
+    m = re.match(r"(\d{1,2})[./](\d{1,2})[./](\d{4})", s)
+    if m:
+        try:
+            return datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def _get_product_costs_for_transfer(db: Session):
+    """Mahsulot tannarxini: Product.purchase_price, keyin so'nggi kirim narxi, keyin so'nggi qoldiq hujjati cost_price."""
+    products = db.query(Product).filter(Product.is_active == True).all()
+    product_cost = {str(p.id): float(p.purchase_price or 0) for p in products}
+    # So'nggi kirim (PurchaseItem) narxi
+    last_purchase = (
+        db.query(PurchaseItem.product_id, PurchaseItem.price)
+        .join(Purchase, PurchaseItem.purchase_id == Purchase.id)
+        .filter((PurchaseItem.price or 0) > 0)
+        .order_by(Purchase.date.desc(), Purchase.id.desc())
+        .all()
+    )
+    seen_purchase = set()
+    for row in last_purchase:
+        pid = str(row.product_id)
+        if (product_cost.get(pid) or 0) <= 0 and pid not in seen_purchase:
+            seen_purchase.add(pid)
+            product_cost[pid] = float(row.price or 0)
+    # So'nggi tasdiqlangan qoldiq hujjati (StockAdjustmentDocItem) cost_price
+    confirmed_ids = [r[0] for r in db.query(StockAdjustmentDoc.id).filter(StockAdjustmentDoc.status == "confirmed").all()]
+    if confirmed_ids:
+        qoldiq_rows = (
+            db.query(StockAdjustmentDocItem.product_id, StockAdjustmentDocItem.cost_price)
+            .filter(StockAdjustmentDocItem.doc_id.in_(confirmed_ids), (StockAdjustmentDocItem.cost_price or 0) > 0)
+            .join(StockAdjustmentDoc, StockAdjustmentDocItem.doc_id == StockAdjustmentDoc.id)
+            .order_by(StockAdjustmentDoc.date.desc())
+            .all()
+        )
+        seen = set()
+        for row in qoldiq_rows:
+            pid = str(row.product_id)
+            if pid not in seen and ((product_cost.get(pid) or 0) <= 0):
+                seen.add(pid)
+                product_cost[pid] = float(row.cost_price or 0)
+    return product_cost
+
+
 @app.get("/warehouse/transfers/new", response_class=HTMLResponse)
 async def warehouse_transfer_new(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
     """Yangi o'tkazish hujjati"""
@@ -4814,8 +5519,18 @@ async def warehouse_transfer_new(request: Request, db: Session = Depends(get_db)
         wid, pid = str(s.warehouse_id), str(s.product_id)
         if wid not in stock_by_warehouse_product:
             stock_by_warehouse_product[wid] = {}
-        stock_by_warehouse_product[wid][pid] = s.quantity
-    products_list = [{"id": p.id, "name": (p.name or ""), "code": (p.code or "")} for p in products]
+        stock_by_warehouse_product[wid][pid] = stock_by_warehouse_product[wid].get(pid, 0) + float(s.quantity or 0)
+    product_cost = _get_product_costs_for_transfer(db)
+    stock_cost_by_warehouse_product = {}
+    for wid, pids in stock_by_warehouse_product.items():
+        stock_cost_by_warehouse_product[wid] = {pid: product_cost.get(pid, 0) for pid in pids}
+    _uc = lambda u: (u.code or "").strip().lower() if u else ""
+    _is_dona = lambda u: _uc(u) in ("dona", "pc", "pcs", "ta", "шт")
+    products_list = [
+        {"id": p.id, "name": (p.name or ""), "code": (p.code or ""), "unit_name": (p.unit.name if p.unit else "") or "", "unit_code": _uc(p.unit), "is_dona": _is_dona(p.unit)}
+        for p in products
+    ]
+    now = datetime.now()
     return templates.TemplateResponse("warehouse/transfer_form.html", {
         "request": request,
         "current_user": current_user,
@@ -4824,7 +5539,10 @@ async def warehouse_transfer_new(request: Request, db: Session = Depends(get_db)
         "products": products,
         "products_list": products_list,
         "stock_by_warehouse_product": stock_by_warehouse_product,
-        "now": datetime.now(),
+        "stock_cost_by_warehouse_product": stock_cost_by_warehouse_product,
+        "now": now,
+        "doc_date_value": now.strftime("%Y-%m-%dT%H:%M"),
+        "doc_date_display": now.strftime("%d.%m.%Y %H:%M"),
         "page_title": "Ombordan omborga o'tkazish (yaratish)"
     })
 
@@ -4845,8 +5563,28 @@ async def warehouse_transfer_edit(request: Request, transfer_id: int, db: Sessio
         wid, pid = str(s.warehouse_id), str(s.product_id)
         if wid not in stock_by_warehouse_product:
             stock_by_warehouse_product[wid] = {}
-        stock_by_warehouse_product[wid][pid] = s.quantity
-    products_list = [{"id": p.id, "name": (p.name or ""), "code": (p.code or "")} for p in products]
+        stock_by_warehouse_product[wid][pid] = stock_by_warehouse_product[wid].get(pid, 0) + float(s.quantity or 0)
+    product_cost = _get_product_costs_for_transfer(db)
+    stock_cost_by_warehouse_product = {}
+    for wid, pids in stock_by_warehouse_product.items():
+        stock_cost_by_warehouse_product[wid] = {pid: product_cost.get(pid, 0) for pid in pids}
+    from_wh_id = str(transfer.from_warehouse_id) if transfer.from_warehouse_id else None
+    source_costs = {}
+    if from_wh_id and from_wh_id in stock_cost_by_warehouse_product:
+        for pid, cost in stock_cost_by_warehouse_product[from_wh_id].items():
+            try:
+                source_costs[int(pid)] = cost
+            except (ValueError, TypeError):
+                pass
+    now_dt = transfer.date or datetime.now()
+    doc_date_value = now_dt.strftime("%Y-%m-%dT%H:%M") if now_dt else datetime.now().strftime("%Y-%m-%dT%H:%M")
+    doc_date_display = now_dt.strftime("%d.%m.%Y %H:%M") if now_dt else datetime.now().strftime("%d.%m.%Y %H:%M")
+    _uc = lambda u: (u.code or "").strip().lower() if u else ""
+    _is_dona = lambda u: _uc(u) in ("dona", "pc", "pcs", "ta", "шт")
+    products_list = [
+        {"id": p.id, "name": (p.name or ""), "code": (p.code or ""), "unit_name": (p.unit.name if p.unit else "") or "", "unit_code": _uc(p.unit), "is_dona": _is_dona(p.unit)}
+        for p in products
+    ]
     return templates.TemplateResponse("warehouse/transfer_form.html", {
         "request": request,
         "current_user": current_user,
@@ -4855,7 +5593,11 @@ async def warehouse_transfer_edit(request: Request, transfer_id: int, db: Sessio
         "products": products,
         "products_list": products_list,
         "stock_by_warehouse_product": stock_by_warehouse_product,
-        "now": transfer.date or datetime.now(),
+        "stock_cost_by_warehouse_product": stock_cost_by_warehouse_product,
+        "source_costs": source_costs,
+        "now": now_dt,
+        "doc_date_value": doc_date_value,
+        "doc_date_display": doc_date_display,
         "page_title": f"O'tkazish {transfer.number}"
     })
 
@@ -4877,12 +5619,14 @@ async def warehouse_transfer_create(
         return RedirectResponse(url="/warehouse/transfers/new?error=" + quote("Qayerdan va qayerga bir xil bo'lmasin."), status_code=303)
     form = await request.form()
     today = datetime.now()
+    doc_date = _parse_doc_date(form.get("doc_date", "")) or today
     count = db.query(WarehouseTransfer).filter(
-        WarehouseTransfer.date >= today.replace(hour=0, minute=0, second=0)
+        WarehouseTransfer.date >= doc_date.replace(hour=0, minute=0, second=0)
     ).count()
-    number = f"OT-{today.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
+    number = f"OT-{doc_date.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
     transfer = WarehouseTransfer(
         number=number,
+        date=doc_date,
         from_warehouse_id=from_warehouse_id,
         to_warehouse_id=to_warehouse_id,
         status="draft",
@@ -4928,13 +5672,16 @@ async def warehouse_transfer_save(
         return RedirectResponse(url=f"/warehouse/transfers/{transfer_id}?error=" + quote("Tasdiqlangan hujjatni tahrirlab bo'lmaydi."), status_code=303)
     if from_warehouse_id == to_warehouse_id:
         return RedirectResponse(url=f"/warehouse/transfers/{transfer_id}?error=" + quote("Qayerdan va qayerga bir xil bo'lmasin."), status_code=303)
+    form = await request.form()
+    parsed = _parse_doc_date(form.get("doc_date", ""))
+    if parsed:
+        transfer.date = parsed
     transfer.from_warehouse_id = from_warehouse_id
     transfer.to_warehouse_id = to_warehouse_id
     transfer.note = note or None
-    # Save qilinganda pending_approval holatiga o'tkazish (bo'lim foydalanuvchisi tasdiqlashi uchun)
-    if transfer.status == "draft":
+    # Faqat "Tasdiqlashga yuborish" bosilganda pending_approval; "Saqlash (qoralama)" — draft qoladi
+    if form.get("submit_approval") and transfer.status == "draft":
         transfer.status = "pending_approval"
-    form = await request.form()
     db.query(WarehouseTransferItem).filter(WarehouseTransferItem.transfer_id == transfer_id).delete()
     for key, value in form.items():
         if key.startswith("product_id_") and value:
@@ -4947,7 +5694,7 @@ async def warehouse_transfer_save(
             except (ValueError, TypeError):
                 pass
     db.commit()
-    return RedirectResponse(url="/warehouse/transfers?saved=1", status_code=303)
+    return RedirectResponse(url=f"/warehouse/transfers/{transfer_id}?saved=1", status_code=303)
 
 
 @app.post("/warehouse/transfers/{transfer_id}/confirm")
@@ -4971,14 +5718,29 @@ async def warehouse_transfer_confirm(
     items = db.query(WarehouseTransferItem).filter(WarehouseTransferItem.transfer_id == transfer_id).all()
     if not items:
         return RedirectResponse(url=f"/warehouse/transfers/{transfer_id}?error=" + quote("Kamida bitta mahsulot qo'shing."), status_code=303)
+    # Qayerdan omborda bitta mahsulot uchun bir nechta Stock qatori bo'lsa — yig'indiga birlashtirib, tekshiruv va chiqim to'g'ri bo'ladi
+    from_wh = transfer.from_warehouse_id
     for item in items:
-        src = db.query(Stock).filter(
+        rows = db.query(Stock).filter(
+            Stock.warehouse_id == from_wh,
+            Stock.product_id == item.product_id
+        ).all()
+        if len(rows) > 1:
+            total = sum(float(r.quantity or 0) for r in rows)
+            keep = rows[0]
+            keep.quantity = total
+            keep.updated_at = datetime.now()
+            for r in rows[1:]:
+                db.delete(r)
+            db.flush()
+    for item in items:
+        rows = db.query(Stock).filter(
             Stock.warehouse_id == transfer.from_warehouse_id,
             Stock.product_id == item.product_id
-        ).first()
+        ).all()
         need = float(item.quantity or 0)
-        have = float(src.quantity or 0) if src else 0
-        if not src or (have + 1e-6 < need):  # 1e-6 — float xatolik, 3.4 ≈ 3.399999...
+        have = sum(float(r.quantity or 0) for r in rows)
+        if have + 1e-6 < need:  # 1e-6 — float xatolik
             prod = db.query(Product).filter(Product.id == item.product_id).first()
             name = prod.name if prod else f"#{item.product_id}"
             avail_display = "0" if abs(have) < 1e-6 else ("%.6f" % have).rstrip("0").rstrip(".")
@@ -5055,6 +5817,7 @@ async def warehouse_transfer_revert(
             src.quantity += item.quantity
         else:
             db.add(Stock(warehouse_id=transfer.from_warehouse_id, product_id=item.product_id, quantity=item.quantity))
+    delete_stock_movements_for_document(db, "WarehouseTransfer", transfer_id)
     transfer.status = "draft"
     db.commit()
     return RedirectResponse(url="/warehouse/transfers?reverted=1", status_code=303)
@@ -5504,6 +6267,7 @@ async def purchase_revert(
         partner = db.query(Partner).filter(Partner.id == purchase.partner_id).first()
         if partner:
             partner.balance += total_with_expenses
+    delete_stock_movements_for_document(db, "Purchase", purchase_id)
     purchase.status = "draft"
     db.commit()
     return RedirectResponse(url=f"/purchases/edit/{purchase_id}", status_code=303)
@@ -6058,6 +6822,7 @@ async def sales_revert(
         ).first()
         if stock:
             stock.quantity = (stock.quantity or 0) + item.quantity
+    delete_stock_movements_for_document(db, "Sale", order_id)
     order.status = "draft"
     db.commit()
     return RedirectResponse(url=f"/sales/edit/{order_id}", status_code=303)
@@ -7536,13 +8301,24 @@ async def employee_delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Xodimni o'chirish"""
+    """Xodimni o'chirish. Bog'liq hujjatlar bo'lsa (ishga qabul, avans, oylik, davomat va h.k.) DB xatolik beradi — foydalanuvchiga xabar."""
+    from urllib.parse import quote
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:
         return RedirectResponse(url="/employees?error=Xodim topilmadi", status_code=303)
-    db.delete(emp)
-    db.commit()
-    return RedirectResponse(url="/employees?deleted=1", status_code=303)
+    try:
+        db.delete(emp)
+        db.commit()
+        return RedirectResponse(url="/employees?deleted=1", status_code=303)
+    except IntegrityError:
+        db.rollback()
+        return RedirectResponse(
+            url="/employees?error=" + quote(
+                "Xodimni o'chirib bo'lmaydi: unga bog'liq yozuvlar mavjud (ishga qabul hujjati, avans, oylik, davomat va h.k.). "
+                "Xodimni o'chirmasdan «Faol emas» deb belgilang yoki avval bog'liq hujjatlarni olib tashlang."
+            ),
+            status_code=303,
+        )
 
 
 # --- ISHGA QABUL QILISH HUJJATI ---
@@ -8821,19 +9597,42 @@ async def employee_salary_page(
         year = today.year
     employees = db.query(Employee).filter(Employee.is_active == True).order_by(Employee.full_name).all()
     salaries = {s.employee_id: s for s in db.query(Salary).filter(Salary.year == year, Salary.month == month).all()}
-    # Ishga qabul hujjatidagi oylik (oxirgi tasdiqlangan hujjat) — asos 0 bo'lsa ishlatiladi
+    # Ishga qabul hujjatidagi oylik — avval tasdiqlangan, keyin har qanday oxirgi hujjat (qadoqlovchilar va b. uchun)
     emp_ids = [e.id for e in employees]
     latest_doc_salary = {}
     if emp_ids:
-        docs_for_salary = (
-            db.query(EmploymentDoc.employee_id, EmploymentDoc.salary, EmploymentDoc.doc_date)
+        # Har bir xodim uchun tasdiqlangan hujjatlar ichidan eng oxirgi (max doc_date) dagi oylik
+        subq_conf = (
+            db.query(EmploymentDoc.employee_id, func.max(EmploymentDoc.doc_date).label("max_date"))
             .filter(EmploymentDoc.employee_id.in_(emp_ids), EmploymentDoc.confirmed_at.isnot(None))
-            .order_by(EmploymentDoc.doc_date.desc())
+            .group_by(EmploymentDoc.employee_id)
+        ).subquery()
+        docs_confirmed = (
+            db.query(EmploymentDoc.employee_id, EmploymentDoc.salary)
+            .join(subq_conf, (EmploymentDoc.employee_id == subq_conf.c.employee_id) & (EmploymentDoc.doc_date == subq_conf.c.max_date))
+            .filter(EmploymentDoc.employee_id.in_(emp_ids), EmploymentDoc.confirmed_at.isnot(None))
             .all()
         )
-        for row in docs_for_salary:
-            if row.employee_id not in latest_doc_salary and (row.salary or 0) > 0:
+        for row in docs_confirmed:
+            if (row.salary or 0) > 0:
                 latest_doc_salary[row.employee_id] = float(row.salary)
+        # Asos hali 0 bo'lgan xodimlar uchun: har bir xodimning eng oxirgi hujjatidagi oylik (max doc_date)
+        missing = [eid for eid in emp_ids if eid not in latest_doc_salary]
+        if missing:
+            subq = (
+                db.query(EmploymentDoc.employee_id, func.max(EmploymentDoc.doc_date).label("max_date"))
+                .filter(EmploymentDoc.employee_id.in_(missing))
+                .group_by(EmploymentDoc.employee_id)
+            ).subquery()
+            docs_latest = (
+                db.query(EmploymentDoc.employee_id, EmploymentDoc.salary)
+                .join(subq, (EmploymentDoc.employee_id == subq.c.employee_id) & (EmploymentDoc.doc_date == subq.c.max_date))
+                .filter(EmploymentDoc.employee_id.in_(missing))
+                .all()
+            )
+            for row in docs_latest:
+                if (row.salary or 0) > 0:
+                    latest_doc_salary[row.employee_id] = float(row.salary)
     # Avanslar (shu oy berilgan) — hisoblash uchun
     advance_sums = {}
     from calendar import monthrange
@@ -8845,20 +9644,41 @@ async def employee_salary_page(
         EmployeeAdvance.advance_date <= end_d,
     ).all():
         advance_sums[a.employee_id] = advance_sums.get(a.employee_id, 0) + a.amount
-    # Bo'lak ish haqi: ishlab chiqarilgan miqdor * (tanlangan bo'lak stavkalari yig'indisi)
+    # Bo'lak ish haqi: ishlab chiqarilgan miqdor * (bitta bo'lak narxi). Bitta stavka ishlatiladi (min), yig'indi emas.
     piecework_calculated = {}
-    # Har bir xodim uchun tanlangan bo'lak stavkalari yig'indisi
+    # Har bir xodim uchun bitta bo'lak narxi (min stavka — bir xil ish uchun bitta narx)
     piece_rate_sum = {}
     if emp_ids:
         rows_rates = (
-            db.query(employee_piecework_tasks.c.employee_id, func.sum(PieceworkTask.price_per_unit))
+            db.query(employee_piecework_tasks.c.employee_id, func.min(PieceworkTask.price_per_unit).label("rate"))
             .join(PieceworkTask, PieceworkTask.id == employee_piecework_tasks.c.task_id)
             .filter(employee_piecework_tasks.c.employee_id.in_(emp_ids))
+            .filter(PieceworkTask.price_per_unit > 0)
             .group_by(employee_piecework_tasks.c.employee_id)
             .all()
         )
-        for eid, ssum in rows_rates:
-            piece_rate_sum[int(eid)] = float(ssum or 0)
+        for eid, rate in rows_rates:
+            piece_rate_sum[int(eid)] = float(rate or 0)
+    # Bo'lak xodimlar, lekin employee_piecework_tasks da yo'q: stavkani ishga qabul hujjatidagi piecework_task_ids dan olaymiz
+    boalak_emp_ids = [e.id for e in employees if getattr(e, "salary_type", None) == "bo'lak"]
+    if boalak_emp_ids:
+        docs_with_tasks = (
+            db.query(EmploymentDoc.employee_id, EmploymentDoc.piecework_task_ids)
+            .filter(EmploymentDoc.employee_id.in_(boalak_emp_ids), EmploymentDoc.confirmed_at.isnot(None))
+            .order_by(EmploymentDoc.doc_date.desc())
+            .all()
+        )
+        for row in docs_with_tasks:
+            eid = row.employee_id
+            if piece_rate_sum.get(eid, 0) > 0:
+                continue
+            raw = (row.piecework_task_ids or "").strip()
+            ids = [int(x) for x in raw.split(",") if x.strip().isdigit()] if raw else []
+            if not ids:
+                continue
+            first_task = db.query(PieceworkTask).filter(PieceworkTask.id == ids[0], PieceworkTask.price_per_unit > 0).first()
+            if first_task:
+                piece_rate_sum[eid] = float(first_task.price_per_unit)
     boalak_employees = [e for e in employees if getattr(e, "salary_type", None) == "bo'lak" and piece_rate_sum.get(e.id, 0) > 0]
     emp_by_id = {e.id: e for e in employees}
     emp_by_user_id = {}
@@ -8892,12 +9712,38 @@ async def employee_salary_page(
                 if not rate_sum:
                     continue
                 piecework_calculated[emp.id] = piecework_calculated.get(emp.id, 0) + total_qty * rate_sum
+        # Bo'lak xodimlar uchun qolganlar: operator_id yoki user_id orqali ulanmagan bo'lsa, to'g'ridan-to'g'ri xodim id bo'yicha yig'indini hisoblaymiz
+        for emp in boalak_employees:
+            if emp.id in piecework_calculated:
+                continue
+            rate_sum = piece_rate_sum.get(emp.id, 0)
+            if not rate_sum:
+                continue
+            cond = Production.operator_id == emp.id
+            if getattr(emp, "user_id", None) is not None:
+                cond = or_(cond, Production.user_id == emp.user_id)
+            q = (
+                db.query(func.coalesce(func.sum(Production.quantity), 0))
+                .filter(
+                    Production.status == "completed",
+                    func.date(Production.date) >= start_d,
+                    func.date(Production.date) <= end_d,
+                    cond,
+                )
+            )
+            total_qty = float(q.scalar() or 0)
+            if total_qty > 0:
+                piecework_calculated[emp.id] = total_qty * rate_sum
     rows = []
     for emp in employees:
         s = salaries.get(emp.id)
-        base = (s.base_salary if s else 0) or (emp.salary or 0) or latest_doc_salary.get(emp.id, 0)
-        if not base and emp.id in piecework_calculated:
-            base = piecework_calculated[emp.id]
+        # Bo'lak xodimlar: faqat ishlab chiqarish bo'yicha hisoblangan summa (saqlangan base ishlatilmaydi)
+        if getattr(emp, "salary_type", None) == "bo'lak":
+            base = piecework_calculated.get(emp.id, 0)
+        else:
+            base = (s.base_salary if s else 0) or (emp.salary or 0) or latest_doc_salary.get(emp.id, 0)
+            if not base and emp.id in piecework_calculated:
+                base = piecework_calculated[emp.id]
         bonus = (s.bonus if s else 0) or 0
         deduction = (s.deduction if s else 0) or 0
         adv_ded = (s.advance_deduction if s and getattr(s, "advance_deduction", None) is not None else None)
@@ -8906,6 +9752,14 @@ async def employee_salary_page(
         total = base + bonus - deduction - adv_ded
         if total < 0:
             total = 0
+        paid = (s.paid if s else 0) or 0
+        status = (s.status if s else "pending") or "pending"
+        if total == 0 and paid == 0:
+            status = "pending"
+        elif (total or 0) > 0 and paid >= total:
+            status = "paid"
+        elif (total or 0) > 0:
+            status = "pending"
         rows.append({
             "employee": emp,
             "salary_row": s,
@@ -8914,8 +9768,8 @@ async def employee_salary_page(
             "deduction": deduction,
             "advance_deduction": adv_ded,
             "total": total,
-            "paid": (s.paid if s else 0) or 0,
-            "status": (s.status if s else "pending") or "pending",
+            "paid": paid,
+            "status": status,
         })
     return templates.TemplateResponse("employees/salary_list.html", {
         "request": request,
@@ -9385,14 +10239,23 @@ async def production_edit_materials(
         return RedirectResponse(url="/login", status_code=303)
     production = db.query(Production).filter(Production.id == prod_id).first()
     if not production:
-        raise HTTPException(status_code=404, detail="Buyurtma topilmadi")
+        return RedirectResponse(
+            url="/production/orders?error=not_found&detail=" + quote("Buyurtma topilmadi yoki o'chirilgan."),
+            status_code=303,
+        )
     if production.status == "completed" and current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Yakunlangan buyurtmani faqat administrator ko'ra oladi")
+        return RedirectResponse(url="/production/orders?error=forbidden&detail=" + quote("Yakunlangan buyurtmani faqat administrator ko'ra oladi."), status_code=303)
     if production.status not in ("draft", "completed"):
-        raise HTTPException(status_code=400, detail="Faqat kutilmoqdagi yoki yakunlangan buyurtmani ko'rish mumkin")
+        return RedirectResponse(
+            url="/production/orders?error=invalid&detail=" + quote("Faqat kutilmoqdagi yoki yakunlangan buyurtmani ko'rish mumkin."),
+            status_code=303,
+        )
     recipe = db.query(Recipe).filter(Recipe.id == production.recipe_id).first()
     if not recipe:
-        raise HTTPException(status_code=404, detail="Retsept topilmadi")
+        return RedirectResponse(
+            url="/production/orders?error=not_found&detail=" + quote("Retsept topilmadi."),
+            status_code=303,
+        )
     # Agar production_items bo'sh bo'lsa, retseptdan yaratib olaylik
     if not production.production_items:
         for item in recipe.items:
@@ -10143,6 +11006,7 @@ async def production_revert(
             stock.quantity += required
         else:
             db.add(Stock(warehouse_id=production.warehouse_id, product_id=product_id, quantity=required))
+    delete_stock_movements_for_document(db, "Production", prod_id)
     production.status = "draft"
     db.commit()
     return _redirect()

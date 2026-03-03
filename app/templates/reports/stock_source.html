@@ -20,6 +20,8 @@
         <p class="text-muted small mb-2">Jadvalda faqat <strong>shu mahsulot</strong> ({{ product.name if product else '-' }}) omborga kirgan yoki chiqqan harakatlar ko‘rsatiladi. «Ishlab chiqarish» qatori — shu mahsulotni tayyor mahsulot qilib chiqargan buyurtma (hujjatni «Ochish» orqali ko‘ring).</p>
         <p class="text-muted small mb-0"><i class="bi bi-exclamation-triangle text-warning"></i> <strong>Ogohlantirish «Hujjatda …»</strong> — ishlab chiqarish hujjatida (retsept bo'yicha) ko'rsatilgan miqdor va harakatda yozilgan miqdor bir-biriga to'g'ri kelmaganida chiqadi (masalan, retsept o'zgartirilgandan keyin yoki boshqa birlikda yozilganda). Qoldiq har doim tasdiqlash paytida yozilgan miqdorga asoslanadi; ogohlantirish faqat farqni ko'rsatish uchun.</p>
         <p class="text-success fw-bold mb-0 mt-2">Hozirgi qoldiq (Stock jadvalidagi yig‘indi): <strong>{% if is_dona %}{{ "{:,.0f}".format(current_qty|round(0)) }}{% else %}{{ "{:,.3f}".format(current_qty) }}{% endif %}</strong></p>
+        <p class="text-muted small mb-0 mt-2"><strong>Jadval:</strong> <strong>birinchi qator</strong> — birinchi harakat (masalan qoldiq tushuriladi), <strong>oxirgi qator</strong> — eng so'nggi harakat. «Qoldiq (harakatdan keyin)» — shu qatordagi harakatdan keyingi yig'indi qoldiq. Masalan: +3.400 (qoldiq tuzatish) keyin −6.800 (ombordan omborga) bo'lsa, oxirgi qatorda qoldiq 3.400 − 6.800 = <strong>−3.400</strong>.</p>
+        <p class="text-muted small mb-0">Agar «Hozirgi qoldiq» oxirgi qatordagi raqamdan farq qilsa, keyinroq boshqa harakatlar bo'lgan bo'lishi mumkin.</p>
     </div>
     <div class="card-body p-0">
         <table class="table table-hover table-sm">

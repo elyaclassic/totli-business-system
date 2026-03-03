@@ -572,6 +572,11 @@
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link {% if page_title == 'Inventarizatsiya' %}active{% endif %}" href="/inventory">
+                                <i class="bi bi-clipboard-check"></i> Inventarizatsiya
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link {% if 'Ishlab chiqarish' in page_title %}active{% endif %}"
                                 href="/production">
                                 <i class="bi bi-gear-fill"></i> Ishlab chiqarish
@@ -872,6 +877,28 @@
                     modalEl.setAttribute('aria-hidden', 'true');
                     modalEl.removeAttribute('aria-modal');
                 });
+            });
+        });
+    </script>
+    <script>
+        // Tepadagi bildirishnomalar (alert) 5 soniyadan keyin avtomatik yopiladi
+        document.addEventListener('DOMContentLoaded', function () {
+            var mainContent = document.querySelector('.main-content');
+            if (!mainContent) return;
+            var alerts = mainContent.querySelectorAll('.alert');
+            alerts.forEach(function (el) {
+                setTimeout(function () {
+                    var closeBtn = el.querySelector('[data-bs-dismiss="alert"]');
+                    if (closeBtn) {
+                        closeBtn.click();
+                    } else {
+                        el.style.transition = 'opacity 0.3s ease';
+                        el.style.opacity = '0';
+                        setTimeout(function () {
+                            if (el.parentNode) el.parentNode.removeChild(el);
+                        }, 300);
+                    }
+                }, 5000);
             });
         });
     </script>

@@ -20,9 +20,24 @@
 </style>
 
 <div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-2">
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
         <h5 class="mb-0">Ombordan omborga o'tkazish {% if transfer %}({{ transfer.number }}){% else %}(yaratish){% endif %}</h5>
-        <a href="/warehouse/transfers" class="btn btn-outline-secondary btn-sm">Ro'yxat</a>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            {% if not transfer or transfer.status != 'confirmed' %}
+            <button type="submit" form="docForm" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> {% if transfer and transfer.status == 'draft' %}Saqlash (qoralama){% else %}Saqlash{% endif %}</button>
+            {% if transfer and transfer.status == 'draft' %}
+            <button type="submit" form="docForm" name="submit_approval" value="1" class="btn btn-outline-primary btn-sm">Tasdiqlashga yuborish</button>
+            {% endif %}
+            {% if transfer and transfer.status == 'pending_approval' %}
+            <form method="post" action="/warehouse/transfers/{{ transfer.id }}/confirm" id="confirmForm" class="d-inline" onsubmit="return confirm('Hujjatni tasdiqlash — ombordagi qoldiqlar o\'zgaradi. Davom etasizmi?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token_from_request(request) }}">
+                <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-check-lg"></i> Tasdiqlash</button>
+            </form>
+            {% endif %}
+            {% endif %}
+            <a href="/warehouse/transfers" class="btn btn-outline-secondary btn-sm">Ro'yxat</a>
+            <a href="/warehouse/transfers" class="btn btn-outline-secondary btn-sm">Chiqish</a>
+        </div>
     </div>
     {% if request.query_params.get('saved') %}
     <div class="alert alert-success py-2 small">Saqlandi.</div>
@@ -51,7 +66,11 @@
             <div class="form-row">
                 <div class="label">Sana</div>
                 <div class="field">
-                    {% if transfer %}{{ transfer.date.strftime('%d.%m.%Y %H:%M') if transfer.date else '—' }}{% else %}{{ now.strftime('%d.%m.%Y %H:%M') if now else '' }}{% endif %}
+                    {% if transfer and transfer.status == 'confirmed' %}
+                    {{ transfer.date.strftime('%d.%m.%Y %H:%M') if transfer.date else '—' }}
+                    {% else %}
+                    <input type="text" name="doc_date" class="form-control w-100" value="{{ doc_date_display | default(doc_date_value) }}" placeholder="dd.mm.yyyy HH:MM — buferdan qo'yishingiz mumkin" required style="max-width: 280px;" autocomplete="off">
+                    {% endif %}
                 </div>
             </div>
             {% if transfer %}
@@ -116,6 +135,11 @@
                 </div>
             </div>
             <div class="p-2 border-top">
+                {% if transfer and transfer.from_warehouse and transfer.to_warehouse %}
+                <div class="alert alert-info py-2 small mb-2" role="alert">
+                    <strong>Bu hujjatda</strong> quyidagi mahsulotlar <strong>«Qayerdan»</strong> — <strong>{{ transfer.from_warehouse.name }}</strong> omboridan chiqariladi va <strong>«Qayerga»</strong> — <strong>{{ transfer.to_warehouse.name }}</strong> omboriga kiritiladi.
+                </div>
+                {% endif %}
                 <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
                     <strong class="small">Mahsulotlar</strong>
                     <button type="button" class="btn btn-outline-primary btn-sm" id="btnLoadAllStock" style="display:none;" title="Ombordan tanlang">
@@ -127,7 +151,7 @@
                         <tr>
                             <th style="width:40px">#</th>
                             <th>Mahsulot</th>
-                            <th style="width:120px">Miqdor</th>
+                            <th style="width:140px">Miqdor (birlik)</th>
                             {% if show_tannarx %}<th style="width:110px">Tannarx (so'm)</th><th style="width:120px">Summa (so'm)</th>{% endif %}
                             {% if transfer and transfer.from_warehouse_id %}<th class="text-center" style="width:60px">Tarix</th>{% endif %}
                             <th style="width:50px"></th>
@@ -152,14 +176,16 @@
                             </td>
                             {% set _uc = (row.product.unit.code or '')|lower if (row.product and row.product.unit) else '' %}
                             {% set _is_dona = _uc in ['dona', 'pc', 'pcs', 'ta', 'шт'] %}
+                            {% set _unit_name = (row.product.unit.name if (row.product and row.product.unit) else '') or '' %}
                             {% set qty_val = (row.quantity|round(0)|int) if (row.quantity is not none and _is_dona) else (row.quantity if row.quantity is not none else "") %}
                             {% set qty_fmt = "%.0f"|format(row.quantity|round(0)|int) if (row.quantity is not none and _is_dona) else ("%.3f"|format(row.quantity) if row.quantity is not none else "") %}
-                            <td>
+                            <td class="d-flex align-items-center gap-1 flex-nowrap">
                                 {% if transfer.status == 'confirmed' %}
-                                <input type="text" class="form-control qty-input" value="{{ qty_fmt }}" readonly>
+                                <input type="text" class="form-control qty-input flex-grow-1" value="{{ qty_fmt }}" readonly>
                                 {% else %}
-                                <input type="text" name="quantity_{{ loop.index }}" class="form-control qty-input" value="{{ qty_fmt }}" inputmode="{{ 'numeric' if _is_dona else 'decimal' }}">
+                                <input type="text" name="quantity_{{ loop.index }}" class="form-control qty-input flex-grow-1" value="{{ qty_fmt }}" inputmode="{{ 'numeric' if _is_dona else 'decimal' }}">
                                 {% endif %}
+                                {% if _unit_name %}<span class="text-muted small text-nowrap">{{ _unit_name }}</span>{% endif %}
                             </td>
                             {% if show_tannarx %}
                             <td class="cost-cell text-end">{{ "{:,.0f}".format(row_cost) }}</td>
@@ -185,7 +211,7 @@
                                 <input type="hidden" name="product_id_1" value="">
                                 <div class="combo-drop" id="comboDrop1" style="display:none;"></div>
                             </td>
-                            <td><input type="text" name="quantity_1" class="form-control qty-input" value="" inputmode="decimal"></td>
+                            <td class="d-flex align-items-center gap-1 flex-nowrap"><input type="text" name="quantity_1" class="form-control qty-input flex-grow-1" value="" inputmode="decimal"><span class="unit-label text-muted small text-nowrap"></span></td>
                             {% if show_tannarx %}<td class="cost-cell text-end">—</td><td class="sum-cell text-end">—</td>{% endif %}
                             {% if transfer and transfer.from_warehouse_id %}<td></td>{% endif %}
                             <td><button type="button" class="btn btn-outline-danger btn-sm rm-row">&times;</button></td>
@@ -197,26 +223,12 @@
                 <button type="button" class="btn btn-success btn-sm mt-1" id="addRow"><i class="bi bi-plus"></i> Qator qo'shish</button>
                 {% endif %}
             </div>
+            {% if transfer and transfer.status == 'confirmed' %}
             <div class="form-row border-0 p-2">
                 <div class="label"></div>
-                <div class="field d-flex gap-1 flex-wrap">
-                    {% if transfer and transfer.status == 'confirmed' %}
-                    <span class="text-muted small align-self-center">Hujjat tasdiqlangan, tahrirlab bo'lmaydi</span>
-                    {% else %}
-                    <button type="submit" class="btn btn-primary btn-sm">Saqlash</button>
-                    {% endif %}
-                    {% if transfer and transfer.status == 'pending_approval' %}
-                    {# Bo'lim foydalanuvchisi tasdiqlashi mumkin #}
-                    <form method="post" action="/warehouse/transfers/{{ transfer.id }}/confirm" class="d-inline" onsubmit="return confirm('Hujjatni tasdiqlash — ombordagi qoldiqlar o\'zgaradi. Davom etasizmi?');">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token_from_request(request) }}">
-                        <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-check-lg"></i> Tasdiqlash</button>
-                    </form>
-                    {% elif transfer and transfer.status == 'draft' %}
-                    {# Draft holatida tasdiqlash tugmasi yo'q, avval saqlash kerak #}
-                    {% endif %}
-                    <a href="/warehouse/transfers" class="btn btn-outline-secondary btn-sm">Chiqish</a>
-                </div>
+                <div class="field"><span class="text-muted small">Hujjat tasdiqlangan, tahrirlab bo'lmaydi</span></div>
             </div>
+            {% endif %}
         </form>
     </div>
 </div>
@@ -235,22 +247,37 @@
 
     function fmtNum(n) { return (Number(n) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 }); }
 
-    function addRow(pid, pname, qty, cost, summa) {
+    function getProductUnit(pid) {
+        var p = products.find(function(x) { return String(x.id) === String(pid); });
+        return p ? { unit_name: p.unit_name || '', is_dona: !!p.is_dona } : { unit_name: '', is_dona: false };
+    }
+    function formatQtyByUnit(qty, isDona) {
+        if (qty === '' || qty == null) return '';
+        var n = parseFloat(qty);
+        if (isNaN(n)) return qty;
+        return isDona ? String(Math.round(n)) : (n % 1 === 0 ? String(n) : (Math.round(n * 1000) / 1000).toString());
+    }
+    function addRow(pid, pname, qty, cost, summa, unitName, isDona) {
         rowIndex++;
+        var u = (typeof unitName !== 'undefined' && unitName !== null) ? { unit_name: unitName, is_dona: !!isDona } : (pid ? getProductUnit(pid) : { unit_name: '', is_dona: false });
+        var qtyDisplay = (qty !== '' && qty != null) ? formatQtyByUnit(qty, u.is_dona) : '';
         var costVal = cost != null && cost !== '' ? (parseFloat(cost) || 0) : null;
         var sumVal = summa != null && summa !== '' ? (parseFloat(summa) || 0) : null;
         var costDisplay = costVal != null && !isNaN(costVal) ? fmtNum(costVal) : '—';
         var sumDisplay = sumVal != null && !isNaN(sumVal) ? fmtNum(sumVal) : '—';
         var tr = document.createElement('tr');
         tr.className = 'item-row';
+        tr.setAttribute('data-unit-name', u.unit_name || '');
+        tr.setAttribute('data-is-dona', u.is_dona ? '1' : '0');
         if (costVal != null && !isNaN(costVal)) tr.setAttribute('data-cost', costVal);
         var costSumHtml = showTannarx ? ('<td class="cost-cell text-end">' + costDisplay + '</td><td class="sum-cell text-end text-success">' + sumDisplay + '</td>') : '';
         var tarixTd = hasTarixColumn ? '<td></td>' : '';
+        var unitSpan = u.unit_name ? (' <span class="unit-label text-muted small text-nowrap">' + (u.unit_name || '') + '</span>') : '';
         tr.innerHTML = '<td class="row-num">' + rowIndex + '</td>' +
             '<td class="combo-wrap"><input type="text" class="form-control combo-input" placeholder="Nom yoki kod (F4)" data-row="' + rowIndex + '" autocomplete="off">' +
             '<input type="hidden" name="product_id_' + rowIndex + '" value="' + (pid || '') + '">' +
             '<div class="combo-drop" id="comboDrop' + rowIndex + '" style="display:none;"></div></td>' +
-            '<td><input type="text" name="quantity_' + rowIndex + '" class="form-control qty-input" value="' + (qty || '') + '" inputmode="decimal"></td>' +
+            '<td class="d-flex align-items-center gap-1 flex-nowrap"><input type="text" name="quantity_' + rowIndex + '" class="form-control qty-input flex-grow-1" value="' + (qtyDisplay || '') + '" inputmode="' + (u.is_dona ? 'numeric' : 'decimal') + '">' + unitSpan + '</td>' +
             costSumHtml +
             tarixTd +
             '<td><button type="button" class="btn btn-outline-danger btn-sm rm-row">&times;</button></td>';
@@ -298,17 +325,27 @@
             drop.style.display = 'block';
             drop.querySelectorAll('.combo-item[data-id]').forEach(function(el) {
                 el.onclick = function() {
-                    hid.value = this.dataset.id;
+                    var pid = this.dataset.id;
+                    hid.value = pid;
                     input.value = this.dataset.name;
                     var fromId = fromWh.value;
-                    var qty = (fromId && stockByWhProduct[fromId] && stockByWhProduct[fromId][this.dataset.id] != null)
-                        ? stockByWhProduct[fromId][this.dataset.id] : '';
-                    var cost = (fromId && stockCostByWhProduct[fromId] && stockCostByWhProduct[fromId][this.dataset.id] != null)
-                        ? stockCostByWhProduct[fromId][this.dataset.id] : 0;
+                    var qty = (fromId && stockByWhProduct[fromId] && stockByWhProduct[fromId][pid] != null)
+                        ? stockByWhProduct[fromId][pid] : '';
+                    var cost = (fromId && stockCostByWhProduct[fromId] && stockCostByWhProduct[fromId][pid] != null)
+                        ? stockCostByWhProduct[fromId][pid] : 0;
+                    var u = getProductUnit(pid);
+                    var qtyStr = qty === '' ? '' : formatQtyByUnit(qty, u.is_dona);
                     var row = input.closest('tr');
                     if (row) {
+                        row.setAttribute('data-unit-name', u.unit_name || '');
+                        row.setAttribute('data-is-dona', u.is_dona ? '1' : '0');
                         var qtyInput = row.querySelector('.qty-input');
-                        if (qtyInput) qtyInput.value = qty === '' ? '' : String(qty);
+                        if (qtyInput) {
+                            qtyInput.value = qtyStr;
+                            qtyInput.setAttribute('inputmode', u.is_dona ? 'numeric' : 'decimal');
+                        }
+                        var unitLabel = row.querySelector('.unit-label');
+                        if (unitLabel) unitLabel.textContent = u.unit_name || '';
                         row.setAttribute('data-cost', cost);
                         var costCell = row.querySelector('.cost-cell');
                         var sumCell = row.querySelector('.sum-cell');
@@ -362,10 +399,12 @@
             var pname = p ? (p.name + (p.code ? ' (' + p.code + ')' : '')) : '';
             var cost = costs[pid] != null ? costs[pid] : 0;
             var qty = parseFloat(avail[pid]) || 0;
-            entries.push({ id: pid, name: pname, qty: avail[pid], cost: cost, summa: cost * qty });
+            var unitName = p && p.unit_name ? p.unit_name : '';
+            var isDona = p && p.is_dona;
+            entries.push({ id: pid, name: pname, qty: avail[pid], cost: cost, summa: cost * qty, unitName: unitName, isDona: isDona });
         }
         entries.sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
-        entries.forEach(function(e) { addRow(e.id, e.name, e.qty, e.cost, e.summa); });
+        entries.forEach(function(e) { addRow(e.id, e.name, e.qty, e.cost, e.summa, e.unitName, e.isDona); });
         if (entries.length === 0) addRow('', '', '', null, null);
         renum();
     };
