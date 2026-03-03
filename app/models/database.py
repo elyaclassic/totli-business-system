@@ -898,6 +898,8 @@ class EmploymentDoc(Base):
     salary = Column(Float, default=0)   # Mehnat haqi miqdori
     salary_type = Column(String(50), nullable=True)   # oylik, soatlik, bo'lak — ish haqi turi
     piecework_task_ids = Column(Text, nullable=True)  # Bo'lak turlari snapshot (vergul bilan)
+    rest_days = Column(String(100), nullable=True)    # Dam olish kunlari (mon,tue,...)
+    probation = Column(String(100), nullable=True)    # Sinov muddati
     # Mehnat shartnomasi muddati (gov.uz: nomuayyan / muayyan muddatga max 5 yil / muayyan ish)
     contract_type = Column(String(50), nullable=True)   # indefinite, fixed, task
     contract_end_date = Column(Date, nullable=True)   # Muayyan muddatga bo'lsa — amal qilish tugash sanasi
@@ -1324,7 +1326,7 @@ def ensure_attendance_advance_tables():
         ed_cols = [row[1] for row in r]
         if "confirmed_at" not in ed_cols:
             conn.execute(text("ALTER TABLE employment_docs ADD COLUMN confirmed_at DATETIME"))
-        for col, sql in [("contract_type", "VARCHAR(50)"), ("contract_end_date", "DATE"), ("salary_type", "VARCHAR(50)"), ("piecework_task_ids", "TEXT")]:
+        for col, sql in [("contract_type", "VARCHAR(50)"), ("contract_end_date", "DATE"), ("salary_type", "VARCHAR(50)"), ("piecework_task_ids", "TEXT"), ("rest_days", "VARCHAR(100)"), ("probation", "VARCHAR(100)")]:
             r = conn.execute(text("PRAGMA table_info(employment_docs)"))
             ed_cols = [row[1] for row in r]
             if col not in ed_cols:

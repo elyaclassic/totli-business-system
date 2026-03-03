@@ -14,3 +14,4 @@ itsdangerous==2.1.2
 pytest>=9.0.0
 APScheduler>=3.10.0
 pyodbc>=4.0.39; platform_system=="Windows"
+python-docx>=1.1.0

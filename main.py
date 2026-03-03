@@ -19,6 +19,10 @@ import traceback
 from typing import Optional, List
 import openpyxl
 import io
+from urllib.parse import quote
+from docx import Document
+from docx.shared import Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from app.models.database import (
     get_db, init_db, SessionLocal,
     User, Product, Category, Unit, Warehouse, Stock, StockMovement,
@@ -7600,6 +7604,8 @@ async def employment_doc_create(
     salary: float = Form(0),
     salary_type: str = Form(""),
     piecework_task_ids: List[int] = Form([]),
+    rest_days: List[str] = Form([]),
+    probation: str = Form(""),
     contract_type: str = Form("indefinite"),
     contract_end_date: str = Form(None),
     note: str = Form(""),
@@ -7636,6 +7642,8 @@ async def employment_doc_create(
         st = None
     task_ids = [int(x) for x in (piecework_task_ids or []) if str(x).strip().isdigit()]
     task_ids = list(dict.fromkeys(task_ids))
+    rest_days_clean = [d for d in (rest_days or []) if d in ("mon","tue","wed","thu","fri","sat","sun")]
+    probation_clean = (probation or "").strip() or None
     ct = (contract_type or "").strip() or "indefinite"
     if ct not in ("indefinite", "fixed", "task"):
         ct = "indefinite"
@@ -7649,6 +7657,8 @@ async def employment_doc_create(
         salary=doc_salary,
         salary_type=st,
         piecework_task_ids=",".join(str(x) for x in task_ids) if (st == "bo'lak" and task_ids) else None,
+        rest_days=",".join(rest_days_clean) if rest_days_clean else None,
+        probation=probation_clean,
         contract_type=ct,
         contract_end_date=end_d,
         note=note or None,
@@ -7727,6 +7737,258 @@ async def employment_doc_view(
     })
 
 
+@app.get("/employees/hiring-doc/{doc_id}/contract", response_class=HTMLResponse)
+async def employment_doc_contract(
+    request: Request,
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Mehnat shartnomasi (to'liq) — namuna asosida chop etish."""
+    doc = (
+        db.query(EmploymentDoc)
+        .options(joinedload(EmploymentDoc.employee), joinedload(EmploymentDoc.user))
+        .filter(EmploymentDoc.id == doc_id)
+        .first()
+    )
+    if not doc:
+        return RedirectResponse(url="/employees/hiring-docs?error=Hujjat topilmadi", status_code=303)
+
+    # Bo'lim ko'rsatish
+    display_department = (doc.department or "").strip() or None
+    if not display_department and doc.employee:
+        display_department = (doc.employee.department or "").strip() or None
+        if not display_department and getattr(doc.employee, "department_id", None):
+            dept = db.query(Department).filter(Department.id == doc.employee.department_id).first()
+            if dept:
+                display_department = dept.name
+    if not display_department:
+        display_department = "—"
+
+    # Tanlangan bo'lak ishlar (snapshot) — stavkalari bilan
+    selected_piecework_tasks = []
+    try:
+        raw = (doc.piecework_task_ids or "").strip()
+        ids = [int(x) for x in raw.split(",") if x.strip().isdigit()] if raw else []
+        if ids:
+            selected_piecework_tasks = db.query(PieceworkTask).filter(PieceworkTask.id.in_(ids)).order_by(PieceworkTask.name).all()
+    except Exception:
+        selected_piecework_tasks = []
+
+    # Dam olish kunlari matni
+    rest_days_display = ""
+    try:
+        raw_rest = (doc.rest_days or "").strip()
+        codes = [x for x in raw_rest.split(",") if x]
+        name_map = {
+            "mon": "dushanba",
+            "tue": "seshanba",
+            "wed": "chorshanba",
+            "thu": "payshanba",
+            "fri": "juma",
+            "sat": "shanba",
+            "sun": "yakshanba",
+        }
+        names = [name_map.get(c, c) for c in codes]
+        if names:
+            rest_days_display = ", ".join(names)
+    except Exception:
+        rest_days_display = ""
+
+    company_name = "TOTLI HOLVA SWEETS"
+    employer_rep_name = "Rahimov D.A."
+
+    return templates.TemplateResponse("employees/labor_contract.html", {
+        "request": request,
+        "doc": doc,
+        "display_department": display_department,
+        "selected_piecework_tasks": selected_piecework_tasks,
+        "company_name": company_name,
+        "employer_rep_name": employer_rep_name,
+        "rest_days_display": rest_days_display,
+        "current_user": current_user,
+        "page_title": f"Mehnat shartnomasi {doc.number}",
+    })
+
+
+def _build_labor_contract_docx(doc, display_department, selected_piecework_tasks, rest_days_display, company_name, employer_rep_name):
+    """Shartnoma matnini Word hujjati (.docx) sifatida qaytaradi (BytesIO)."""
+    d = Document()
+    style = d.styles["Normal"]
+    style.font.size = Pt(11)
+    style.font.name = "Times New Roman"
+
+    # Sarlavha
+    h = d.add_heading("MEHNAT SHARTNOMASI", level=0)
+    h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    d.add_paragraph()
+    p = d.add_paragraph()
+    p.add_run(f"№ {doc.number}").bold = True
+    p.add_run(f"   Sana: {doc.doc_date.strftime('%d.%m.%Y') if doc.doc_date else '—'}")
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    d.add_paragraph()
+
+    d.add_paragraph("Joy: ____________________________")
+    d.add_paragraph(f"Korxona: {company_name}")
+    d.add_paragraph()
+
+    d.add_paragraph(
+        f"{company_name} (keyingi o'rinlarda Ish beruvchi) va fuqaro {doc.employee.full_name} "
+        "(keyingi o'rinlarda Xodim), mazkur mehnat shartnomasini quyidagilar haqida tuzdilar."
+    )
+    d.add_paragraph()
+
+    d.add_heading("1. UMUMIY QOIDALAR", level=1)
+    hire_date_str = doc.hire_date.strftime("%d.%m.%Y") if doc.hire_date else "________________"
+    pos = doc.position or (doc.employee.position if doc.employee else "") or "________________"
+    d.add_paragraph(
+        f"1.1. Xodim {hire_date_str} sanadan boshlab {display_department} bo'limida {pos} lavozimiga ishga qabul qilinadi."
+    )
+    d.add_paragraph(f"1.2. Xodimning ish joyi: {display_department}.")
+    if doc.contract_type == "fixed":
+        end = f" ({doc.contract_end_date.strftime('%d.%m.%Y')} gacha)" if doc.contract_end_date else ""
+        d.add_paragraph(f"1.3. Mazkur shartnomaning amal qilish muddati: muayyan muddatga{end}.")
+    elif doc.contract_type == "task":
+        d.add_paragraph("1.3. Mazkur shartnomaning amal qilish muddati: muayyan ishni bajarish davriga.")
+    else:
+        d.add_paragraph("1.3. Mazkur shartnomaning amal qilish muddati: nomuayyan muddatga.")
+    prob = doc.probation if doc.probation else "sinovsiz"
+    d.add_paragraph(f"1.4. Sinov muddati: {prob}.")
+    d.add_paragraph("1.5. Xodim lavozim yo'riqnomasi va amaldagi qonunchilikka muvofiq mehnat majburiyatlarini bajaradi.")
+    d.add_paragraph()
+
+    d.add_heading("2. TOMONLARNING HUQUQ VA MAJBURIYATLARI", level=1)
+    d.add_paragraph("2.1. Ish beruvchining majburiyatlari:")
+    d.add_paragraph("  • Xodimga xavfsiz va samarali mehnat qilish uchun shart-sharoitlar yaratish.")
+    d.add_paragraph("  • Ichki mehnat tartibi qoidalari va lavozim yo'riqnomasi bilan tanishtirish.")
+    d.add_paragraph("  • Ish haqini o'z vaqtida to'lash.")
+    d.add_paragraph("2.2. Xodimning majburiyatlari:")
+    d.add_paragraph("  • Mehnat intizomi va ichki tartib qoidalariga rioya qilish.")
+    d.add_paragraph("  • Ish beruvchining qonuniy topshiriqlarini o'z vaqtida va aniq bajarish.")
+    d.add_paragraph("  • Mehnat muhofazasi va texnika xavfsizligi talablariga rioya qilish.")
+    d.add_paragraph()
+
+    d.add_heading("3. ISH VAQTI VA DAM OLISH VAQTI", level=1)
+    d.add_paragraph("3.1. Ish kuni vaqti: 09:00 dan 18:00 gacha (to'liq ish kuni asosida).")
+    rest = rest_days_display if rest_days_display else "shanba va yakshanba"
+    d.add_paragraph(f"3.2. Dam olish kunlari: {rest}.")
+    d.add_paragraph("3.3. Qonunchilikda belgilangan tartibda dam olish/bayram kunlari ishga jalb etilishi mumkin.")
+    d.add_paragraph()
+
+    d.add_heading("4. MEHNATGA HAQ TO'LASH", level=1)
+    salary_type_map = {"oylik": "Oylik", "soatlik": "Soatlik", "bo'lak": "Bo'lak"}
+    st = salary_type_map.get(doc.salary_type, "________________")
+    d.add_paragraph(f"4.1. Ish haqi turi: {st}.")
+    if doc.salary_type == "bo'lak" and selected_piecework_tasks:
+        d.add_paragraph("Bo'lak ishlar va stavkalar:")
+        for t in selected_piecework_tasks:
+            name = t.name or t.code or str(t.id)
+            price = f"{t.price_per_unit:,.0f}" if t.price_per_unit is not None else "0"
+            unit = t.unit_name or "birlik"
+            d.add_paragraph(f"  • {name} — {price} so'm/{unit}")
+    salary_val = f"{doc.salary:,.0f}" if doc.salary else "0"
+    d.add_paragraph(f"4.2. Mehnat haqi miqdori: {salary_val} so'm.")
+    d.add_paragraph("4.3. Ish haqi har oyda kamida ikki marta to'lanadi.")
+    d.add_paragraph()
+
+    d.add_heading("5. XIZMAT SAFARLARI", level=1)
+    d.add_paragraph("5.1. Ish zaruriyatiga ko'ra Xodim xizmat safariga yuborilishi mumkin. Xarajatlar amaldagi qonunchilikka muvofiq qoplanadi.")
+    d.add_paragraph()
+
+    d.add_heading("6. MEHNAT SHARTNOMASINI BEKOR QILISH", level=1)
+    d.add_paragraph("6.1. Mehnat shartnomasi O'zbekiston Respublikasi Mehnat kodeksida belgilangan tartibda bekor qilinishi mumkin.")
+    d.add_paragraph()
+
+    d.add_heading("7. MEHNAT NIZOLARI", level=1)
+    d.add_paragraph("7.1. Mehnat nizolari qonun hujjatlarida belgilangan tartibda hal qilinadi.")
+    d.add_paragraph()
+
+    d.add_heading("8. TOMONLAR REKVIZITLARI VA IMZOLARI", level=1)
+    d.add_paragraph("Ish beruvchi:")
+    d.add_paragraph(f"Korxona: {company_name}")
+    d.add_paragraph("Manzil: O'zbekiston Respublikasi, Qo'qon shahri, Jasorat ko'chasi, 52-uy")
+    d.add_paragraph("STIR: 311469106")
+    d.add_paragraph("Hisob raqam: 202088409071067110001")
+    d.add_paragraph('Bank: "Asaka" banki Qo\'qon filiali')
+    d.add_paragraph("MFO: 00873")
+    d.add_paragraph(f"Rahbar: {employer_rep_name}")
+    d.add_paragraph("Imzo: ______________________")
+    d.add_paragraph()
+    d.add_paragraph("Xodim:")
+    d.add_paragraph(f"F.I.O: {doc.employee.full_name}")
+    d.add_paragraph(f"Kodi: {doc.employee.code or '—'}")
+    d.add_paragraph(f"Telefon: {doc.employee.phone or '—'}")
+    d.add_paragraph("Manzil: ____________________________")
+    d.add_paragraph("Pasport: ____________________________")
+    d.add_paragraph("Imzo: ______________________")
+
+    buf = io.BytesIO()
+    d.save(buf)
+    buf.seek(0)
+    return buf
+
+
+@app.get("/employees/hiring-doc/{doc_id}/contract/export-word")
+async def employment_doc_contract_export_word(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Mehnat shartnomasini Word (.docx) formatida yuklab olish."""
+    doc = (
+        db.query(EmploymentDoc)
+        .options(joinedload(EmploymentDoc.employee), joinedload(EmploymentDoc.user))
+        .filter(EmploymentDoc.id == doc_id)
+        .first()
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Hujjat topilmadi")
+
+    display_department = (doc.department or "").strip() or None
+    if not display_department and doc.employee:
+        display_department = (doc.employee.department or "").strip() or None
+        if not display_department and getattr(doc.employee, "department_id", None):
+            dept = db.query(Department).filter(Department.id == doc.employee.department_id).first()
+            if dept:
+                display_department = dept.name
+    if not display_department:
+        display_department = "—"
+
+    selected_piecework_tasks = []
+    try:
+        raw = (doc.piecework_task_ids or "").strip()
+        ids = [int(x) for x in raw.split(",") if x.strip().isdigit()] if raw else []
+        if ids:
+            selected_piecework_tasks = db.query(PieceworkTask).filter(PieceworkTask.id.in_(ids)).order_by(PieceworkTask.name).all()
+    except Exception:
+        selected_piecework_tasks = []
+
+    rest_days_display = ""
+    try:
+        raw_rest = (doc.rest_days or "").strip()
+        codes = [x for x in raw_rest.split(",") if x]
+        name_map = {"mon": "dushanba", "tue": "seshanba", "wed": "chorshanba", "thu": "payshanba", "fri": "juma", "sat": "shanba", "sun": "yakshanba"}
+        names = [name_map.get(c, c) for c in codes]
+        if names:
+            rest_days_display = ", ".join(names)
+    except Exception:
+        rest_days_display = ""
+
+    company_name = "TOTLI HOLVA SWEETS"
+    employer_rep_name = "Rahimov D.A."
+
+    buf = _build_labor_contract_docx(
+        doc, display_department, selected_piecework_tasks, rest_days_display, company_name, employer_rep_name
+    )
+    safe_number = (doc.number or "shartnoma").replace("/", "-").replace("\\", "-")
+    filename = f"Mehnat_shartnomasi_{safe_number}.docx"
+    return Response(
+        content=buf.read(),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename*=UTF-8\'\'{quote(filename)}'},
+    )
+
+
 @app.post("/employees/hiring-doc/{doc_id}/confirm")
 async def employment_doc_confirm(
     doc_id: int,
@@ -7794,6 +8056,12 @@ async def employment_doc_edit_page(
     )
     if not doc:
         return RedirectResponse(url="/employees/hiring-docs?error=Hujjat topilmadi", status_code=303)
+    if doc.confirmed_at:
+        from urllib.parse import quote
+        return RedirectResponse(
+            url="/employees/hiring-docs?error=" + quote("Tasdiqlangan hujjatni tahrirlash mumkin emas. Avval «Bekor qilish» orqali tasdiqlashni bekor qiling."),
+            status_code=303,
+        )
     departments = db.query(Department).filter(Department.is_active == True).order_by(Department.name).all()
     positions = db.query(Position).filter(Position.is_active == True).order_by(Position.name).all()
     piecework_tasks = db.query(PieceworkTask).filter(PieceworkTask.is_active == True).order_by(PieceworkTask.name).all()
@@ -7820,17 +8088,24 @@ async def employment_doc_edit_save(
     salary: float = Form(0),
     salary_type: str = Form(""),
     piecework_task_ids: List[int] = Form([]),
+    rest_days: List[str] = Form([]),
+    probation: str = Form(""),
     contract_type: str = Form("indefinite"),
     contract_end_date: str = Form(None),
     note: str = Form(""),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Ishga qabul hujjatini saqlash (tahrirlash)"""
+    """Ishga qabul hujjatini saqlash (tahrirlash) — faqat tasdiqlanmagan hujjatni tahrirlash mumkin."""
     from urllib.parse import quote
     doc = db.query(EmploymentDoc).filter(EmploymentDoc.id == doc_id).first()
     if not doc:
         return RedirectResponse(url="/employees/hiring-docs?error=Hujjat topilmadi", status_code=303)
+    if doc.confirmed_at:
+        return RedirectResponse(
+            url="/employees/hiring-docs?error=" + quote("Tasdiqlangan hujjatni tahrirlash mumkin emas. Avval «Bekor qilish» orqali tasdiqlashni bekor qiling."),
+            status_code=303,
+        )
     emp = db.query(Employee).filter(Employee.id == doc.employee_id).first()
     if not emp:
         return RedirectResponse(url="/employees/hiring-docs?error=" + quote("Xodim topilmadi"), status_code=303)
@@ -7855,6 +8130,8 @@ async def employment_doc_edit_save(
         st = None
     task_ids = [int(x) for x in (piecework_task_ids or []) if str(x).strip().isdigit()]
     task_ids = list(dict.fromkeys(task_ids))
+    rest_days_clean = [d for d in (rest_days or []) if d in ("mon","tue","wed","thu","fri","sat","sun")]
+    probation_clean = (probation or "").strip() or None
     ct = (contract_type or "").strip() or "indefinite"
     if ct not in ("indefinite", "fixed", "task"):
         ct = "indefinite"
@@ -7869,6 +8146,8 @@ async def employment_doc_edit_save(
     doc.contract_type = ct
     doc.contract_end_date = end_d
     doc.note = (note or "").strip() or None
+    doc.probation = probation_clean
+    doc.rest_days = ",".join(rest_days_clean) if rest_days_clean else None
 
     # Employee snapshot yangilash (o'ylik hisoblash uchun)
     emp.salary = doc.salary

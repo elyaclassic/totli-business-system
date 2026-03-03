@@ -81,6 +81,48 @@
                         <label class="form-label">Oylik (so'm)</label>
                         <input type="number" class="form-control" name="salary" value="{{ emp.salary if emp else 0 }}" step="100000">
                     </div>
+                    <div class="col-md-12">
+                        <hr class="my-2">
+                        <small class="text-muted d-block mb-1">Ish vaqti hamda dam olish kunlari</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Dam olish kunlari *</label>
+                        {% set default_rest = ['sat','sun'] %}
+                        <div class="border rounded p-2 small">
+                            {% set days = [
+                                ('mon', 'Dushanba'),
+                                ('tue', 'Seshanba'),
+                                ('wed', 'Chorshanba'),
+                                ('thu', 'Payshanba'),
+                                ('fri', 'Juma'),
+                                ('sat', 'Shanba'),
+                                ('sun', 'Yakshanba'),
+                            ] %}
+                            {% set selected_rest = ('' ) %}
+                            {% if emp and emp.employment_docs and emp.employment_docs[-1].rest_days %}
+                                {% set selected_rest = emp.employment_docs[-1].rest_days %}
+                            {% endif %}
+                            {% for code, label in days %}
+                            {% set checked = (code in default_rest) %}
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" name="rest_days" value="{{ code }}" id="rest_{{ code }}"
+                                    {% if checked %}checked{% endif %}>
+                                <label class="form-check-label" for="rest_{{ code }}">{{ label }}</label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <small class="text-muted">Odatiy: Shanba va Yakshanba dam olish. Kerak bo'lsa kunlarni o'zgartiring.</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Sinov muddati</label>
+                        <select class="form-select" name="probation">
+                            <option value="">Sinovsiz</option>
+                            <option value="1 oy">1 oy</option>
+                            <option value="3 oy">3 oy</option>
+                            <option value="6 oy">6 oy</option>
+                        </select>
+                        <small class="text-muted">Agar sinov muddati bo'lsa tanlang, aks holda sinovsiz hisoblanadi.</small>
+                    </div>
                     <div class="col-md-12"><hr class="my-2"><small class="text-muted">Mehnat shartnomasi muddati (O'zR Mehnat kodeksi)</small></div>
                     <div class="col-md-4">
                         <label class="form-label">Shartnoma turi</label>
