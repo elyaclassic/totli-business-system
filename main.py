@@ -5733,6 +5733,9 @@ async def warehouse_transfer_confirm(
             for r in rows[1:]:
                 db.delete(r)
             db.flush()
+    # Kichik kasr farqi bo'lsa (masalan qoldiq 2806.77, so'ralgan 2807) — mavjud miqdorga tushirib tasdiqlash
+    TOLERANCE_ABS = 0.5   # 0.5 birlikgacha farq bo'lsa mavjudga tushiriladi
+    TOLERANCE_PCT = 0.002  # yoki so'ralganning 0.2% gacha
     for item in items:
         rows = db.query(Stock).filter(
             Stock.warehouse_id == transfer.from_warehouse_id,
@@ -5740,7 +5743,14 @@ async def warehouse_transfer_confirm(
         ).all()
         need = float(item.quantity or 0)
         have = sum(float(r.quantity or 0) for r in rows)
-        if have + 1e-6 < need:  # 1e-6 — float xatolik
+        if have + 1e-6 < need:
+            shortfall = need - have
+            allow_cap = shortfall <= max(TOLERANCE_ABS, need * TOLERANCE_PCT)
+            if allow_cap and have >= 1e-6:
+                # Mavjud miqdorga tushirib tasdiqlash (hujjatda ham yangilanadi)
+                item.quantity = have
+                db.flush()
+                continue
             prod = db.query(Product).filter(Product.id == item.product_id).first()
             name = prod.name if prod else f"#{item.product_id}"
             avail_display = "0" if abs(have) < 1e-6 else ("%.6f" % have).rstrip("0").rstrip(".")
