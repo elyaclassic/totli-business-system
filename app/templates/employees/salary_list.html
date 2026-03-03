@@ -5,6 +5,16 @@
     {% if request.query_params.get('saved') %}
     <div class="alert alert-success alert-dismissible fade show py-2 small">
         <i class="bi bi-check-circle"></i> Oylik yozuvlari saqlandi.
+        {% if cash_doc_id %}
+        Oylik vedomost bo'yicha kassadan chiqim hujjati yaratildi va tasdiqlandi.
+        <a href="/qoldiqlar/kassa/hujjat/{{ cash_doc_id }}" class="alert-link ms-1">Kassa hujjatini ko'rish</a>
+        {% endif %}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if no_cash_warn %}
+    <div class="alert alert-warning alert-dismissible fade show py-2 small">
+        <i class="bi bi-exclamation-triangle"></i> Oylik saqlandi. Kassadan chiqim yozish uchun kamida bitta faol kassa bo'lishi kerak.
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% endif %}
@@ -77,7 +87,7 @@
                             <td class="text-end">
                                 <input type="number" name="advance_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:90px" step="1000" value="{{ row.advance_deduction }}">
                             </td>
-                            <td class="text-end fw-bold">{{ "{:,.0f}".format(row.total) }}</td>
+                            <td class="text-end fw-bold jami-cell{% if row.total is defined and row.total < 0 %} text-danger{% endif %}" data-emp-id="{{ row.employee.id }}">{{ "{:,.0f}".format(row.total) }}</td>
                             <td class="text-end">{{ "{:,.0f}".format(row.paid) }}</td>
                             <td>
                                 {% if row.status == 'paid' %}
@@ -109,4 +119,30 @@
         </div>
     </div>
 </div>
+<script>
+(function() {
+    function updateJami() {
+        document.querySelectorAll('.card table tbody tr').forEach(function(tr) {
+            var baseInp = tr.querySelector('input[name^="base_"]');
+            var bonusInp = tr.querySelector('input[name^="bonus_"]');
+            var dedInp = tr.querySelector('input[name^="deduction_"]');
+            var advInp = tr.querySelector('input[name^="advance_"]');
+            var jamiCell = tr.querySelector('.jami-cell');
+            if (!baseInp || !jamiCell) return;
+            var base = parseFloat(baseInp.value) || 0;
+            var bonus = parseFloat(bonusInp && bonusInp.value ? bonusInp.value : 0) || 0;
+            var ded = parseFloat(dedInp && dedInp.value ? dedInp.value : 0) || 0;
+            var adv = parseFloat(advInp && advInp.value ? advInp.value : 0) || 0;
+            var total = base + bonus - ded - adv;
+            jamiCell.textContent = Math.round(total).toLocaleString('ru-RU');
+            jamiCell.classList.toggle('text-danger', total < 0);
+        });
+    }
+    var card = document.querySelector('.card table');
+    if (card) {
+        card.addEventListener('input', updateJami);
+        card.addEventListener('change', updateJami);
+    }
+})();
+</script>
 {% endblock %}

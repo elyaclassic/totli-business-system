@@ -9718,59 +9718,41 @@ async def employee_salary_page(
                 piece_rate_sum[eid] = float(first_task.price_per_unit)
     boalak_employees = [e for e in employees if getattr(e, "salary_type", None) == "bo'lak" and piece_rate_sum.get(e.id, 0) > 0]
     emp_by_id = {e.id: e for e in employees}
-    emp_by_user_id = {}
+    user_to_employee_id = {}
     for e in employees:
         if e.user_id:
-            emp_by_user_id.setdefault(e.user_id, []).append(e)
+            user_to_employee_id[e.user_id] = e.id
+    # Bo'lak ish haqi: Operator bo'yicha ishlab chiqarishdagi kabi KG hisoblanadi (qiyom hisobga olinmaydi), keyin kg * bo'lak narxi
     if boalak_employees:
-        prod_qty = (
-            db.query(Production.operator_id, Production.user_id, func.sum(Production.quantity).label("total_qty"))
+        productions_for_salary = (
+            db.query(Production)
+            .options(joinedload(Production.recipe))
             .filter(
                 Production.status == "completed",
                 func.date(Production.date) >= start_d,
                 func.date(Production.date) <= end_d,
             )
-            .group_by(Production.operator_id, Production.user_id)
             .all()
         )
-        for row in prod_qty:
-            op_id, user_id, total_qty = row.operator_id, row.user_id, float(row.total_qty or 0)
-            if not total_qty:
+        total_kg_by_emp_id = {}
+        for p in productions_for_salary:
+            if _is_qiyom_recipe(p.recipe):
                 continue
-            emps_to_add = []
-            if op_id and op_id in emp_by_id:
-                emps_to_add.append(emp_by_id[op_id])
-            elif user_id and user_id in emp_by_user_id:
-                emps_to_add = emp_by_user_id[user_id]
-            for emp in emps_to_add:
-                if emp not in boalak_employees:
-                    continue
-                rate_sum = piece_rate_sum.get(emp.id, 0)
-                if not rate_sum:
-                    continue
-                piecework_calculated[emp.id] = piecework_calculated.get(emp.id, 0) + total_qty * rate_sum
-        # Bo'lak xodimlar uchun qolganlar: operator_id yoki user_id orqali ulanmagan bo'lsa, to'g'ridan-to'g'ri xodim id bo'yicha yig'indini hisoblaymiz
+            kg = (float(p.quantity or 0) * _kg_per_unit_from_recipe(p.recipe)) if p.recipe else 0
+            if kg <= 0:
+                continue
+            emp_id = None
+            if p.operator_id and p.operator_id in emp_by_id:
+                emp_id = p.operator_id
+            elif p.user_id and p.user_id in user_to_employee_id:
+                emp_id = user_to_employee_id[p.user_id]
+            if emp_id:
+                total_kg_by_emp_id[emp_id] = total_kg_by_emp_id.get(emp_id, 0) + kg
         for emp in boalak_employees:
-            if emp.id in piecework_calculated:
-                continue
-            rate_sum = piece_rate_sum.get(emp.id, 0)
-            if not rate_sum:
-                continue
-            cond = Production.operator_id == emp.id
-            if getattr(emp, "user_id", None) is not None:
-                cond = or_(cond, Production.user_id == emp.user_id)
-            q = (
-                db.query(func.coalesce(func.sum(Production.quantity), 0))
-                .filter(
-                    Production.status == "completed",
-                    func.date(Production.date) >= start_d,
-                    func.date(Production.date) <= end_d,
-                    cond,
-                )
-            )
-            total_qty = float(q.scalar() or 0)
-            if total_qty > 0:
-                piecework_calculated[emp.id] = total_qty * rate_sum
+            total_kg = total_kg_by_emp_id.get(emp.id, 0)
+            rate = piece_rate_sum.get(emp.id, 0)
+            if total_kg > 0 and rate > 0:
+                piecework_calculated[emp.id] = total_kg * rate
     rows = []
     for emp in employees:
         s = salaries.get(emp.id)
@@ -9781,14 +9763,16 @@ async def employee_salary_page(
             base = (s.base_salary if s else 0) or (emp.salary or 0) or latest_doc_salary.get(emp.id, 0)
             if not base and emp.id in piecework_calculated:
                 base = piecework_calculated[emp.id]
-        bonus = (s.bonus if s else 0) or 0
-        deduction = (s.deduction if s else 0) or 0
-        adv_ded = (s.advance_deduction if s and getattr(s, "advance_deduction", None) is not None else None)
+        base = float(base or 0)
+        bonus = float(s.bonus if s and s.bonus is not None else 0) or 0
+        deduction = float(s.deduction if s and s.deduction is not None else 0) or 0
+        adv_ded = None
+        if s and getattr(s, "advance_deduction", None) is not None:
+            adv_ded = float(s.advance_deduction)
         if adv_ded is None:
-            adv_ded = advance_sums.get(emp.id, 0)
+            adv_ded = float(advance_sums.get(emp.id, 0) or 0)
         total = base + bonus - deduction - adv_ded
-        if total < 0:
-            total = 0
+        total = round(total, 2)
         paid = (s.paid if s else 0) or 0
         status = (s.status if s else "pending") or "pending"
         if total == 0 and paid == 0:
@@ -9808,6 +9792,12 @@ async def employee_salary_page(
             "paid": paid,
             "status": status,
         })
+    cash_doc_id = request.query_params.get("cash_doc")
+    try:
+        cash_doc_id = int(cash_doc_id) if cash_doc_id else None
+    except (TypeError, ValueError):
+        cash_doc_id = None
+    no_cash_warn = request.query_params.get("no_cash") == "1"
     return templates.TemplateResponse("employees/salary_list.html", {
         "request": request,
         "year": year,
@@ -9815,6 +9805,8 @@ async def employee_salary_page(
         "rows": rows,
         "current_user": current_user,
         "page_title": "Oylik hisoblash",
+        "cash_doc_id": cash_doc_id,
+        "no_cash_warn": no_cash_warn,
     })
 
 
@@ -9826,19 +9818,19 @@ async def employee_salary_save(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Oylik yozuvlarini saqlash (barcha qatorlar)"""
+    """Oylik yozuvlarini saqlash; jami to'lov summasiga kassadan chiqim hujjati yaratiladi va tasdiqlanadi."""
     if not (1 <= month <= 12) or year < 2020 or year > 2030:
         return RedirectResponse(url="/employees/salary?error=Noto'g'ri oy yoki yil", status_code=303)
     form = await request.form()
     employees = db.query(Employee).filter(Employee.is_active == True).all()
+    total_payroll = 0.0
     for emp in employees:
         base = float(form.get(f"base_{emp.id}", 0) or 0)
         bonus = float(form.get(f"bonus_{emp.id}", 0) or 0)
         deduction = float(form.get(f"deduction_{emp.id}", 0) or 0)
         advance_deduction = float(form.get(f"advance_{emp.id}", 0) or 0)
         total = base + bonus - deduction - advance_deduction
-        if total < 0:
-            total = 0
+        total_payroll += max(0, float(total))  # Kassadan faqat musbat to'lovlar chiqadi
         s = db.query(Salary).filter(Salary.employee_id == emp.id, Salary.year == year, Salary.month == month).first()
         if not s:
             s = Salary(employee_id=emp.id, year=year, month=month)
@@ -9852,7 +9844,42 @@ async def employee_salary_save(
             s.paid = 0
         s.status = "paid" if (s.paid or 0) >= total else "pending"
     db.commit()
-    return RedirectResponse(url=f"/employees/salary?year={year}&month={month}&saved=1", status_code=303)
+    # Oylik vedomost bo'yicha kassaga yo'naltirish — kassadan chiqim hujjati yaratish va tasdiqlash
+    cash_doc_id = None
+    no_cash_warn = False
+    if total_payroll > 0:
+        cash = db.query(CashRegister).filter(CashRegister.is_active == True).order_by(CashRegister.id).first()
+        if cash:
+            current_balance = float(cash.balance or 0)
+            new_balance = current_balance - total_payroll
+            today = datetime.now()
+            count = db.query(CashBalanceDoc).filter(
+                CashBalanceDoc.date >= today.replace(hour=0, minute=0, second=0)
+            ).count()
+            number = f"KLD-{today.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
+            doc = CashBalanceDoc(
+                number=number,
+                date=today,
+                user_id=current_user.id if current_user else None,
+                status="draft",
+            )
+            db.add(doc)
+            db.flush()
+            item = CashBalanceDocItem(doc_id=doc.id, cash_register_id=cash.id, balance=new_balance, previous_balance=current_balance)
+            db.add(item)
+            db.flush()
+            cash.balance = new_balance
+            doc.status = "confirmed"
+            db.commit()
+            cash_doc_id = doc.id
+        else:
+            no_cash_warn = True
+    params = f"year={year}&month={month}&saved=1"
+    if cash_doc_id:
+        params += f"&cash_doc={cash_doc_id}"
+    if no_cash_warn:
+        params += "&no_cash=1"
+    return RedirectResponse(url=f"/employees/salary?{params}", status_code=303)
 
 
 @app.post("/employees/salary/mark-paid/{employee_id}")
