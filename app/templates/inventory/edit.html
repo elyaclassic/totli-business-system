@@ -51,7 +51,13 @@
     <form method="post" action="/inventory/{{ doc.id }}/save" id="invForm">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <h5 class="mb-0">Jadval — hisobiy va haqiqiy qoldiq</h5>
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <h5 class="mb-0">Jadval — hisobiy va haqiqiy qoldiq</h5>
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="form-label mb-0 small text-muted">Sana</label>
+                        <input type="datetime-local" name="doc_date" class="form-control form-control-sm" value="{{ doc_date_value | default('') }}" style="max-width: 200px;" step="60">
+                    </div>
+                </div>
                 <div class="d-flex gap-2">
                     <button type="submit" formaction="/inventory/{{ doc.id }}/save" class="btn btn-outline-primary"><i class="bi bi-save"></i> Saqlash (qoralama)</button>
                     <button type="submit" formaction="/inventory/{{ doc.id }}/confirm" class="btn btn-success" onclick="return confirm('Tasdiqlashni xohlaysizmi? Ombordagi qoldiq yangilanadi.');"><i class="bi bi-check-circle"></i> Tasdiqlash</button>

@@ -4661,6 +4661,9 @@ async def inventory_edit_page(
         products_to_add = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
     products_data = sorted(by_product.values(), key=lambda x: (x["product_name"].lower(), x["product_id"]))
     show_tannarx = getattr(current_user, "role", None) == "admin"
+    inv_date = doc.date or datetime.now()
+    doc_date_value = inv_date.strftime("%Y-%m-%dT%H:%M") if inv_date else ""
+    doc_date_display = inv_date.strftime("%d.%m.%Y %H:%M") if inv_date else ""
     return templates.TemplateResponse("inventory/edit.html", {
         "request": request,
         "doc": doc,
@@ -4669,6 +4672,8 @@ async def inventory_edit_page(
         "products_to_add": products_to_add,
         "show_tannarx": show_tannarx,
         "current_user": current_user,
+        "doc_date_value": doc_date_value,
+        "doc_date_display": doc_date_display,
         "page_title": "Inventarizatsiya — tahrirlash",
     })
 
@@ -4811,6 +4816,11 @@ async def inventory_save_draft(
     if not doc or doc.status != "draft":
         return RedirectResponse(url="/inventory", status_code=303)
     form = await request.form()
+    doc_date_str = form.get("doc_date")
+    if doc_date_str:
+        parsed = _parse_doc_date(doc_date_str)
+        if parsed:
+            doc.date = parsed
     item_ids = form.getlist("item_id")
     quantities = form.getlist("actual_quantity")
     total_tannarx = 0.0
@@ -4893,6 +4903,11 @@ async def inventory_confirm(
     if not doc.items:
         return RedirectResponse(url=f"/inventory/{doc_id}/edit?message=Jadval bo'sh. Avval qoldiq tovarlarni yuklang yoki tovar qo'shing.", status_code=303)
     form = await request.form()
+    doc_date_str = form.get("doc_date")
+    if doc_date_str:
+        parsed = _parse_doc_date(doc_date_str)
+        if parsed:
+            doc.date = parsed
     item_ids = form.getlist("item_id")
     quantities = form.getlist("actual_quantity")
     for i, iid in enumerate(item_ids):

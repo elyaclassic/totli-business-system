@@ -69,7 +69,7 @@
                     {% if transfer and transfer.status == 'confirmed' %}
                     {{ transfer.date.strftime('%d.%m.%Y %H:%M') if transfer.date else '—' }}
                     {% else %}
-                    <input type="text" name="doc_date" class="form-control w-100" value="{{ doc_date_display | default(doc_date_value) }}" placeholder="dd.mm.yyyy HH:MM — buferdan qo'yishingiz mumkin" required style="max-width: 280px;" autocomplete="off">
+                    <input type="datetime-local" name="doc_date" class="form-control w-100" value="{{ doc_date_value | default('') }}" required style="max-width: 280px;" step="60">
                     {% endif %}
                 </div>
             </div>
