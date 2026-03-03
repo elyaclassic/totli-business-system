@@ -4596,12 +4596,8 @@ async def inventory_create_draft(
     if not wh:
         return RedirectResponse(url="/inventory/new?message=Ombor topilmadi.", status_code=303)
     today = datetime.now()
-    count = db.query(StockAdjustmentDoc).filter(
-        StockAdjustmentDoc.date >= today.replace(hour=0, minute=0, second=0)
-    ).count()
-    number = f"INV-{today.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
     doc = StockAdjustmentDoc(
-        number=number,
+        number="INV-PENDING",  # Saqlanganda INV-YYYYMMDD-NNNN ga almashtiriladi
         date=today,
         warehouse_id=warehouse_id,
         user_id=current_user.id,
@@ -4610,6 +4606,8 @@ async def inventory_create_draft(
         total_sotuv=0,
     )
     db.add(doc)
+    db.flush()
+    doc.number = f"INV-PENDING-{doc.id}"  # Unique bo'lishi uchun
     db.commit()
     db.refresh(doc)
     return RedirectResponse(url=f"/inventory/{doc.id}/edit", status_code=303)
@@ -4821,6 +4819,13 @@ async def inventory_save_draft(
         parsed = _parse_doc_date(doc_date_str)
         if parsed:
             doc.date = parsed
+    # Sana tanlanib saqlanganda haqiqiy raqam berish (INV-YYYYMMDD-NNNN)
+    if doc.number and doc.number.startswith("INV-PENDING") and doc.date:
+        date_str = doc.date.strftime("%Y%m%d")
+        count = db.query(StockAdjustmentDoc).filter(
+            StockAdjustmentDoc.number.like(f"INV-{date_str}-%")
+        ).count()
+        doc.number = f"INV-{date_str}-{str(count + 1).zfill(4)}"
     item_ids = form.getlist("item_id")
     quantities = form.getlist("actual_quantity")
     total_tannarx = 0.0
@@ -4908,6 +4913,13 @@ async def inventory_confirm(
         parsed = _parse_doc_date(doc_date_str)
         if parsed:
             doc.date = parsed
+    # Sana tanlangan holda tasdiqlashda ham raqam berish (agar hali INV-PENDING bo'lsa)
+    if doc.number and doc.number.startswith("INV-PENDING") and doc.date:
+        date_str = doc.date.strftime("%Y%m%d")
+        count = db.query(StockAdjustmentDoc).filter(
+            StockAdjustmentDoc.number.like(f"INV-{date_str}-%")
+        ).count()
+        doc.number = f"INV-{date_str}-{str(count + 1).zfill(4)}"
     item_ids = form.getlist("item_id")
     quantities = form.getlist("actual_quantity")
     for i, iid in enumerate(item_ids):

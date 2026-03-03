@@ -37,7 +37,7 @@
                         {% for d in docs %}
                         <tr>
                             <td>{{ loop.index }}</td>
-                            <td><a href="/inventory/{{ d.id }}">{{ d.number }}</a></td>
+                            <td><a href="/inventory/{{ d.id }}">{% if d.number and d.number.startswith('INV-PENDING') %}— (saqlanganda beriladi){% else %}{{ d.number }}{% endif %}</a></td>
                             <td>{{ d.date.strftime('%d.%m.%Y %H:%M') if d.date else '-' }}</td>
                             <td>{{ d.warehouse.name if d.warehouse else '-' }}</td>
                             <td>
