@@ -18,6 +18,11 @@
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% endif %}
+    {% if request.query_params.get('error') %}
+    <div class="alert alert-danger alert-dismissible fade show">{{ request.query_params.get('error') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
 
     <div class="card mb-3">
         <div class="card-body">
@@ -43,6 +48,9 @@
                 <form method="post" action="/inventory/{{ doc.id }}/remove-zero-balance" class="d-inline">
                     <button type="submit" class="btn btn-outline-warning btn-sm" title="Ombordan o'tkazilgan (qoldig'i 0) tovarlarni ro'yxatdan olib tashlash"><i class="bi bi-trash"></i> 0 qoldiqli qatorlarni olib tashlash</button>
                 </form>
+                {% if doc.warehouse_id %}
+                <a href="/reports/stock/no-history?warehouse_id={{ doc.warehouse_id }}" class="btn btn-outline-info btn-sm" title="Bu omborda qoldigi bor lekin harakat tarixi yo'q mahsulotlar" target="_blank"><i class="bi bi-exclamation-triangle"></i> Tarixsiz qoldiqlar</a>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -74,6 +82,7 @@
                                 <th>Haqiqiy qoldiq</th>
                                 <th>Farq</th>
                                 {% if show_tannarx %}<th>Tannarx</th><th>Sotuv narx</th>{% endif %}
+                                <th class="text-center" style="width: 90px;">Qayerdan</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -87,6 +96,11 @@
                                 <td><input type="number" name="actual_quantity" value="{{ row.actual_quantity }}" step="any" min="0" class="form-control form-control-sm"></td>
                                 <td class="{% if diff > 0 %}text-success{% elif diff < 0 %}text-danger{% else %}text-muted{% endif %}">{{ "{:+,.3f}".format(diff) }}</td>
                                 {% if show_tannarx %}<td>{{ "{:,.0f}".format(row.cost_price) }}</td><td>{{ "{:,.0f}".format(row.sale_price) }}</td>{% endif %}
+                                <td class="text-center">
+                                    {% if doc.warehouse_id and row.product_id %}
+                                    <a href="/reports/stock/source?warehouse_id={{ doc.warehouse_id }}&product_id={{ row.product_id }}" class="btn btn-sm btn-outline-info" title="Bu omborda shu tovar qayerdan keldi — harakat tarixi" target="_blank"><i class="bi bi-clock-history"></i></a>
+                                    {% else %}—{% endif %}
+                                </td>
                             </tr>
                             {% endfor %}
                         </tbody>

@@ -4,7 +4,7 @@ Hisobotlar — savdo, qoldiq, qarzdorlik va Excel export.
 import io
 import json
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Request, Depends, File, UploadFile
+from fastapi import APIRouter, Request, Depends, File, Form, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, and_
@@ -12,7 +12,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 
 from app.core import templates
-from app.models.database import get_db, Order, OrderItem, Stock, StockMovement, Product, Partner, Warehouse, User, Production, Recipe, StockAdjustmentDoc, StockAdjustmentDocItem, Employee, Purchase, PurchaseItem, WarehouseTransfer, Payment
+from app.models.database import get_db, Order, OrderItem, Stock, StockMovement, Product, Partner, Warehouse, User, Production, Recipe, StockAdjustmentDoc, StockAdjustmentDocItem, Employee, Purchase, PurchaseItem, WarehouseTransfer, Payment, ProductPrice
 from app.deps import get_current_user, require_auth, require_admin
 from app.utils.user_scope import get_warehouses_for_user
 
@@ -240,6 +240,140 @@ def _document_url(doc_type: str, doc_id: int) -> str:
     return "#"
 
 
+@router.get("/stock/no-history", response_class=HTMLResponse)
+async def report_stock_no_history(
+    request: Request,
+    warehouse_id: int = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Faqat qoldigi bor, lekin harakat tarixi yo'q mahsulotlar — tanlangan ombor bo'yicha (qoldiq qayerdandur paydo bo'lib qolganlar)."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.name).all()
+    rows = []
+    warehouse = None
+    if warehouse_id:
+        warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+        if warehouse:
+            # Ombor bo'yicha barcha Stock (qoldiq > 0), product_id bo'yicha yig'indisi
+            from collections import defaultdict
+            by_product = defaultdict(float)
+            for s in db.query(Stock).filter(Stock.warehouse_id == warehouse_id).all():
+                q = float(s.quantity or 0)
+                if q > 0:
+                    by_product[s.product_id] += q
+            product_ids = list(by_product.keys())
+            if product_ids:
+                products_by_id = {p.id: p for p in db.query(Product).filter(Product.id.in_(product_ids)).all()}
+                # Harakat tarixi yo'q (warehouse_id, product_id) larni qoldiramiz
+                for pid in product_ids:
+                    has_movement = (
+                        db.query(StockMovement)
+                        .filter(
+                            StockMovement.warehouse_id == warehouse_id,
+                            StockMovement.product_id == pid,
+                        )
+                        .limit(1)
+                        .first()
+                    )
+                    if not has_movement and pid in products_by_id:
+                        rows.append({
+                            "product": products_by_id[pid],
+                            "product_id": pid,
+                            "quantity": by_product[pid],
+                        })
+                rows.sort(key=lambda r: ((r["product"].name or "").lower(), r["product_id"]))
+    return templates.TemplateResponse("reports/stock_no_history.html", {
+        "request": request,
+        "warehouses": warehouses,
+        "warehouse": warehouse,
+        "selected_warehouse_id": warehouse_id,
+        "rows": rows,
+        "page_title": "Tarixsiz qoldiqlar",
+        "current_user": current_user,
+    })
+
+
+@router.post("/stock/no-history/create-inventory", response_class=RedirectResponse)
+async def report_stock_no_history_create_inventory(
+    request: Request,
+    warehouse_id: int = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tarixsiz qoldiqlar ro'yxatidagi mahsulotlar uchun inventarizatsiya hujjati yaratib, tahrirga yo'naltiradi. Haqiqiy qoldiqni 0 qilsangiz — qoldiq tozalanadi, tasdiqlanganda harakat tarixi yoziladi."""
+    from urllib.parse import quote
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    if not warehouse_id:
+        return RedirectResponse(url="/reports/stock/no-history?error=" + quote("Ombor tanlang."), status_code=303)
+    warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+    if not warehouse:
+        return RedirectResponse(url="/reports/stock/no-history?error=" + quote("Ombor topilmadi."), status_code=303)
+    # Tarixsiz qoldiqlar ro'yxati (qoldiq > 0, StockMovement yo'q)
+    from collections import defaultdict
+    by_product = defaultdict(float)
+    for s in db.query(Stock).filter(Stock.warehouse_id == warehouse_id).all():
+        q = float(s.quantity or 0)
+        if q > 0:
+            by_product[s.product_id] += q
+    product_ids = [pid for pid in by_product.keys()]
+    no_history_ids = []
+    for pid in product_ids:
+        has_movement = (
+            db.query(StockMovement)
+            .filter(StockMovement.warehouse_id == warehouse_id, StockMovement.product_id == pid)
+            .limit(1)
+            .first()
+        )
+        if not has_movement:
+            no_history_ids.append(pid)
+    if not no_history_ids:
+        return RedirectResponse(
+            url="/reports/stock/no-history?warehouse_id=" + str(warehouse_id) + "&message=" + quote("Bu omborda tarixsiz qoldiq yo'q."),
+            status_code=303,
+        )
+    # Qoralama inventarizatsiya hujjati
+    today = datetime.now()
+    doc = StockAdjustmentDoc(
+        number="INV-PENDING",
+        date=today,
+        warehouse_id=warehouse_id,
+        user_id=current_user.id,
+        status="draft",
+        total_tannarx=0,
+        total_sotuv=0,
+    )
+    db.add(doc)
+    db.flush()
+    doc.number = f"INV-PENDING-{doc.id}"
+    # Har bir tarixsiz mahsulot uchun qator (haqiqiy = hisobiy — keyin 0 qilish mumkin)
+    products = {p.id: p for p in db.query(Product).filter(Product.id.in_(no_history_ids)).all()}
+    for pid in no_history_ids:
+        if pid not in products:
+            continue
+        product = products[pid]
+        qty = by_product[pid]
+        cost = float(product.purchase_price or 0)
+        sale = float(product.sale_price or 0)
+        if (product.sale_price or 0) <= 0:
+            pp = db.query(ProductPrice).filter(ProductPrice.product_id == pid).first()
+            if pp:
+                sale = float(getattr(pp, "sale_price", 0) or 0)
+        db.add(StockAdjustmentDocItem(
+            doc_id=doc.id,
+            product_id=pid,
+            warehouse_id=warehouse_id,
+            quantity=qty,
+            cost_price=cost,
+            sale_price=sale,
+        ))
+    db.commit()
+    msg = quote(f"Inventarizatsiya yaratildi ({len(no_history_ids)} ta mahsulot). Haqiqiy qoldiqni 0 qilsangiz — qoldiq tozalanadi.")
+    return RedirectResponse(url=f"/inventory/{doc.id}/edit?message={msg}", status_code=303)
+
+
 @router.get("/stock/source", response_class=HTMLResponse)
 async def report_stock_source(
     request: Request,
@@ -280,6 +414,7 @@ async def report_stock_source(
     # Bir xil hujjat (document_type, document_id) uchun bitta qator — dublikat harakatlar birlashtiriladi
     rows = []
     seen_doc = set()  # (document_type, document_id)
+    transfers_by_id = {}  # keyed by document_id for wrong_warehouse check
     for m in movements:
         # Qoldiq tuzatish: faqat tasdiqlangan hujjat ko'rinsin
         if (m.document_type or "") == "StockAdjustmentDoc" and m.document_id not in confirmed_adj_ids:
@@ -292,7 +427,7 @@ async def report_stock_source(
             display_date = doc_dates[m.document_id].strftime("%d.%m.%Y %H:%M")
         else:
             display_date = m.created_at.strftime("%d.%m.%Y %H:%M") if m.created_at else "—"
-        rows.append({
+        row = {
             "date": display_date,
             "document_type": m.document_type or "",
             "document_type_label": _document_type_label(m.document_type or ""),
@@ -301,14 +436,29 @@ async def report_stock_source(
             "document_url": _document_url(m.document_type or "", m.document_id),
             "quantity_change": float(m.quantity_change or 0),
             "quantity_after": float(m.quantity_after or 0),
-        })
+            "movement_id": getattr(m, "id", None),
+        }
+        # Ombordan omborga: hujjatda bu ombor ko'rsatilmagan bo'lsa ogohlantirish
+        if (m.document_type or "") == "WarehouseTransfer" and m.document_id:
+            if m.document_id not in transfers_by_id:
+                t = db.query(WarehouseTransfer).filter(WarehouseTransfer.id == m.document_id).first()
+                transfers_by_id[m.document_id] = t
+            t = transfers_by_id.get(m.document_id)
+            if t:
+                if (m.quantity_change or 0) > 0:  # transfer_in — hujjatda "omborga" bu ombor bo'lishi kerak
+                    if t.to_warehouse_id != warehouse_id:
+                        row["wrong_warehouse"] = True
+                else:  # transfer_out — hujjatda "ombordan" bu ombor bo'lishi kerak
+                    if t.from_warehouse_id != warehouse_id:
+                        row["wrong_warehouse"] = True
+        rows.append(row)
     # Barcha hujjat turlarida sana — hujjat sanasi (harakat yozilgan vaqt emas), barcha mahsulotlar uchun bir xil
     purchase_ids = [r["document_id"] for r in rows if (r.get("document_type") or "") == "Purchase" and r.get("document_id")]
     sale_ids = [r["document_id"] for r in rows if (r.get("document_type") or "") in ("Sale", "SaleReturn", "SaleReturnRevert") and r.get("document_id")]
     transfer_ids = [r["document_id"] for r in rows if (r.get("document_type") or "") == "WarehouseTransfer" and r.get("document_id")]
     purchases_by_id = {p.id: p for p in db.query(Purchase).filter(Purchase.id.in_(purchase_ids)).all()} if purchase_ids else {}
     orders_by_id = {o.id: o for o in db.query(Order).filter(Order.id.in_(sale_ids)).all()} if sale_ids else {}
-    transfers_by_id = {t.id: t for t in db.query(WarehouseTransfer).filter(WarehouseTransfer.id.in_(transfer_ids)).all()} if transfer_ids else {}
+    transfers_by_id_dates = {t.id: t for t in db.query(WarehouseTransfer).filter(WarehouseTransfer.id.in_(transfer_ids)).all()} if transfer_ids else {}
     for r in rows:
         doc_type = r.get("document_type") or ""
         doc_id = r.get("document_id")
@@ -316,8 +466,8 @@ async def report_stock_source(
             r["date"] = purchases_by_id[doc_id].date.strftime("%d.%m.%Y %H:%M")
         elif doc_type in ("Sale", "SaleReturn", "SaleReturnRevert") and doc_id and doc_id in orders_by_id and orders_by_id[doc_id].date:
             r["date"] = orders_by_id[doc_id].date.strftime("%d.%m.%Y %H:%M")
-        elif doc_type == "WarehouseTransfer" and doc_id and doc_id in transfers_by_id and transfers_by_id[doc_id].date:
-            r["date"] = transfers_by_id[doc_id].date.strftime("%d.%m.%Y %H:%M")
+        elif doc_type == "WarehouseTransfer" and doc_id and doc_id in transfers_by_id_dates and transfers_by_id_dates[doc_id].date:
+            r["date"] = transfers_by_id_dates[doc_id].date.strftime("%d.%m.%Y %H:%M")
     # Ishlab chiqarish qatorlari uchun: hujjat sanasi va hujjatda ko'rsatilgan miqdor bilan harakatdagi miqdorni solishtirish (farq bo'lsa ogohlantirish)
     from sqlalchemy.orm import joinedload
     from app.utils.production_order import production_output_quantity_for_stock
@@ -358,6 +508,9 @@ async def report_stock_source(
     # Dona mahsulotlar uchun ko'rsatishda butun son (216, 6), boshqalar uchun 3 xona kasr
     _unit_str = ((getattr(product, "unit", None) and (product.unit.name or "") or "") + " " + (getattr(product, "unit", None) and (product.unit.code or "") or "")).lower()
     is_dona = product and "dona" in _unit_str
+    msg = request.query_params.get("msg") or ""
+    error = request.query_params.get("error") or ""
+    removed = request.query_params.get("removed")
     return templates.TemplateResponse("reports/stock_source.html", {
         "request": request,
         "warehouse": warehouse,
@@ -367,7 +520,137 @@ async def report_stock_source(
         "is_dona": is_dona,
         "page_title": "Qoldiq manbai",
         "current_user": current_user,
+        "msg": msg,
+        "error": error,
+        "removed": removed,
     })
+
+
+@router.post("/stock/source/remove-movement")
+async def report_stock_source_remove_movement(
+    request: Request,
+    movement_id: int = Form(...),
+    warehouse_id: int = Form(...),
+    product_id: int = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Bitta harakatni olib tashlash (masalan hujjatda bu ombor ko'rsatilmagan noto'g'ri yozuv). Qoldiq qaytariladi."""
+    from urllib.parse import quote
+    m = db.query(StockMovement).filter(StockMovement.id == movement_id).first()
+    if not m or m.warehouse_id != warehouse_id or m.product_id != product_id:
+        return RedirectResponse(
+            url=f"/reports/stock/source?warehouse_id={warehouse_id}&product_id={product_id}&error=" + quote("Harakat topilmadi yoki bu ombor+mahsulotga tegishli emas."),
+            status_code=303,
+        )
+    add_back = -(float(m.quantity_change or 0))
+    stocks = db.query(Stock).filter(Stock.warehouse_id == m.warehouse_id, Stock.product_id == m.product_id).all()
+    if stocks:
+        stocks[0].quantity = (float(stocks[0].quantity or 0) + add_back)
+        if hasattr(stocks[0], "updated_at"):
+            stocks[0].updated_at = datetime.now()
+    elif add_back > 0:
+        db.add(Stock(warehouse_id=m.warehouse_id, product_id=m.product_id, quantity=add_back))
+    db.delete(m)
+    db.commit()
+    return RedirectResponse(
+        url=f"/reports/stock/source?warehouse_id={warehouse_id}&product_id={product_id}&removed=1&msg=" + quote("Noto'g'ri harakat olib tashlandi, qoldiq qaytarildi."),
+        status_code=303,
+    )
+
+
+@router.post("/stock/cleanup-orphan-movements")
+async def report_stock_cleanup_orphan_movements(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """O'chirilgan barcha hujjat turlariga tegishli harakatlarni tozalash: ombordan omborga, ishlab chiqarish, kirim, qoldiq tuzatish. Qoldiq harakat ta'siriga qarab qaytariladi."""
+    from urllib.parse import quote
+    doc_types_tables = [
+        ("WarehouseTransfer", WarehouseTransfer),
+        ("Production", Production),
+        ("Purchase", Purchase),
+        ("StockAdjustmentDoc", StockAdjustmentDoc),
+    ]
+    existing_ids_by_type = {}
+    for doc_type, model in doc_types_tables:
+        try:
+            existing_ids_by_type[doc_type] = {r[0] for r in db.query(model.id).all()}
+        except Exception:
+            existing_ids_by_type[doc_type] = set()
+    all_movements = (
+        db.query(StockMovement)
+        .filter(
+            StockMovement.document_type.in_([d[0] for d in doc_types_tables]),
+            StockMovement.document_id.isnot(None),
+        )
+        .all()
+    )
+    orphans = [
+        m for m in all_movements
+        if (m.document_type or "") in existing_ids_by_type and m.document_id not in existing_ids_by_type.get(m.document_type, set())
+    ]
+    reverted = 0
+    for m in orphans:
+        wh_id, prod_id = m.warehouse_id, m.product_id
+        if wh_id is None or prod_id is None:
+            db.delete(m)
+            reverted += 1
+            continue
+        add_back = -(float(m.quantity_change or 0))
+        stocks = db.query(Stock).filter(Stock.warehouse_id == wh_id, Stock.product_id == prod_id).all()
+        if stocks:
+            stocks[0].quantity = (float(stocks[0].quantity or 0) + add_back)
+            if hasattr(stocks[0], "updated_at"):
+                stocks[0].updated_at = datetime.now()
+        elif add_back > 0:
+            db.add(Stock(warehouse_id=wh_id, product_id=prod_id, quantity=add_back))
+        db.delete(m)
+        reverted += 1
+    db.commit()
+    msg = quote(f"O'chirilgan hujjatlar harakatlari: {reverted} ta tozalandi (ombordan omborga, ishlab chiqarish, kirim, qoldiq tuzatish). Qoldiq qaytarildi.")
+    return RedirectResponse(url=f"/reports/stock?cleanup_orphan=1&msg={msg}", status_code=303)
+
+
+@router.post("/stock/cleanup-orphan-sale-movements")
+async def report_stock_cleanup_orphan_sale_movements(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """O'chirilgan sotuv/qaytish hujjatlariga tegishli StockMovement larni tozalash va qoldiqni qaytarish (hujjat yo'q, qoldiq qolib ketgan holatlar)."""
+    from urllib.parse import quote
+    existing_order_ids = {r[0] for r in db.query(Order.id).all()}
+    sale_doc_types = ("Sale", "SaleReturn", "SaleReturnRevert")
+    orphans = (
+        db.query(StockMovement)
+        .filter(
+            StockMovement.document_type.in_(sale_doc_types),
+            StockMovement.document_id.isnot(None),
+        )
+        .all()
+    )
+    orphans = [m for m in orphans if m.document_id not in existing_order_ids]
+    reverted = 0
+    for m in orphans:
+        wh_id, prod_id = m.warehouse_id, m.product_id
+        if wh_id is None or prod_id is None:
+            db.delete(m)
+            reverted += 1
+            continue
+        # Harakat ta'sirini bekor qilish: qoldiqga (-quantity_change) qo'shamiz
+        add_back = -(float(m.quantity_change or 0))
+        stocks = db.query(Stock).filter(Stock.warehouse_id == wh_id, Stock.product_id == prod_id).all()
+        if stocks:
+            stocks[0].quantity = (float(stocks[0].quantity or 0) + add_back)
+            if hasattr(stocks[0], "updated_at"):
+                stocks[0].updated_at = datetime.now()
+        elif add_back > 0:
+            db.add(Stock(warehouse_id=wh_id, product_id=prod_id, quantity=add_back))
+        db.delete(m)
+        reverted += 1
+    db.commit()
+    msg = quote(f"O'chirilgan sotuv/qaytish harakatlari: {reverted} ta tozalandi, qoldiq qaytarildi.")
+    return RedirectResponse(url=f"/reports/stock?cleanup_sale=1&msg={msg}", status_code=303)
 
 
 @router.post("/stock/merge-duplicates")

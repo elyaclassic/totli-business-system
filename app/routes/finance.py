@@ -5,7 +5,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core import templates
 from app.models.database import get_db, User, CashRegister, Payment
@@ -23,8 +23,14 @@ async def finance(
     """Moliya - kassa"""
     cash_registers = db.query(CashRegister).all()
 
-    # So'nggi to'lovlar
-    payments = db.query(Payment).order_by(Payment.date.desc()).limit(50).all()
+    # So'nggi to'lovlar — qaysi kassaga kirim/chiqim ekanini ko'rsatish uchun cash_register yuklanadi
+    payments = (
+        db.query(Payment)
+        .options(joinedload(Payment.cash_register), joinedload(Payment.partner))
+        .order_by(Payment.date.desc())
+        .limit(50)
+        .all()
+    )
 
     # Bugungi statistika
     today = datetime.now().date()

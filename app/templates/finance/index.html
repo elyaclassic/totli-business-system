@@ -12,6 +12,11 @@
 {% elif request.query_params.get('success') == '1' %}
 <div class="alert alert-success"><i class="bi bi-check-circle"></i> To'lov kiritildi.</div>
 {% endif %}
+{% if request.query_params.get('error') %}
+<div class="alert alert-danger alert-dismissible fade show"><i class="bi bi-exclamation-triangle"></i> {{ request.query_params.get('error') }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
 <!-- Kassa statistikasi -->
 <div class="row g-4 mb-4">
     <div class="col-md-4">
@@ -72,15 +77,17 @@
                     {% if cash_registers %}
                         {% for cash in cash_registers %}
                         <div class="col-md-4">
-                            <div class="card border-{% if cash.balance >= 0 %}success{% else %}danger{% endif %}">
-                                <div class="card-body">
-                                    <h5>{{ cash.name }}</h5>
-                                    <h3 class="{% if cash.balance >= 0 %}text-success{% else %}text-danger{% endif %}">
-                                        {{ "{:,.0f}".format(cash.balance) }}
-                                    </h3>
-                                    <small class="text-muted">{{ cash.type }}</small>
+                            <a href="/finance/kassa/{{ cash.id }}" class="text-decoration-none text-body">
+                                <div class="card border-{% if (cash.balance or 0) >= 0 %}success{% else %}danger{% endif %} h-100 hover-shadow">
+                                    <div class="card-body">
+                                        <h5>{{ cash.name }}</h5>
+                                        <h3 class="{% if (cash.balance or 0) >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                            {{ "{:,.0f}".format(cash.balance) }}
+                                        </h3>
+                                        <small class="text-muted">{{ cash.payment_type or '-' }}</small>
+                                    </div>
                                 </div>
-                            </div>
+                            </a>
                         </div>
                         {% endfor %}
                     {% else %}
@@ -99,8 +106,15 @@
 <div class="row">
     <div class="col-12">
         <div class="card">
-            <div class="card-header">
-                <i class="bi bi-clock-history"></i> So'nggi to'lovlar
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span><i class="bi bi-clock-history"></i> So'nggi to'lovlar</span>
+                <form method="get" action="/finance" class="d-flex align-items-center gap-2">
+                    <input type="date" name="date_from" class="form-control form-control-sm" style="width: auto;" value="{{ filter_date_from or '' }}" title="Sana dan">
+                    <span class="small text-muted">—</span>
+                    <input type="date" name="date_to" class="form-control form-control-sm" style="width: auto;" value="{{ filter_date_to or '' }}" title="Sana gacha">
+                    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-search"></i> Qidirish</button>
+                    <a href="/finance" class="btn btn-sm btn-outline-secondary">Tozalash</a>
+                </form>
             </div>
             <div class="card-body p-0">
                 <table class="table table-hover mb-0">
@@ -108,6 +122,7 @@
                         <tr>
                             <th width="50">#</th>
                             <th>Sana</th>
+                            <th>Kassa</th>
                             <th>Turi</th>
                             <th>Kontragent</th>
                             <th>Izoh</th>
@@ -125,6 +140,7 @@
                             <tr class="{% if p_status == 'cancelled' %}table-secondary opacity-75{% endif %}">
                                 <td>{{ loop.index }}</td>
                                 <td>{{ payment.date.strftime('%d.%m.%Y %H:%M') if payment.date else '-' }}</td>
+                                <td><small>{% if payment.cash_register %}{{ payment.cash_register.name or payment.cash_register.code or 'Kassa ' ~ payment.cash_register_id }}{% else %}-{% endif %}</small></td>
                                 <td>
                                     {% if payment.type == 'income' %}
                                         <span class="badge bg-success">Kirim</span>
@@ -150,22 +166,22 @@
                                     <form method="post" action="/finance/payment/{{ payment.id }}/confirm" class="d-inline" onsubmit="return confirm('Tasdiqlash — kassa balansiga qayta hisoblanadi.');">
                                         <button type="submit" class="btn btn-sm btn-success" title="Tasdiqlash"><i class="bi bi-check-circle"></i></button>
                                     </form>
+                                    <a href="/finance/payment/{{ payment.id }}/edit" class="btn btn-sm btn-outline-primary" title="Tahrirlash"><i class="bi bi-pencil"></i></a>
+                                    <form method="post" action="/finance/payment/{{ payment.id }}/delete" class="d-inline" onsubmit="return confirm('Ushbu to\'lovni o\'chirmoqchimisiz? Kassa balansi yangilanadi.');">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="O'chirish"><i class="bi bi-trash"></i></button>
+                                    </form>
                                     {% else %}
                                     <form method="post" action="/finance/payment/{{ payment.id }}/cancel" class="d-inline" onsubmit="return confirm('Tasdiqni bekor qilish — kassa balansidan chiqariladi. Davom etasizmi?');">
                                         <button type="submit" class="btn btn-sm btn-warning" title="Tasdiqni bekor qilish"><i class="bi bi-x-circle"></i></button>
                                     </form>
                                     {% endif %}
-                                    <a href="/finance/payment/{{ payment.id }}/edit" class="btn btn-sm btn-outline-primary" title="Tahrirlash"><i class="bi bi-pencil"></i></a>
-                                    <form method="post" action="/finance/payment/{{ payment.id }}/delete" class="d-inline" onsubmit="return confirm('Ushbu to\'lovni o\'chirmoqchimisiz? Kassa balansi yangilanadi.');">
-                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="O'chirish"><i class="bi bi-trash"></i></button>
-                                    </form>
                                 </td>
                                 {% endif %}
                             </tr>
                             {% endfor %}
                         {% else %}
                             <tr>
-                                <td colspan="{% if current_user.role == 'admin' %}8{% else %}6{% endif %}" class="text-center text-muted py-5">
+                                <td colspan="{% if current_user.role == 'admin' %}9{% else %}7{% endif %}" class="text-center text-muted py-5">
                                     <i class="bi bi-cash-stack fs-1 d-block mb-2"></i>
                                     Hozircha to'lovlar yo'q
                                 </td>

@@ -769,8 +769,13 @@ async def production_orders(
         db.query(Production)
         .options(
             joinedload(Production.recipe).joinedload(Recipe.stages),
+            joinedload(Production.recipe).joinedload(Recipe.product).joinedload(Product.unit),
+            joinedload(Production.production_items),
             joinedload(Production.user),
             joinedload(Production.operator),
+            joinedload(Production.warehouse),
+            joinedload(Production.output_warehouse),
+            joinedload(Production.machine),
         )
         .order_by(Production.date.desc())
     )
@@ -805,6 +810,28 @@ async def production_orders(
         except (ValueError, TypeError):
             pass
     productions = q.all()
+    total_output_kg = 0.0
+    total_yarim_tayyor_kg = 0.0
+    for p in productions:
+        out_wh_name = (getattr(p.output_warehouse, "name", None) or "").lower()
+        is_yarim_tayyor_output = "yarim" in out_wh_name
+        out_kg = recipe_kg_per_unit(p.recipe) * (float(p.quantity or 0))
+        inp_kg = sum(float(pi.quantity or 0) for pi in (p.production_items or []))
+        completed_only = getattr(p, "status", None) == "completed"
+        if is_yarim_tayyor_output:
+            p.output_kg = 0.0
+            is_qiyom = p.recipe and "qiyom" in (getattr(p.recipe, "name", None) or "").lower()
+            if is_qiyom:
+                p.yarim_tayyor_kg = 0.0  # qiyom retseptlari Y.t.kg da ko'rsatilmaydi va jamiga kiritilmaydi
+            else:
+                p.yarim_tayyor_kg = inp_kg
+                if completed_only:
+                    total_yarim_tayyor_kg += inp_kg
+        else:
+            p.output_kg = out_kg
+            p.yarim_tayyor_kg = 0.0
+            if completed_only:
+                total_output_kg += out_kg
     machines = db.query(Machine).filter(Machine.is_active == True).all()
     employees = db.query(Employee).filter(Employee.is_active == True).all()
     error = request.query_params.get("error")
@@ -813,6 +840,8 @@ async def production_orders(
         "request": request,
         "current_user": current_user,
         "productions": productions,
+        "total_output_kg": total_output_kg,
+        "total_yarim_tayyor_kg": total_yarim_tayyor_kg,
         "machines": machines,
         "employees": employees,
         "current_user_employee_id": current_user_employee.id if current_user_employee else None,
@@ -858,6 +887,123 @@ async def production_orders_fix_dates_from_numbers(
     db.commit()
     msg = quote(f"Hujjat raqamidan sana tuzatildi: {updated} ta yangilandi.")
     return RedirectResponse(url=f"/production/orders?fix_dates={msg}", status_code=303)
+
+
+def _production_revert_one(db, production) -> Optional[str]:
+    """Bitta buyurtmani tasdiqdan qaytaradi. Muvaffaqiyat bo'lsa None, xato bo'lsa xabar qaytaradi."""
+    if production.status != "completed":
+        return None
+    recipe = db.query(Recipe).filter(Recipe.id == production.recipe_id).first()
+    if not recipe:
+        return "Retsept topilmadi"
+    items_to_use = (
+        [(pi.product_id, pi.quantity) for pi in production.production_items]
+        if production.production_items
+        else [(item.product_id, item.quantity * production.quantity) for item in recipe.items]
+    )
+    output_units = production_output_quantity_for_stock(db, production, recipe)
+    out_wh_id = production.output_warehouse_id if production.output_warehouse_id else production.warehouse_id
+    product_stock = db.query(Stock).filter(
+        Stock.warehouse_id == out_wh_id,
+        Stock.product_id == recipe.product_id,
+    ).first()
+    current_qty = float(product_stock.quantity or 0) if product_stock else 0
+    if not product_stock or current_qty < output_units:
+        out_wh = db.query(Warehouse).filter(Warehouse.id == out_wh_id).first()
+        out_product = db.query(Product).filter(Product.id == recipe.product_id).first()
+        wh_name = (out_wh.name if out_wh else "2-ombor") or "2-ombor"
+        prod_name = (out_product.name if out_product else "tayyor mahsulot") or "tayyor mahsulot"
+        return f"«{wh_name}» da «{prod_name}» dan kerak: {output_units:,.1f}, mavjud: {current_qty:,.1f}"
+    product_stock.quantity -= output_units
+    for product_id, required in items_to_use:
+        stock = db.query(Stock).filter(
+            Stock.warehouse_id == production.warehouse_id,
+            Stock.product_id == product_id,
+        ).first()
+        if stock:
+            stock.quantity += required
+        else:
+            db.add(Stock(warehouse_id=production.warehouse_id, product_id=product_id, quantity=required))
+    production.status = "draft"
+    movements = db.query(StockMovement).filter(
+        StockMovement.document_type == "Production",
+        StockMovement.document_id == production.id,
+    ).all()
+    for m in movements:
+        db.delete(m)
+    return None
+
+
+@router.post("/orders/bulk-revert")
+async def production_orders_bulk_revert(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    form = await request.form()
+    raw_ids = form.getlist("prod_ids")
+    prod_ids = [int(x) for x in raw_ids if str(x).strip().isdigit()]
+    if not prod_ids:
+        return RedirectResponse(
+            url="/production/orders?error=revert&detail=" + quote("Hech qaysi buyurtma tanlanmagan."),
+            status_code=303,
+        )
+    reverted = 0
+    for pid in prod_ids:
+        production = db.query(Production).filter(Production.id == pid).first()
+        if not production:
+            continue
+        err = _production_revert_one(db, production)
+        if err:
+            db.rollback()
+            return RedirectResponse(
+                url="/production/orders?error=revert&detail=" + quote(f"{production.number}: {err}"),
+                status_code=303,
+            )
+        reverted += 1
+    db.commit()
+    return RedirectResponse(url="/production/orders?bulk_reverted=" + str(reverted), status_code=303)
+
+
+@router.post("/orders/bulk-complete")
+async def production_orders_bulk_complete(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    form = await request.form()
+    raw_ids = form.getlist("prod_ids")
+    prod_ids = [int(x) for x in raw_ids if str(x).strip().isdigit()]
+    if not prod_ids:
+        return RedirectResponse(
+            url="/production/orders?error=complete&detail=" + quote("Hech qaysi buyurtma tanlanmagan."),
+            status_code=303,
+        )
+    completed = 0
+    for pid in prod_ids:
+        production = db.query(Production).filter(Production.id == pid).first()
+        if not production or production.status not in ("draft", "in_progress"):
+            continue
+        recipe = db.query(Recipe).filter(Recipe.id == production.recipe_id).first()
+        if not recipe:
+            return RedirectResponse(
+                url="/production/orders?error=complete&detail=" + quote(f"{production.number}: Retsept topilmadi."),
+                status_code=303,
+            )
+        err = _do_complete_production_stock(db, production, recipe)
+        if err:
+            db.rollback()
+            return err
+        production.status = "completed"
+        production.current_stage = _recipe_max_stage(recipe)
+        completed += 1
+    db.commit()
+    check_low_stock_and_notify(db)
+    for pid in prod_ids:
+        production = db.query(Production).filter(Production.id == pid).first()
+        if production and production.status == "completed":
+            notify_managers_production_ready(db, production)
+    return RedirectResponse(url="/production/orders?bulk_completed=" + str(completed), status_code=303)
 
 
 @router.get("/new", response_class=HTMLResponse)

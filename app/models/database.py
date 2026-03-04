@@ -788,6 +788,7 @@ class Payment(Base):
     created_at = Column(DateTime, default=datetime.now)
     
     partner = relationship("Partner", back_populates="payments")
+    cash_register = relationship("CashRegister", foreign_keys=[cash_register_id])
 
 
 # ==========================================
@@ -878,6 +879,7 @@ class EmployeeAdvance(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    cash_register_id = Column(Integer, ForeignKey("cash_registers.id"), nullable=True)  # Qaysi kassadan berilgani
     amount = Column(Float, default=0)
     advance_date = Column(Date, nullable=False)
     note = Column(String(500), nullable=True)
@@ -885,6 +887,7 @@ class EmployeeAdvance(Base):
     created_at = Column(DateTime, default=datetime.now)
     
     employee = relationship("Employee", backref="advances")
+    cash_register = relationship("CashRegister", foreign_keys=[cash_register_id])
 
 
 class EmploymentDoc(Base):
@@ -1305,6 +1308,8 @@ def ensure_attendance_advance_tables():
         adv_cols = [row[1] for row in r]
         if "confirmed_at" not in adv_cols:
             conn.execute(text("ALTER TABLE employee_advances ADD COLUMN confirmed_at DATETIME"))
+        if "cash_register_id" not in adv_cols:
+            conn.execute(text("ALTER TABLE employee_advances ADD COLUMN cash_register_id INTEGER REFERENCES cash_registers(id)"))
         r = conn.execute(text("PRAGMA table_info(salaries)"))
         cols = [row[1] for row in r]
         if "advance_deduction" not in cols:

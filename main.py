@@ -4800,6 +4800,34 @@ async def inventory_remove_zero_balance(
     return RedirectResponse(url=f"/inventory/{doc_id}/edit?message=" + quote(msg), status_code=303)
 
 
+def _parse_quantity(value) -> float:
+    """Formadan miqdorni o'qiydi; vergulni nuqtaga almashtiradi."""
+    if value is None or str(value).strip() == "":
+        return 0.0
+    try:
+        return float(str(value).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _next_inventory_number(db: Session, date_str: str) -> str:
+    """Berilgan sana (YYYYMMDD) uchun keyingi bo'sh INV-YYYYMMDD-NNNN raqamini qaytaradi (max suffix + 1)."""
+    prefix = f"INV-{date_str}-"
+    rows = db.query(StockAdjustmentDoc.number).filter(
+        StockAdjustmentDoc.number.like(f"{prefix}%")
+    ).all()
+    max_suffix = 0
+    for (num,) in rows:
+        if num and num.startswith(prefix):
+            try:
+                suf = int(num[len(prefix):].strip())
+                if suf > max_suffix:
+                    max_suffix = suf
+            except (ValueError, TypeError):
+                pass
+    return f"{prefix}{str(max_suffix + 1).zfill(4)}"
+
+
 @app.post("/inventory/{doc_id}/save")
 async def inventory_save_draft(
     doc_id: int,
@@ -4808,48 +4836,65 @@ async def inventory_save_draft(
     current_user: User = Depends(require_auth),
 ):
     """Qoralama hujjatni saqlash (haqiqiy qoldiqlarni yangilash)."""
+    from urllib.parse import quote
     if not current_user:
         return RedirectResponse(url="/login", status_code=303)
     doc = db.query(StockAdjustmentDoc).filter(StockAdjustmentDoc.id == doc_id).first()
     if not doc or doc.status != "draft":
         return RedirectResponse(url="/inventory", status_code=303)
-    form = await request.form()
-    doc_date_str = form.get("doc_date")
-    if doc_date_str:
-        parsed = _parse_doc_date(doc_date_str)
-        if parsed:
-            doc.date = parsed
-    # Sana tanlanib saqlanganda haqiqiy raqam berish (INV-YYYYMMDD-NNNN)
-    if doc.number and doc.number.startswith("INV-PENDING") and doc.date:
-        date_str = doc.date.strftime("%Y%m%d")
-        count = db.query(StockAdjustmentDoc).filter(
-            StockAdjustmentDoc.number.like(f"INV-{date_str}-%")
-        ).count()
-        doc.number = f"INV-{date_str}-{str(count + 1).zfill(4)}"
-    item_ids = form.getlist("item_id")
-    quantities = form.getlist("actual_quantity")
-    total_tannarx = 0.0
-    total_sotuv = 0.0
-    for i, iid in enumerate(item_ids):
-        if not iid:
-            continue
+    try:
+        form = await request.form()
+        doc_date_str = form.get("doc_date")
+        if doc_date_str:
+            parsed = _parse_doc_date(doc_date_str)
+            if parsed:
+                doc.date = parsed
+        # Sana tanlanib saqlanganda haqiqiy raqam berish (INV-YYYYMMDD-NNNN)
+        if doc.number and doc.number.startswith("INV-PENDING") and doc.date:
+            date_str = doc.date.strftime("%Y%m%d")
+            doc.number = _next_inventory_number(db, date_str)
+        item_ids = form.getlist("item_id")
+        quantities = form.getlist("actual_quantity")
+        total_tannarx = 0.0
+        total_sotuv = 0.0
+        for i, iid in enumerate(item_ids):
+            if not iid:
+                continue
+            try:
+                item_id = int(iid)
+            except (TypeError, ValueError):
+                continue
+            qty = _parse_quantity(quantities[i] if i < len(quantities) else None)
+            item = db.query(StockAdjustmentDocItem).filter(
+                StockAdjustmentDocItem.id == item_id,
+                StockAdjustmentDocItem.doc_id == doc_id,
+            ).first()
+            if item:
+                item.quantity = qty
+                total_tannarx += qty * float(item.cost_price or 0)
+                total_sotuv += qty * float(item.sale_price or 0)
+        doc.total_tannarx = total_tannarx
+        doc.total_sotuv = total_sotuv
         try:
-            item_id = int(iid)
-            qty = float(quantities[i]) if i < len(quantities) and str(quantities[i]).strip() != "" else 0
-        except (TypeError, ValueError):
-            continue
-        item = db.query(StockAdjustmentDocItem).filter(
-            StockAdjustmentDocItem.id == item_id,
-            StockAdjustmentDocItem.doc_id == doc_id,
-        ).first()
-        if item:
-            item.quantity = qty
-            total_tannarx += qty * float(item.cost_price or 0)
-            total_sotuv += qty * float(item.sale_price or 0)
-    doc.total_tannarx = total_tannarx
-    doc.total_sotuv = total_sotuv
-    db.commit()
-    return RedirectResponse(url=f"/inventory/{doc_id}/edit?message=Saqlandi.", status_code=303)
+            db.commit()
+        except Exception as commit_err:
+            db.rollback()
+            # Raqam boshqa hujjatda bo'lsa — yangi raqam bilan qayta urinish
+            if "UNIQUE" in str(commit_err) and "number" in str(commit_err).lower() and doc.date:
+                date_str = doc.date.strftime("%Y%m%d")
+                doc.number = _next_inventory_number(db, date_str)
+                db.commit()
+            else:
+                raise commit_err
+        return RedirectResponse(url=f"/inventory/{doc_id}/edit?message=Saqlandi.", status_code=303)
+    except Exception as e:
+        db.rollback()
+        import logging
+        logging.getLogger(__name__).exception("inventory save error doc_id=%s: %s", doc_id, e)
+        return RedirectResponse(
+            url=f"/inventory/{doc_id}/edit?error=" + quote(f"Saqlashda xatolik: {str(e)}"),
+            status_code=303,
+        )
 
 
 @app.get("/inventory/{doc_id}", response_class=HTMLResponse)
@@ -4916,10 +4961,7 @@ async def inventory_confirm(
     # Sana tanlangan holda tasdiqlashda ham raqam berish (agar hali INV-PENDING bo'lsa)
     if doc.number and doc.number.startswith("INV-PENDING") and doc.date:
         date_str = doc.date.strftime("%Y%m%d")
-        count = db.query(StockAdjustmentDoc).filter(
-            StockAdjustmentDoc.number.like(f"INV-{date_str}-%")
-        ).count()
-        doc.number = f"INV-{date_str}-{str(count + 1).zfill(4)}"
+        doc.number = _next_inventory_number(db, date_str)
     item_ids = form.getlist("item_id")
     quantities = form.getlist("actual_quantity")
     for i, iid in enumerate(item_ids):
@@ -4927,9 +4969,9 @@ async def inventory_confirm(
             continue
         try:
             item_id = int(iid)
-            qty = float(quantities[i]) if i < len(quantities) and str(quantities[i]).strip() != "" else 0
         except (TypeError, ValueError):
             continue
+        qty = _parse_quantity(quantities[i] if i < len(quantities) else None)
         item = db.query(StockAdjustmentDocItem).filter(
             StockAdjustmentDocItem.id == item_id,
             StockAdjustmentDocItem.doc_id == doc_id,
@@ -6853,12 +6895,21 @@ async def sales_revert(
             status_code=303
         )
     for item in order.items:
-        stock = db.query(Stock).filter(
+        stocks = db.query(Stock).filter(
             Stock.warehouse_id == order.warehouse_id,
             Stock.product_id == item.product_id
-        ).first()
-        if stock:
-            stock.quantity = (stock.quantity or 0) + item.quantity
+        ).all()
+        if stocks:
+            # Bitta qatorga qaytarish (barcha qatorlar yig'indisiga qo'shamiz)
+            stocks[0].quantity = (stocks[0].quantity or 0) + item.quantity
+            stocks[0].updated_at = datetime.now()
+        else:
+            # Stock qatori yo'q bo'lsa (sotuvda tovar chiqarilganda) — yangi qator yaratamiz
+            db.add(Stock(
+                warehouse_id=order.warehouse_id,
+                product_id=item.product_id,
+                quantity=float(item.quantity or 0),
+            ))
     delete_stock_movements_for_document(db, "Sale", order_id)
     order.status = "draft"
     db.commit()
@@ -7981,19 +8032,37 @@ def _ensure_orders_payment_due_date_column(db: Session) -> None:
 
 
 @app.get("/finance", response_class=HTMLResponse)
-async def finance(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    """Moliya - kassa"""
+async def finance(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    """Moliya - kassa. So'nggi to'lovlar sana bo'yicha filtrlanishi mumkin."""
     _ensure_payments_status_column(db)
     cash_registers = db.query(CashRegister).all()
     partners = db.query(Partner).filter(Partner.is_active == True).order_by(Partner.name).all()
-    # So'nggi to'lovlar (kontragent bilan hisob-kitob uchun joinedload)
-    payments = (
+    q = (
         db.query(Payment)
-        .options(joinedload(Payment.partner))
+        .options(joinedload(Payment.cash_register), joinedload(Payment.partner))
         .order_by(Payment.date.desc())
-        .limit(50)
-        .all()
     )
+    if (date_from or "").strip():
+        try:
+            df = datetime.strptime(str(date_from).strip()[:10], "%Y-%m-%d").date()
+            q = q.filter(Payment.date >= df)
+        except ValueError:
+            pass
+    if (date_to or "").strip():
+        try:
+            dt = datetime.strptime(str(date_to).strip()[:10], "%Y-%m-%d").date()
+            q = q.filter(Payment.date < datetime.combine(dt + timedelta(days=1), datetime.min.time()))
+        except ValueError:
+            pass
+    payments = q.limit(200).all()
+    filter_date_from = str(date_from or "").strip()[:10] if date_from else ""
+    filter_date_to = str(date_to or "").strip()[:10] if date_to else ""
     # Bugungi statistika — faqat tasdiqlangan to'lovlar
     today = datetime.now().date()
     try:
@@ -8021,8 +8090,59 @@ async def finance(request: Request, db: Session = Depends(get_db), current_user:
         "partners": partners,
         "payments": payments,
         "stats": stats,
+        "filter_date_from": filter_date_from,
+        "filter_date_to": filter_date_to,
         "current_user": current_user,
         "page_title": "Moliya"
+    })
+
+
+@app.get("/finance/kassa/{cash_register_id}", response_class=HTMLResponse)
+async def finance_kassa_detail(
+    cash_register_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    """Kassaning kirim/chiqimlari — qayerdan keldi, qayerga ketdi (hujjatlar ro'yxati)."""
+    cash = db.query(CashRegister).filter(CashRegister.id == cash_register_id).first()
+    if not cash:
+        raise HTTPException(status_code=404, detail="Kassa topilmadi")
+    q = (
+        db.query(Payment)
+        .options(joinedload(Payment.partner))
+        .filter(Payment.cash_register_id == cash_register_id)
+        .order_by(Payment.date.desc())
+    )
+    if (date_from or "").strip():
+        try:
+            df = datetime.strptime(str(date_from).strip()[:10], "%Y-%m-%d").date()
+            q = q.filter(Payment.date >= df)
+        except ValueError:
+            pass
+    if (date_to or "").strip():
+        try:
+            dt = datetime.strptime(str(date_to).strip()[:10], "%Y-%m-%d").date()
+            q = q.filter(Payment.date < datetime.combine(dt + timedelta(days=1), datetime.min.time()))
+        except ValueError:
+            pass
+    payments = q.limit(500).all()
+    filter_date_from = str(date_from or "").strip()[:10] if date_from else ""
+    filter_date_to = str(date_to or "").strip()[:10] if date_to else ""
+    total_income = sum(p.amount or 0 for p in payments if getattr(p, "type", None) == "income")
+    total_expense = sum(p.amount or 0 for p in payments if getattr(p, "type", None) == "expense")
+    return templates.TemplateResponse("finance/kassa_detail.html", {
+        "request": request,
+        "cash": cash,
+        "payments": payments,
+        "filter_date_from": filter_date_from,
+        "filter_date_to": filter_date_to,
+        "total_income": total_income,
+        "total_expense": total_expense,
+        "current_user": current_user,
+        "page_title": (cash.name or "Kassa") + " — kirim/chiqimlar",
     })
 
 
@@ -8127,10 +8247,15 @@ async def finance_payment_edit_page(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """To'lovni tahrirlash sahifasi (admin)."""
+    """To'lovni tahrirlash sahifasi (admin). Faqat tasdiq bekor qilingan to'lovlar."""
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
         raise HTTPException(status_code=404, detail="To'lov topilmadi")
+    if getattr(payment, "status", "confirmed") == "confirmed":
+        return RedirectResponse(
+            url="/finance?error=" + quote("Tasdiqlangan to'lovni tahrirlash mumkin emas. Avval tasdiqni bekor qiling."),
+            status_code=303,
+        )
     partners = db.query(Partner).filter(Partner.is_active == True).order_by(Partner.name).all()
     cash_registers = db.query(CashRegister).filter(CashRegister.is_active == True).all()
     return templates.TemplateResponse("finance/payment_edit.html", {
@@ -8154,10 +8279,15 @@ async def finance_payment_edit_post(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """To'lovni saqlash (admin). Eski balansni bekor qilib yangi qiymatni qo'llaydi."""
+    """To'lovni saqlash (admin). Faqat tasdiq bekor qilingan to'lovlar tahrirlanadi."""
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
         raise HTTPException(status_code=404, detail="To'lov topilmadi")
+    if getattr(payment, "status", "confirmed") == "confirmed":
+        return RedirectResponse(
+            url="/finance?error=" + quote("Tasdiqlangan to'lovni tahrirlash mumkin emas. Avval tasdiqni bekor qiling."),
+            status_code=303,
+        )
     if type not in ("income", "expense"):
         return RedirectResponse(url=f"/finance/payment/{payment_id}/edit?error=type", status_code=303)
     amount = float(amount)
@@ -8171,19 +8301,12 @@ async def finance_payment_edit_post(
         p = db.query(Partner).filter(Partner.id == int(partner_id)).first()
         if p:
             pid = p.id
-    status = getattr(payment, "status", "confirmed")
-    # Eski balansni ortga qaytarish (agar tasdiqlangan bo'lsa)
-    if status == "confirmed":
-        _payment_apply_balance(db, payment, -1)
-    # Yangi qiymatlar
+    # Yangi qiymatlar (faqat tasdiq bekor qilingan to'lov — balansga ta'sir qilmagan)
     payment.type = type
     payment.amount = amount
     payment.cash_register_id = cash_register_id
     payment.partner_id = pid
     payment.description = (description or "").strip() or ("Kirim" if type == "income" else "Chiqim")
-    # Yangi balansni qo'llash (agar tasdiqlangan bo'lsa)
-    if status == "confirmed":
-        _payment_apply_balance(db, payment, 1)
     db.commit()
     return RedirectResponse(url="/finance?success=edited", status_code=303)
 
@@ -8194,13 +8317,15 @@ async def finance_payment_delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """To'lovni o'chirish (admin). Tasdiqlangan bo'lsa kassa balansini qaytaradi."""
+    """To'lovni o'chirish (admin). Faqat tasdiq bekor qilingan to'lovlar o'chiriladi."""
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
         raise HTTPException(status_code=404, detail="To'lov topilmadi")
-    status = getattr(payment, "status", "confirmed")
-    if status == "confirmed":
-        _payment_apply_balance(db, payment, -1)
+    if getattr(payment, "status", "confirmed") == "confirmed":
+        return RedirectResponse(
+            url="/finance?error=" + quote("Tasdiqlangan to'lovni o'chirish mumkin emas. Avval tasdiqni bekor qiling."),
+            status_code=303,
+        )
     db.delete(payment)
     db.commit()
     return RedirectResponse(url="/finance?success=deleted", status_code=303)
@@ -9465,21 +9590,57 @@ async def attendance_record_delete(
 # AVANS BERISH
 # ==========================================
 
+def _advances_list_redirect_params(form_or_params, key_from="date_from", key_to="date_to"):
+    """Filtr parametrlarini redirect URL ga qo'shish."""
+    parts = []
+    if hasattr(form_or_params, "get"):
+        df, dt = form_or_params.get(key_from) or "", form_or_params.get(key_to) or ""
+    else:
+        df = form_or_params.get(key_from, "") or ""
+        dt = form_or_params.get(key_to, "") or ""
+    if (df or "").strip():
+        parts.append("date_from=" + quote(str(df).strip()[:10]))
+    if (dt or "").strip():
+        parts.append("date_to=" + quote(str(dt).strip()[:10]))
+    return "&".join(parts)
+
+
 @app.get("/employees/advances", response_class=HTMLResponse)
 async def employee_advances_list(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ):
-    """Xodim avanslari ro'yxati"""
-    advances = db.query(EmployeeAdvance).order_by(EmployeeAdvance.advance_date.desc()).all()
+    """Xodim avanslari ro'yxati — sana bo'yicha filtrlash."""
+    q = db.query(EmployeeAdvance).options(joinedload(EmployeeAdvance.cash_register)).order_by(EmployeeAdvance.advance_date.desc())
+    if (date_from or "").strip():
+        try:
+            df = datetime.strptime(str(date_from).strip()[:10], "%Y-%m-%d").date()
+            q = q.filter(EmployeeAdvance.advance_date >= df)
+        except ValueError:
+            pass
+    if (date_to or "").strip():
+        try:
+            dt = datetime.strptime(str(date_to).strip()[:10], "%Y-%m-%d").date()
+            q = q.filter(EmployeeAdvance.advance_date <= dt)
+        except ValueError:
+            pass
+    advances = q.all()
     employees = db.query(Employee).filter(Employee.is_active == True).order_by(Employee.full_name).all()
+    cash_registers = db.query(CashRegister).filter(CashRegister.is_active == True).order_by(CashRegister.name).all()
     default_date = date.today().strftime("%Y-%m-%d")
+    filter_date_from = str(date_from or "").strip()[:10] if date_from else ""
+    filter_date_to = str(date_to or "").strip()[:10] if date_to else ""
     return templates.TemplateResponse("employees/advances_list.html", {
         "request": request,
         "advances": advances,
         "employees": employees,
+        "cash_registers": cash_registers,
         "default_date": default_date,
+        "filter_date_from": filter_date_from,
+        "filter_date_to": filter_date_to,
         "current_user": current_user,
         "page_title": "Avans berish",
     })
@@ -9491,11 +9652,12 @@ async def employee_advance_add(
     employee_id: int = Form(...),
     amount: float = Form(...),
     advance_date: str = Form(...),
+    cash_register_id: Optional[int] = Form(None),
     note: str = Form(""),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Avans qo'shish"""
+    """Avans qo'shish; tanlangan kassadan chiqim yoziladi."""
     try:
         adv_date = datetime.strptime(advance_date, "%Y-%m-%d").date()
     except ValueError:
@@ -9505,8 +9667,39 @@ async def employee_advance_add(
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:
         return RedirectResponse(url="/employees/advances?error=Xodim topilmadi", status_code=303)
-    adv = EmployeeAdvance(employee_id=employee_id, amount=amount, advance_date=adv_date, note=note or None)
+    cash = None
+    if cash_register_id:
+        cash = db.query(CashRegister).filter(CashRegister.id == cash_register_id, CashRegister.is_active == True).first()
+    if not cash:
+        return RedirectResponse(url="/employees/advances?error=Kassani tanlang", status_code=303)
+    adv = EmployeeAdvance(
+        employee_id=employee_id,
+        amount=amount,
+        advance_date=adv_date,
+        cash_register_id=cash.id,
+        note=note or None,
+    )
     db.add(adv)
+    db.flush()
+    # Kassadan chiqim — kassa balansini kamaytirish
+    current_balance = float(cash.balance or 0)
+    new_balance = current_balance - amount
+    today = datetime.now()
+    count = db.query(CashBalanceDoc).filter(
+        CashBalanceDoc.date >= today.replace(hour=0, minute=0, second=0)
+    ).count()
+    doc_number = f"KLD-{today.strftime('%Y%m%d')}-{str(count + 1).zfill(4)}"
+    doc = CashBalanceDoc(
+        number=doc_number,
+        date=today,
+        user_id=current_user.id if current_user else None,
+        status="confirmed",
+    )
+    db.add(doc)
+    db.flush()
+    db.add(CashBalanceDocItem(doc_id=doc.id, cash_register_id=cash.id, balance=new_balance, previous_balance=current_balance))
+    cash.balance = new_balance
+    adv.confirmed_at = today
     db.commit()
     return RedirectResponse(url="/employees/advances?added=1", status_code=303)
 
@@ -9518,19 +9711,33 @@ async def employee_advance_edit_page(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Avansni tahrirlash sahifasi"""
-    adv = db.query(EmployeeAdvance).options(joinedload(EmployeeAdvance.employee)).filter(EmployeeAdvance.id == advance_id).first()
+    """Avansni tahrirlash sahifasi — faqat tasdiqlanmagan avanslar."""
+    adv = db.query(EmployeeAdvance).options(
+        joinedload(EmployeeAdvance.employee),
+        joinedload(EmployeeAdvance.cash_register),
+    ).filter(EmployeeAdvance.id == advance_id).first()
     if not adv:
         return RedirectResponse(url="/employees/advances?error=Avans topilmadi", status_code=303)
+    if adv.confirmed_at:
+        return RedirectResponse(
+            url="/employees/advances?error=" + quote("Tasdiqlangan avansni tahrirlash mumkin emas. Avval tasdiqni bekor qiling."),
+            status_code=303,
+        )
     employees = db.query(Employee).filter(Employee.is_active == True).order_by(Employee.full_name).all()
     if adv.employee and not any(e.id == adv.employee_id for e in employees):
         employees = [adv.employee] + list(employees)
+    cash_registers = db.query(CashRegister).filter(CashRegister.is_active == True).order_by(CashRegister.name).all()
+    next_ids = (request.query_params.get("next_ids") or "").strip()
+    next_count = len([x for x in next_ids.split(",") if x.strip()]) if next_ids else 0
     return templates.TemplateResponse("employees/advance_edit.html", {
         "request": request,
         "advance": adv,
         "employees": employees,
+        "cash_registers": cash_registers,
         "current_user": current_user,
         "page_title": "Avansni tahrirlash",
+        "next_ids": next_ids,
+        "next_count": next_count,
     })
 
 
@@ -9541,14 +9748,21 @@ async def employee_advance_edit_save(
     employee_id: int = Form(...),
     amount: float = Form(...),
     advance_date: str = Form(...),
+    cash_register_id: Optional[int] = Form(None),
     note: str = Form(""),
+    next_ids: str = Form(""),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Avansni saqlash (tahrirlash)"""
+    """Avansni saqlash (tahrirlash) — faqat tasdiqlanmagan avanslar."""
     adv = db.query(EmployeeAdvance).filter(EmployeeAdvance.id == advance_id).first()
     if not adv:
         return RedirectResponse(url="/employees/advances?error=Avans topilmadi", status_code=303)
+    if adv.confirmed_at:
+        return RedirectResponse(
+            url="/employees/advances?error=" + quote("Tasdiqlangan avansni tahrirlash mumkin emas."),
+            status_code=303,
+        )
     try:
         adv_date = datetime.strptime(advance_date, "%Y-%m-%d").date()
     except ValueError:
@@ -9558,12 +9772,31 @@ async def employee_advance_edit_save(
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:
         return RedirectResponse(url=f"/employees/advances/edit/{advance_id}?error=Xodim topilmadi", status_code=303)
+    if cash_register_id:
+        cash = db.query(CashRegister).filter(CashRegister.id == cash_register_id, CashRegister.is_active == True).first()
+        adv.cash_register_id = cash.id if cash else adv.cash_register_id
+    else:
+        adv.cash_register_id = None
     adv.employee_id = employee_id
     adv.amount = amount
     adv.advance_date = adv_date
     adv.note = note or None
-    adv.confirmed_at = datetime.now()  # Saqlashda avtomatik tasdiqlash
+    adv.confirmed_at = datetime.now()  # Tahrirlashda saqlash = tasdiqlash
     db.commit()
+    # Ketma-ket tahrirlash: keyingi avansga yo'naltirish
+    next_param = (next_ids or "").strip()
+    if next_param:
+        rest = [x.strip() for x in next_param.split(",") if x.strip()]
+        if rest:
+            try:
+                next_id = int(rest[0])
+                remaining = ",".join(rest[1:])
+                url = f"/employees/advances/edit/{next_id}"
+                if remaining:
+                    url += "?next_ids=" + remaining
+                return RedirectResponse(url=url, status_code=303)
+            except (ValueError, TypeError):
+                pass
     return RedirectResponse(url="/employees/advances?edited=1", status_code=303)
 
 
@@ -9603,13 +9836,131 @@ async def employee_advance_delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Avansni ro'yxatdan o'chirish"""
+    """Avansni ro'yxatdan o'chirish — faqat tasdiqlanmagan (tasdiq bekor qilingan) avanslar."""
     adv = db.query(EmployeeAdvance).filter(EmployeeAdvance.id == advance_id).first()
     if not adv:
         return RedirectResponse(url="/employees/advances?error=Avans topilmadi", status_code=303)
+    if adv.confirmed_at:
+        return RedirectResponse(
+            url="/employees/advances?error=" + quote("Tasdiqlangan avansni o'chirish mumkin emas. Avval tasdiqni bekor qiling."),
+            status_code=303,
+        )
     db.delete(adv)
     db.commit()
     return RedirectResponse(url="/employees/advances?deleted=1", status_code=303)
+
+
+@app.post("/employees/advances/bulk-edit", response_class=RedirectResponse)
+async def employee_advances_bulk_edit(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tanlangan tasdiqlanmagan avanslarni ketma-ket tahrirlash — birinchisiga yo'naltiradi."""
+    form = await request.form()
+    raw = form.getlist("advance_ids")
+    ids = []
+    for x in raw:
+        try:
+            ids.append(int(x))
+        except (TypeError, ValueError):
+            pass
+    if not ids:
+        return RedirectResponse(url="/employees/advances?error=" + quote("Hech qaysi avans tanlanmagan."), status_code=303)
+    unconfirmed = (
+        db.query(EmployeeAdvance.id)
+        .filter(EmployeeAdvance.id.in_(ids), EmployeeAdvance.confirmed_at.is_(None))
+        .order_by(EmployeeAdvance.id)
+        .all()
+    )
+    unconfirmed_ids = [r[0] for r in unconfirmed]
+    if not unconfirmed_ids:
+        return RedirectResponse(url="/employees/advances?error=" + quote("Tanlangan avanslar tasdiqlangan. Faqat tasdiqlanmagan avanslarni tahrirlash mumkin."), status_code=303)
+    first_id = unconfirmed_ids[0]
+    next_ids = unconfirmed_ids[1:]
+    next_param = ",".join(str(i) for i in next_ids) if next_ids else ""
+    url = f"/employees/advances/edit/{first_id}"
+    if next_param:
+        url += "?next_ids=" + next_param
+    return RedirectResponse(url=url, status_code=303)
+
+
+@app.post("/employees/advances/bulk-unconfirm", response_class=RedirectResponse)
+async def employee_advances_bulk_unconfirm(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tanlangan tasdiqlangan avanslarning tasdiqini bekor qilish"""
+    form = await request.form()
+    raw = form.getlist("advance_ids")
+    ids = []
+    for x in raw:
+        try:
+            ids.append(int(x))
+        except (TypeError, ValueError):
+            pass
+    if not ids:
+        return RedirectResponse(url="/employees/advances?error=" + quote("Hech qaysi avans tanlanmagan."), status_code=303)
+    updated = db.query(EmployeeAdvance).filter(EmployeeAdvance.id.in_(ids), EmployeeAdvance.confirmed_at.isnot(None)).update({EmployeeAdvance.confirmed_at: None}, synchronize_session=False)
+    db.commit()
+    base = "/employees/advances?bulk_unconfirmed=" + str(updated)
+    extra = _advances_list_redirect_params(form)
+    return RedirectResponse(url=base + ("&" + extra if extra else ""), status_code=303)
+
+
+@app.post("/employees/advances/bulk-confirm", response_class=RedirectResponse)
+async def employee_advances_bulk_confirm(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tanlangan tasdiqlanmagan avanslarni tasdiqlash"""
+    form = await request.form()
+    raw = form.getlist("advance_ids")
+    ids = []
+    for x in raw:
+        try:
+            ids.append(int(x))
+        except (TypeError, ValueError):
+            pass
+    if not ids:
+        return RedirectResponse(url="/employees/advances?error=" + quote("Hech qaysi avans tanlanmagan."), status_code=303)
+    now = datetime.now()
+    updated = db.query(EmployeeAdvance).filter(EmployeeAdvance.id.in_(ids), EmployeeAdvance.confirmed_at.is_(None)).update({EmployeeAdvance.confirmed_at: now}, synchronize_session=False)
+    db.commit()
+    base = "/employees/advances?bulk_confirmed=" + str(updated)
+    extra = _advances_list_redirect_params(form)
+    return RedirectResponse(url=base + ("&" + extra if extra else ""), status_code=303)
+
+
+@app.post("/employees/advances/bulk-delete", response_class=RedirectResponse)
+async def employee_advances_bulk_delete(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tanlangan tasdiqlanmagan avanslarni o'chirish (tasdiqlanganlarni o'chirish mumkin emas)."""
+    form = await request.form()
+    raw = form.getlist("advance_ids")
+    ids = []
+    for x in raw:
+        try:
+            ids.append(int(x))
+        except (TypeError, ValueError):
+            pass
+    if not ids:
+        base = "/employees/advances?error=" + quote("Hech qaysi avans tanlanmagan.")
+        extra = _advances_list_redirect_params(form)
+        return RedirectResponse(url=base + ("&" + extra if extra else ""), status_code=303)
+    deleted = db.query(EmployeeAdvance).filter(EmployeeAdvance.id.in_(ids), EmployeeAdvance.confirmed_at.is_(None)).delete(synchronize_session=False)
+    db.commit()
+    if ids and deleted == 0:
+        base = "/employees/advances?error=" + quote("Tanlangan avanslar tasdiqlangan. O'chirish uchun avval tasdiqni bekor qiling.")
+    else:
+        base = "/employees/advances?bulk_deleted=" + str(deleted)
+    extra = _advances_list_redirect_params(form)
+    return RedirectResponse(url=base + ("&" + extra if extra else ""), status_code=303)
 
 
 # ==========================================
@@ -10371,6 +10722,54 @@ async def production_save_materials(
     return RedirectResponse(url="/production/orders", status_code=303)
 
 
+@app.get("/production/{prod_id}/movements", response_class=HTMLResponse)
+async def production_movements_page(
+    prod_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Shu ishlab chiqarish buyurtmasi uchun ombor harakati tarixi (xom ashyo chiqimi, tayyor mahsulot kirimi)."""
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    production = db.query(Production).filter(Production.id == prod_id).first()
+    if not production:
+        return RedirectResponse(
+            url="/production/orders?error=not_found&detail=" + quote("Buyurtma topilmadi."),
+            status_code=303,
+        )
+    movements = (
+        db.query(StockMovement)
+        .filter(
+            StockMovement.document_type == "Production",
+            StockMovement.document_id == prod_id,
+        )
+        .order_by(StockMovement.created_at.asc())
+        .all()
+    )
+    rows = []
+    for m in movements:
+        wh_name = (m.warehouse.name if m.warehouse else "") or "—"
+        prod_name = (m.product.name if m.product else "") or "—"
+        code = (m.product.code if m.product else "") or ""
+        qty = float(m.quantity_change or 0)
+        rows.append({
+            "warehouse_name": wh_name,
+            "product_name": prod_name,
+            "product_code": code,
+            "quantity_change": qty,
+            "quantity_after": float(m.quantity_after or 0),
+            "created_at": m.created_at.strftime("%d.%m.%Y %H:%M") if m.created_at else "—",
+        })
+    return templates.TemplateResponse("production/movements.html", {
+        "request": request,
+        "current_user": current_user,
+        "production": production,
+        "rows": rows,
+        "page_title": f"Harakat tarixi — {production.number}",
+    })
+
+
 @app.get("/production/orders", response_class=HTMLResponse)
 async def production_orders(
     request: Request,
@@ -10408,6 +10807,7 @@ async def production_orders(
             .options(
                 joinedload(Production.recipe).joinedload(Recipe.stages),
                 joinedload(Production.recipe).joinedload(Recipe.product).joinedload(Product.unit),
+                joinedload(Production.production_items),
                 joinedload(Production.operator),
                 joinedload(Production.user),
                 joinedload(Production.warehouse),
@@ -10458,6 +10858,28 @@ async def production_orders(
             except Exception:
                 qry = qry.filter(func.lower(Production.number).like(search))
         productions = qry.all()
+        # T.kg — faqat tayyor mahsulot chiqadigan qatorlarda; Y.t.kg — faqat yarim tayyor chiqadigan qatorlarda
+        total_output_kg = 0.0
+        total_yarim_tayyor_kg = 0.0
+        for p in productions:
+            out_wh_name = (getattr(p.output_warehouse, "name", None) or "").lower()
+            is_yarim_tayyor_output = "yarim" in out_wh_name  # 2-ombor yarim tayyor ombori bo'lsa
+            out_kg = _kg_per_unit_from_recipe(p.recipe) * (float(p.quantity or 0))
+            inp_kg = sum(float(pi.quantity or 0) for pi in (p.production_items or []))
+            completed_only = getattr(p, "status", None) == "completed"  # faqat yakunlanganlar jamiga
+            if is_yarim_tayyor_output:
+                p.output_kg = 0.0
+                if _is_qiyom_recipe(p.recipe):
+                    p.yarim_tayyor_kg = 0.0  # qiyom retseptlari Y.t.kg da ko'rsatilmaydi va jamiga kiritilmaydi
+                else:
+                    p.yarim_tayyor_kg = inp_kg
+                    if completed_only:
+                        total_yarim_tayyor_kg += inp_kg
+            else:
+                p.output_kg = out_kg
+                p.yarim_tayyor_kg = 0.0
+                if completed_only:
+                    total_output_kg += out_kg
         machines = db.query(Machine).filter(Machine.is_active == True).all()
         employees = db.query(Employee).filter(Employee.is_active == True).all()
         current_user_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first() if current_user else None
@@ -10467,6 +10889,8 @@ async def production_orders(
             "request": request,
             "current_user": current_user,
             "productions": productions,
+            "total_output_kg": total_output_kg,
+            "total_yarim_tayyor_kg": total_yarim_tayyor_kg,
             "machines": machines,
             "employees": employees,
             "current_user_employee_id": current_user_employee.id if current_user_employee else None,

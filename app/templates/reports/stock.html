@@ -14,7 +14,14 @@
             <a href="/reports/stock/andoza" class="btn btn-outline-secondary" title="Import uchun andoza yuklab olish"><i class="bi bi-file-earmark-arrow-down"></i> Andoza</a>
             <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#importStockModal" title="Exceldan qoldiqlarni yuklash"><i class="bi bi-upload"></i> Import</button>
             <a href="/reports/stock/export" class="btn btn-success"><i class="bi bi-file-earmark-excel"></i> Excel</a>
+            <a href="/reports/stock/no-history" class="btn btn-outline-warning" title="Qoldigi bor lekin harakat tarixi yo'q mahsulotlar"><i class="bi bi-exclamation-triangle"></i> Tarixsiz qoldiqlar</a>
             {% if current_user and current_user.role == 'admin' %}
+            <form method="post" action="/reports/stock/cleanup-orphan-movements" class="d-inline" onsubmit="return confirm('O\'chirilgan ombordan omborga, ishlab chiqarish, kirim, qoldiq tuzatish hujjatlariga tegishli harakatlarni o\'chirib qoldiqni qaytarishni xohlaysizmi? (Do\'kon 1 va boshqa omborlardagi \"qayerdan keldi\" nomalum qoldiqlar tozalanadi.)');">
+                <button type="submit" class="btn btn-outline-danger btn-sm" title="O'chirilgan hujjatlar — ombordan omborga, ishlab chiqarish, kirim, qoldiq tuzatish"><i class="bi bi-arrow-counterclockwise"></i> O'chirilgan hujjatlar harakatlarini tozalash</button>
+            </form>
+            <form method="post" action="/reports/stock/cleanup-orphan-sale-movements" class="d-inline" onsubmit="return confirm('O\'chirilgan sotuv/qaytish hujjatlariga tegishli harakatlarni o\'chirib, qoldiqni qaytarishni xohlaysizmi?');">
+                <button type="submit" class="btn btn-outline-danger btn-sm" title="Hujjati o'chirilgan sotuv harakatlarini tozalash"><i class="bi bi-arrow-counterclockwise"></i> O'chirilgan sotuv harakatlarini tozalash</button>
+            </form>
             <form method="post" action="/reports/stock/cleanup-orphans" class="d-inline" onsubmit="return confirm('O\'chirilgan tovar/ombor/hujjatlarga tegishli yozuvlarni o\'chirishni xohlaysizmi?');">
                 <button type="submit" class="btn btn-outline-warning" title="O'chirilgan tovar/ombor/hujjatlarga tegishli Stock va harakat yozuvlarini o'chirish"><i class="bi bi-trash"></i> O'chirilgan ma'lumotlarni tozalash</button>
             </form>

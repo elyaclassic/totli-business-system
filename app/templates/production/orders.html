@@ -7,10 +7,19 @@
     .production-orders-wrap .card.mb-0 + .card { margin-top: 0 !important; }
     .production-orders-wrap .card .card-body.p-0 { padding: 0 !important; }
     .production-orders-wrap .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    .production-orders-wrap #productionTable td:last-child { min-width: 320px; white-space: normal; }
-    .production-orders-wrap #productionTable .amallar-cell { min-width: 320px; }
-    .production-orders-wrap #productionTable .amallar-cell .form-select-sm { min-width: 100px; }
-    .production-orders-wrap #productionTable .amallar-cell form { display: inline-block; vertical-align: middle; margin: 2px; }
+    .production-orders-wrap #productionTable { font-size: 0.85rem; }
+    .production-orders-wrap #productionTable td:last-child { min-width: 1px; white-space: normal; }
+    .production-orders-wrap #productionTable .amallar-cell { min-width: 1px; max-width: 240px; }
+    .production-orders-wrap #productionTable .amallar-cell .form-select-sm { min-width: 72px; max-width: 95px; font-size: 0.8rem; padding: 0.2rem 0.35rem; }
+    .production-orders-wrap #productionTable .amallar-cell form { display: inline; vertical-align: middle; margin: 1px; }
+    .production-orders-wrap #productionTable .amallar-cell .btn { padding: 0.25rem 0.4rem; font-size: 0.8rem; }
+    .production-orders-wrap #productionTable .col-retsept { max-width: 140px; }
+    .production-orders-wrap #productionTable .col-retsept a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .production-orders-wrap #productionTable .col-ombor { max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .production-orders-wrap #productionTable .col-sana { white-space: nowrap; font-size: 0.8rem; }
+    .production-orders-wrap #productionTable th { font-weight: 600; white-space: nowrap; }
+    .production-orders-wrap #productionTable .bosqich-desc { font-size: 0.75rem; max-width: 85px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .production-orders-wrap #productionTable td, .production-orders-wrap #productionTable th { padding: 0.35rem 0.5rem; vertical-align: middle; }
     @media (max-width: 767px) {
         .production-orders-wrap .production-table-wrap { display: none !important; }
         .production-orders-wrap .production-orders-cards { display: block; }
@@ -42,6 +51,12 @@
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 {% endif %}
+{% if error == "complete" %}
+<div class="alert alert-danger alert-dismissible fade show" role="alert">
+    <strong>Tasdiqlash xatosi.</strong> {% if error_detail %}{{ error_detail }}{% endif %}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
 {% if error == "stage" %}
 <div class="alert alert-warning alert-dismissible fade show" role="alert">
     <strong>Bosqich xatosi.</strong> {% if error_detail %}{{ error_detail }}{% endif %}
@@ -65,6 +80,40 @@
     <i class="bi bi-calendar-check"></i> {{ request.query_params.get('fix_dates') }}
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
+{% endif %}
+{% if request.query_params.get('bulk_reverted') %}
+<div class="alert alert-success alert-dismissible fade show py-2 small">
+    <i class="bi bi-arrow-counterclockwise"></i> Tasdiqlash bekor qilindi: {{ request.query_params.get('bulk_reverted') }} ta buyurtma.
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+{% if request.query_params.get('bulk_completed') %}
+<div class="alert alert-success alert-dismissible fade show py-2 small">
+    <i class="bi bi-check-all"></i> Tasdiqlandi: {{ request.query_params.get('bulk_completed') }} ta buyurtma.
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+{% set _display_total_t = total_output_kg|default(0)|float %}
+{% set _display_total_y = total_yarim_tayyor_kg|default(0)|float %}
+{% if (_display_total_t == 0 and _display_total_y == 0) and productions %}
+{% set _sums = namespace(t=0.0, y=0.0) %}
+{% for _p in productions %}
+  {% set _completed = (_p.status or '') == 'completed' %}
+  {% set _out_wh = ((_p.output_warehouse.name or '')|lower) if _p.output_warehouse else '' %}
+  {% set _is_yarim = 'yarim' in _out_wh %}
+  {% set _is_qiyom = _p.recipe and ('qiyom' in ((_p.recipe.name or '')|lower)) %}
+  {% if _completed %}
+  {% if _is_yarim and not _is_qiyom %}
+    {% set _sums.y = _sums.y + (_p.yarim_tayyor_kg|default(0)|float) %}
+  {% elif not _is_yarim %}
+    {% set _rn = (_p.recipe.name or '')|lower if _p.recipe else '' %}
+    {% set _kpu = 0.25 if ('250gr' in _rn or '250 gr' in _rn) else (0.4 if ('400gr' in _rn or '400 gr' in _rn) else (5.0 if ('5kg' in _rn or '5 kg' in _rn) else (4.0 if ('4kg' in _rn or '4 kg' in _rn) else (3.0 if ('3kg' in _rn or '3 kg' in _rn) else (2.0 if ('2kg' in _rn or '2 kg' in _rn) else (1.0 if ('1kg' in _rn or '1 kg' in _rn) else (_p.recipe.output_quantity if _p.recipe and _p.recipe.output_quantity else 1))))))) %}
+    {% set _sums.t = _sums.t + ((_p.quantity|default(0)|float) * _kpu) %}
+  {% endif %}
+  {% endif %}
+{% endfor %}
+{% set _display_total_t = _sums.t %}
+{% set _display_total_y = _sums.y %}
 {% endif %}
 <div class="container-fluid production-page production-orders-wrap">
 <div class="page-header d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
@@ -127,19 +176,43 @@
 
 <!-- Jadval (desktop) -->
 <div class="card production-table-wrap">
-    <div class="card-header py-2 px-3 d-flex justify-content-between align-items-center">
+    <div class="card-header py-2 px-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span class="small fw-semibold"><i class="bi bi-list-ul"></i> Buyurtmalar</span>
-        <span class="badge bg-secondary">{{ productions|length }} ta</span>
+        <span class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="badge bg-secondary">{{ productions|length }} ta</span>
+            <span class="small text-muted">|</span>
+            <span class="small" title="Shu ro'yxatdagi barcha buyurtmalar bo'yicha jami tayyor mahsulot (kg)">Jami tayyor: <strong class="text-success">{{ "{:,.2f}".format(_display_total_t) }}</strong> kg</span>
+            <span class="small text-muted">|</span>
+            <span class="small" title="Shu ro'yxatdagi barcha buyurtmalar bo'yicha jami yarim tayyor / xom ashyo (kg)">Jami y.t.: <strong class="text-primary">{{ "{:,.2f}".format(_display_total_y) }}</strong> kg</span>
+        </span>
+        {% if current_user and current_user.role == 'admin' %}
+        <form id="bulkForm" method="post" class="d-flex align-items-center gap-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token_from_request(request) }}">
+            <button type="submit" formaction="/production/orders/bulk-revert" class="btn btn-sm btn-outline-warning" title="Tanlangan yakunlangan buyurtmalar uchun tasdiqni bekor qilish">
+                <i class="bi bi-arrow-counterclockwise"></i> Tasdiqlashni bekor qilish
+            </button>
+            <button type="submit" formaction="/production/orders/bulk-complete" class="btn btn-sm btn-outline-success" title="Tanlangan kutilmoqda/jarayondagi buyurtmalarni yakunlash">
+                <i class="bi bi-check-all"></i> Tasdiqlash
+            </button>
+        </form>
+        {% endif %}
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
-        <table class="table table-hover mb-0">
+        <table class="table table-hover table-sm mb-0">
             <thead class="table-light">
                 <tr>
+                    {% if current_user and current_user.role == 'admin' %}
+                    <th class="text-center" style="width: 36px;">
+                        <input type="checkbox" id="selectAllProd" class="form-check-input" title="Barchasini tanlash">
+                    </th>
+                    {% endif %}
                     <th>Raqam</th>
                     <th>Sana</th>
                     <th>Retsept</th>
-                    <th>Miqdor</th>
+                    <th class="text-end">Miqdor</th>
+                    <th class="text-end" title="Tayyor mahsulot (kg)">T.kg</th>
+                    <th class="text-end" title="Yarim tayyor / xom ashyo (kg)">Y.t.kg</th>
                     <th>Bosqich</th>
                     <th>Uskuna</th>
                     <th>Operator</th>
@@ -152,25 +225,27 @@
             <tbody id="productionTable">
                 {% for prod in productions %}
                 <tr data-status="{{ prod.status }}">
+                    {% if current_user and current_user.role == 'admin' %}
+                    <td class="text-center">
+                        <input type="checkbox" form="bulkForm" name="prod_ids" value="{{ prod.id }}" class="form-check-input prod-row-cb">
+                    </td>
+                    {% endif %}
                     <td><strong>{{ prod.number }}</strong></td>
-                    <td>{{ prod.date.strftime('%d.%m.%Y %H:%M') }}</td>
-                    <td>
+                    <td class="col-sana" title="{{ prod.date.strftime('%d.%m.%Y %H:%M') }}">{{ prod.date.strftime('%d.%m.%y %H:%M') }}</td>
+                    <td class="col-retsept" title="{{ prod.recipe.name if prod.recipe else '' }}">
                         {% if prod.recipe %}
                         <a href="/production/{{ prod.id }}/materials">{{ prod.recipe.name }}</a>
-                        {% else %}
-                        -
-                        {% endif %}
+                        {% else %}-{% endif %}
                     </td>
-                    <td>
+                    <td class="text-end">
                         {% set unit_name = (prod.recipe.product.unit.name if prod.recipe and prod.recipe.product and prod.recipe.product.unit else 'kg') %}
                         {% set _rname = (prod.recipe.name or '')|lower if prod.recipe else '' %}
                         {% set _kg_per_unit = 0.25 if ('250gr' in _rname or '250 gr' in _rname) else (0.4 if ('400gr' in _rname or '400 gr' in _rname) else (5.0 if ('5kg' in _rname or '5 kg' in _rname) else (4.0 if ('4kg' in _rname or '4 kg' in _rname) else (3.0 if ('3kg' in _rname or '3 kg' in _rname) else (2.0 if ('2kg' in _rname or '2 kg' in _rname) else (1.0 if ('1kg' in _rname or '1 kg' in _rname) else (prod.recipe.output_quantity if prod.recipe and prod.recipe.output_quantity else 1))))))) %}
                         {% set qty_kg = prod.quantity * _kg_per_unit %}
-                        <strong>{{ "%.2f"|format(prod.quantity) }} {{ unit_name }}</strong>
-                        {% if unit_name|lower != 'kg' %}
-                        <span class="text-muted small">({{ "%.2f"|format(qty_kg) }} kg)</span>
-                        {% endif %}
+                        {% if (unit_name or '')|lower == 'kg' %}{{ "%.2f"|format(prod.quantity) }} kg{% else %}{{ "%.2f"|format(prod.quantity) }} {{ unit_name }}<br><small class="text-muted">({{ "%.2f"|format(qty_kg) }} kg)</small>{% endif %}
                     </td>
+                    <td class="text-end">{% set _tkg = prod.output_kg|default(qty_kg) %}{% if _tkg %}{{ "%.2f"|format(_tkg) }}{% else %}-{% endif %}</td>
+                    <td class="text-end">{% set _ykg = prod.yarim_tayyor_kg|default(0) %}{% if _ykg %}{{ "%.2f"|format(_ykg) }}{% else %}-{% endif %}</td>
                     <td>
                         {% set cur = getattr(prod, 'current_stage', 1) or 1 %}
                         {% set r_stages = (prod.recipe.stages|sort(attribute='stage_number')) if (prod.recipe and prod.recipe.stages) else [] %}
@@ -187,7 +262,7 @@
                                     <span class="badge bg-secondary me-1">{{ s.stage_number }}</span>
                                 {% endif %}
                             {% endfor %}
-                            <small class="d-block text-muted mt-1">
+                            <small class="d-block text-muted mt-1 bosqich-desc" title="{% for s in r_stages %}{% if s.stage_number == cur %}{{ s.name }}{% endif %}{% endfor %}">
                                 {% for s in r_stages %}{% if s.stage_number == cur %}{{ s.name }}{% endif %}{% endfor %}
                             </small>
                         {% else %}
@@ -203,24 +278,16 @@
                                     <span class="badge bg-secondary me-1">{{ sn }}</span>
                                 {% endif %}
                             {% endfor %}
-                            <small class="d-block text-muted mt-1">{{ stage_names.get(cur, '') if stage_names else '' }}</small>
+                            <small class="d-block text-muted mt-1 bosqich-desc" title="{{ stage_names.get(cur, '') if stage_names else '' }}">{{ stage_names.get(cur, '') if stage_names else '' }}</small>
                         {% endif %}
                     </td>
-                    <td>{{ prod.machine.name if prod.machine else '-' }}</td>
-                    <td>{{ prod.operator.full_name if prod.operator else (prod.user.full_name if prod.user else '-') }}</td>
-                    <td>
-                        {% if prod.warehouse %}
-                        {{ prod.warehouse.name }}
-                        {% else %}
-                        -
-                        {% endif %}
+                    <td class="col-ombor" title="{{ prod.machine.name if prod.machine else '' }}">{{ prod.machine.name if prod.machine else '-' }}</td>
+                    <td style="max-width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ prod.operator.full_name if prod.operator else (prod.user.full_name if prod.user else '') }}">{{ prod.operator.full_name if prod.operator else (prod.user.full_name if prod.user else '-') }}</td>
+                    <td class="col-ombor" title="{{ prod.warehouse.name if prod.warehouse else '' }}">
+                        {% if prod.warehouse %}{{ prod.warehouse.name }}{% else %}-{% endif %}
                     </td>
-                    <td>
-                        {% if prod.output_warehouse %}
-                        {{ prod.output_warehouse.name }}
-                        {% else %}
-                        {{ prod.warehouse.name if prod.warehouse else '-' }}
-                        {% endif %}
+                    <td class="col-ombor" title="{{ prod.output_warehouse.name if prod.output_warehouse else (prod.warehouse.name if prod.warehouse else '') }}">
+                        {% if prod.output_warehouse %}{{ prod.output_warehouse.name }}{% else %}{{ prod.warehouse.name if prod.warehouse else '-' }}{% endif %}
                     </td>
                     <td>
                         {% if prod.status == 'completed' %}
@@ -267,6 +334,9 @@
                             </button>
                         </form>
                         {% elif prod.status == 'completed' %}
+                        <a href="/production/{{ prod.id }}/movements" class="btn btn-sm btn-outline-info" title="Ishlab chiqarish harakati tarixi (ombor chiqim/kirim)">
+                            <i class="bi bi-clock-history"></i>
+                        </a>
                         {% if current_user and current_user.role == 'admin' %}
                         <a href="/production/{{ prod.id }}/materials" class="btn btn-sm btn-outline-primary" title="Tahrirlash (ko'rish)">
                             <i class="bi bi-pencil"></i>
@@ -297,7 +367,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="11" class="text-center text-muted py-4">
+                    <td colspan="{{ 14 if (current_user and current_user.role == 'admin') else 13 }}" class="text-center text-muted py-4">
                         <i class="bi bi-inbox fs-1"></i><br>
                         Ishlab chiqarish buyurtmalari yo'q
                     </td>
@@ -311,6 +381,13 @@
 
 <!-- Mobil: kartochkalar -->
 <div class="production-orders-cards" id="productionCards">
+    <div class="alert alert-light border py-2 px-3 mb-2 small d-flex flex-wrap gap-2 align-items-center">
+        <span><strong>{{ productions|length }} ta</strong> buyurtma</span>
+        <span class="text-muted">|</span>
+        <span>Jami tayyor: <strong class="text-success">{{ "{:,.2f}".format(_display_total_t) }}</strong> kg</span>
+        <span class="text-muted">|</span>
+        <span>Jami y.t.: <strong class="text-primary">{{ "{:,.2f}".format(_display_total_y) }}</strong> kg</span>
+    </div>
     {% for prod in productions %}
     <div class="card production-order-card" data-status="{{ prod.status }}">
         <div class="card-body">
@@ -325,6 +402,11 @@
             <div class="prod-row">
                 {% if prod.recipe %}<a href="/production/{{ prod.id }}/materials">{{ prod.recipe.name }}</a>{% else %}-{% endif %}
                 <strong>{{ "%.2f"|format(prod.quantity) }} {{ unit_name }}</strong>{% if unit_name|lower != 'kg' %}<span class="text-muted small">({{ "%.2f"|format(qty_kg) }} kg)</span>{% endif %}
+            </div>
+            <div class="prod-row text-muted small">
+                {% set _tkg = prod.output_kg|default(qty_kg) %}{% set _ykg = prod.yarim_tayyor_kg|default(0) %}
+                <span>Tayyor: <strong>{% if _tkg %}{{ "%.2f"|format(_tkg) }} kg{% else %}-{% endif %}</strong></span>
+                <span>Yarim tayyor: <strong>{% if _ykg %}{{ "%.2f"|format(_ykg) }} kg{% else %}-{% endif %}</strong></span>
             </div>
             <div class="prod-row">
                 {% if prod.status == 'completed' %}<span class="badge bg-success">Yakunlangan</span>
@@ -351,6 +433,7 @@
                 </form>
                 <form method="POST" action="/production/{{ prod.id }}/cancel" class="d-inline"><input type="hidden" name="csrf_token" value="{{ csrf_token_from_request(request) }}"><button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-x-lg"></i></button></form>
                 {% elif prod.status == 'completed' %}
+                <a href="/production/{{ prod.id }}/movements" class="btn btn-sm btn-outline-info" title="Harakat tarixi"><i class="bi bi-clock-history"></i></a>
                 {% if current_user and current_user.role == 'admin' %}
                 <a href="/production/{{ prod.id }}/materials" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
                 <form method="POST" action="/production/{{ prod.id }}/revert" class="d-inline" onsubmit="return confirm('Tasdiqni bekor qilish?');"><button type="submit" class="btn btn-sm btn-outline-warning"><i class="bi bi-arrow-counterclockwise"></i></button></form>
@@ -425,6 +508,22 @@ function filterStatus(status, btn) {
     document.querySelectorAll('.status-filter-btn').forEach(function(b) { b.classList.remove('active'); });
     if (btn) btn.classList.add('active');
 }
+// Barchasini tanlash
+(function() {
+    var selectAll = document.getElementById('selectAllProd');
+    var checkboxes = document.querySelectorAll('.prod-row-cb');
+    if (selectAll && checkboxes.length) {
+        selectAll.addEventListener('change', function() {
+            checkboxes.forEach(function(cb) { cb.checked = selectAll.checked; });
+        });
+        checkboxes.forEach(function(cb) {
+            cb.addEventListener('change', function() {
+                var checked = document.querySelectorAll('.prod-row-cb:checked').length;
+                selectAll.checked = (checked === checkboxes.length);
+            });
+        });
+    }
+})();
 // Yakunlash bosilganda shu qator/kartochkadagi operator tanlovidan qiymatni yuborish (oylik hisobda kg chiqishi uchun)
 document.querySelectorAll('.complete-form').forEach(function(form) {
     form.addEventListener('submit', function() {
@@ -459,6 +558,22 @@ document.querySelectorAll('.complete-form').forEach(function(form) {
     document.querySelectorAll('form[action*="/production/"]').forEach(function(form) {
         form.addEventListener('submit', function() { appendFilterParams(form); }, false);
     });
+    var bulkForm = document.getElementById('bulkForm');
+    if (bulkForm) {
+        bulkForm.addEventListener('submit', function() {
+            var names = ['date_from', 'date_to', 'operator_id', 'q'];
+            names.forEach(function(name) {
+                if (bulkForm.querySelector('input[name="redirect_' + name + '"]')) return;
+                var inp = filterForm.querySelector('[name="' + name + '"]');
+                var val = inp ? (inp.value || '').trim() : '';
+                var h = document.createElement('input');
+                h.type = 'hidden';
+                h.name = 'redirect_' + name;
+                h.value = val;
+                bulkForm.appendChild(h);
+            });
+        }, false);
+    }
 })();
 // Xato xabari bo'lsa sahifa ochilganda alert ko'rinishiga scroll qilish
 (function() {
