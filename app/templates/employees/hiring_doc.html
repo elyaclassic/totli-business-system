@@ -82,9 +82,9 @@
                 {% endif %}
                 <tr>
                     <th class="table-light">Ish haqi turi (oylik turi)</th>
-                    <td>{% if doc.salary_type == 'oylik' %}Oylik{% elif doc.salary_type == 'soatlik' %}Soatlik{% elif doc.salary_type == "bo'lak" %}Bo'lak{% else %}—{% endif %}</td>
+                    <td>{% if doc.salary_type == 'oylik' %}Oylik{% elif doc.salary_type == 'soatlik' %}Soatlik{% elif doc.salary_type == "bo'lak" %}Bo'lak{% elif doc.salary_type == "bo'lak_oylik" %}Bo'lak + oylik{% else %}—{% endif %}</td>
                 </tr>
-                {% if doc.salary_type == "bo'lak" %}
+                {% if doc.salary_type == "bo'lak" or doc.salary_type == "bo'lak_oylik" %}
                 <tr>
                     <th class="table-light">Bo'lak ishlar (turlari)</th>
                     <td>

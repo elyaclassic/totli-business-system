@@ -32,6 +32,7 @@
                             <option value="oylik" {% if emp.salary_type == 'oylik' %}selected{% endif %}>Oylik</option>
                             <option value="soatlik" {% if emp.salary_type == 'soatlik' %}selected{% endif %}>Soatlik</option>
                             <option value="bo'lak" {% if emp.salary_type == "bo'lak" %}selected{% endif %}>Bo'lak</option>
+                            <option value="bo'lak_oylik" {% if emp.salary_type == "bo'lak_oylik" %}selected{% endif %}>Bo'lak + oylik</option>
                         </select>
                     </div>
                     <div class="col-md-3">
@@ -47,7 +48,7 @@
                             </div>
                             {% endfor %}
                         </div>
-                        <small class="text-muted">Ish haqi turi "Bo'lak" bo'lsa, oylik = ishlab chiqarilgan miqdor × (tanlangan bo'lak stavkalari yig'indisi).</small>
+                        <small class="text-muted">Bo'lak: oylik = ishlab chiqarilgan × stavka. Bo'lak + oylik: oylik = max(mehnat haqi, bo'lak hisobi).</small>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">Lavozimi</label>

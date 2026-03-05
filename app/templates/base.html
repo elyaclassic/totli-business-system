@@ -548,6 +548,11 @@
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link {% if 'Ishlab chiqarish guruhlari' in page_title or 'qiyomchilar' in (page_title or '')|lower %}active{% endif %}" href="/info/production-groups">
+                                <i class="bi bi-people"></i> Ishlab chiqarish guruhi
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link {% if 'Retsept' in page_title %}active{% endif %}"
                                 href="/production/recipes">
                                 <i class="bi bi-journal-text"></i> Retseptlar
@@ -716,6 +721,11 @@
                     <i class="bi bi-file-earmark-person"></i> Ishga qabul hujjati
                 </a>
             </li>
+            <li class="nav-item">
+                <a class="nav-link {% if 'Ishlab chiqarish guruhlari' in (page_title or '') %}active{% endif %}" href="/info/production-groups">
+                    <i class="bi bi-people"></i> Ishlab chiqarish guruhi
+                </a>
+            </li>
 
             {% elif qadoqlash_menu %}
             <!-- Qadoqlash uchun qisqa menyu -->
@@ -747,6 +757,11 @@
             <li class="nav-item">
                 <a class="nav-link {% if page_title == 'Ishga qabul qilish hujjatlari' or (page_title and 'Ishga qabul' in page_title) %}active{% endif %}" href="/employees/hiring-docs">
                     <i class="bi bi-file-earmark-person"></i> Ishga qabul hujjati
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if 'Ishlab chiqarish guruhlari' in (page_title or '') %}active{% endif %}" href="/info/production-groups">
+                    <i class="bi bi-people"></i> Ishlab chiqarish guruhi
                 </a>
             </li>
 

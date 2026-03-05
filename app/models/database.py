@@ -918,6 +918,49 @@ class EmploymentDoc(Base):
     user = relationship("User")
 
 
+# Ishlab chiqarish guruhi (masalan qiyomchilar): bitta operator nomidan yozilgan ish kunlik tabel bo'yicha guruh a'zolari orasida teng bo'linadi
+production_group_members = Table(
+    "production_group_members",
+    Base.metadata,
+    Column("group_id", Integer, ForeignKey("production_groups.id"), primary_key=True),
+    Column("employee_id", Integer, ForeignKey("employees.id"), primary_key=True),
+)
+
+
+class ProductionGroup(Base):
+    """Ishlab chiqarish guruhi (qiyomchilar va h.k.) — operator bitta, ish haqi kunlik davomat bo'yicha a'zolar orasida teng taqsimlanadi"""
+    __tablename__ = "production_groups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)  # masalan "Qiyomchilar"
+    operator_id = Column(Integer, ForeignKey("employees.id"), nullable=False)  # Tizimga kirib buyurtma yakunlovchi (Production.operator_id)
+    piecework_task_id = Column(Integer, ForeignKey("piecework_tasks.id"), nullable=True)  # Bo'lak narxi (so'm/kg)
+    include_qiyom = Column(Boolean, default=True)  # Qiyom retseptlari ham kg ga kiritilsin
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    operator = relationship("Employee", foreign_keys=[operator_id])
+    piecework_task = relationship("PieceworkTask")
+    members = relationship("Employee", secondary=production_group_members, backref="production_groups")
+
+
+class DismissalDoc(Base):
+    """Ishdan bo'shatish hujjati (O'zR Mehnat kodeksi bo'yicha)"""
+    __tablename__ = "dismissal_docs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    number = Column(String(50), unique=True, index=True, nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    doc_date = Column(Date, nullable=False)   # Ishdan bo'shatish sanasi
+    reason = Column(String(200), nullable=True)   # Sabab (o'z ixtiyori, muddati tugadi, ...)
+    note = Column(Text, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    employee = relationship("Employee", backref="dismissal_docs")
+    user = relationship("User")
+
+
 # ==========================================
 # SAVDO AGENTLARI
 # ==========================================
@@ -1256,6 +1299,60 @@ def ensure_piecework_tasks_table():
         print(f"ensure_piecework_tasks_table: {e}")
 
 
+def ensure_production_groups_tables():
+    """production_groups va production_group_members jadvalarini ta'minlash."""
+    from sqlalchemy import text
+    try:
+        with engine.begin() as conn:
+            r = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='production_groups'"))
+            if r.fetchone() is None:
+                conn.execute(text("""
+                    CREATE TABLE production_groups (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        name VARCHAR(100) NOT NULL,
+                        operator_id INTEGER NOT NULL REFERENCES employees(id),
+                        piecework_task_id INTEGER REFERENCES piecework_tasks(id),
+                        include_qiyom BOOLEAN DEFAULT 1,
+                        is_active BOOLEAN DEFAULT 1,
+                        created_at DATETIME
+                    )
+                """))
+            r = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='production_group_members'"))
+            if r.fetchone() is None:
+                conn.execute(text("""
+                    CREATE TABLE production_group_members (
+                        group_id INTEGER NOT NULL REFERENCES production_groups(id),
+                        employee_id INTEGER NOT NULL REFERENCES employees(id),
+                        PRIMARY KEY (group_id, employee_id)
+                    )
+                """))
+    except Exception as e:
+        print(f"ensure_production_groups_tables: {e}")
+
+
+def ensure_dismissal_docs_table():
+    """dismissal_docs jadvali mavjudligini ta'minlash."""
+    from sqlalchemy import text
+    try:
+        with engine.begin() as conn:
+            r = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='dismissal_docs'"))
+            if r.fetchone() is None:
+                conn.execute(text("""
+                    CREATE TABLE dismissal_docs (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        number VARCHAR(50) NOT NULL UNIQUE,
+                        employee_id INTEGER NOT NULL REFERENCES employees(id),
+                        doc_date DATE NOT NULL,
+                        reason VARCHAR(200),
+                        note TEXT,
+                        user_id INTEGER REFERENCES users(id),
+                        created_at DATETIME
+                    )
+                """))
+    except Exception as e:
+        print(f"ensure_dismissal_docs_table: {e}")
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     ensure_recipe_warehouse_columns()
@@ -1263,6 +1360,8 @@ def init_db():
     ensure_piecework_tasks_table()
     ensure_employee_salary_type()
     ensure_employee_piecework_tasks_table()
+    ensure_dismissal_docs_table()
+    ensure_production_groups_tables()
     print("Database tayyor (mavjud ma'lumotlar saqlanadi).")
 
 

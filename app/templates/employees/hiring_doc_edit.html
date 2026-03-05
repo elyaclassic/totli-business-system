@@ -54,6 +54,7 @@
                             <option value="oylik" {% if doc.salary_type == 'oylik' %}selected{% endif %}>Oylik</option>
                             <option value="soatlik" {% if doc.salary_type == 'soatlik' %}selected{% endif %}>Soatlik</option>
                             <option value="bo'lak" {% if doc.salary_type == "bo'lak" %}selected{% endif %}>Bo'lak</option>
+                            <option value="bo'lak_oylik" {% if doc.salary_type == "bo'lak_oylik" %}selected{% endif %}>Bo'lak + oylik</option>
                         </select>
                     </div>
                     <div class="col-md-5" id="pieceworkWrap" style="display:none;">
@@ -145,7 +146,7 @@
     var pw = document.getElementById('pieceworkWrap');
     function togglePiecework() {
         if (!st || !pw) return;
-        pw.style.display = (st.value === "bo'lak") ? 'block' : 'none';
+        pw.style.display = (st.value === "bo'lak" || st.value === "bo'lak_oylik") ? 'block' : 'none';
     }
     if (st) { st.addEventListener('change', togglePiecework); togglePiecework(); }
 

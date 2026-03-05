@@ -84,7 +84,7 @@
                                 {% if current_user and current_user.role == 'admin' %}
                                 {% if not doc.confirmed_at %}
                                 <a href="/employees/attendance/records?start_date={{ doc.date.strftime('%Y-%m-%d') }}&end_date={{ doc.date.strftime('%Y-%m-%d') }}" class="btn btn-sm btn-outline-secondary" title="O'zgartirish"><i class="bi bi-pencil"></i> O'zgartirish</a>
-                                <form action="/employees/attendance/doc/{{ doc.id }}/delete" method="POST" class="d-inline" onsubmit="return confirm('Hujjatni o\'chirishni xohlaysizmi? Yozuvlar saqlanadi, faqat tasdiqlash bekor qilinadi.');">
+                                <form action="/employees/attendance/doc/{{ doc.id }}/delete" method="POST" class="d-inline" onsubmit="return confirm('Hujjatni ro\'yxatdan butunlay o\'chirishni xohlaysizmi? Davomat yozuvlari (Keldi/Ketdi) saqlanadi, faqat tabel hujjati o\'chiriladi.');">
                                     <button type="submit" class="btn btn-sm btn-danger" title="O'chirish"><i class="bi bi-trash"></i> O'chirish</button>
                                 </form>
                                 {% else %}

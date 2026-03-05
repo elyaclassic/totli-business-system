@@ -113,10 +113,11 @@
                     {% if doc.salary_type == 'oylik' %}<strong>Oylik</strong>
                     {% elif doc.salary_type == 'soatlik' %}<strong>Soatlik</strong>
                     {% elif doc.salary_type == "bo'lak" %}<strong>Bo'lak</strong>
+                    {% elif doc.salary_type == "bo'lak_oylik" %}<strong>Bo'lak + oylik</strong>
                     {% else %}<strong>________________</strong>{% endif %}.
                 </p>
 
-                {% if doc.salary_type == "bo'lak" %}
+                {% if doc.salary_type == "bo'lak" or doc.salary_type == "bo'lak_oylik" %}
                 <div class="mb-2">
                     <strong>Bo'lak ishlar va stavkalar:</strong>
                     {% if selected_piecework_tasks and selected_piecework_tasks|length %}

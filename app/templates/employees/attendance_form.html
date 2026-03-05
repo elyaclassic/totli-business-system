@@ -19,6 +19,12 @@
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% endif %}
+    {% if request.query_params.get('saved') %}
+    <div class="alert alert-success alert-dismissible fade show py-2 small">
+        <i class="bi bi-check-circle"></i> {{ request.query_params.get('msg', 'Tabel saqlandi.') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
 
     <div class="card mb-3">
         <div class="card-body">
@@ -64,64 +70,90 @@
     </div>
 
     <div class="card mb-3">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <span>Barcha xodimlar ({{ attendance_rows|length }} ta) — keldi: {{ attendances|length }} ta</span>
-            {% if current_user and current_user.role == 'admin' %}
-            <form method="POST" action="/employees/attendance/form/confirm" class="d-inline">
-                <input type="hidden" name="date" value="{{ form_date_str }}">
-                <button type="submit" class="btn btn-sm btn-success" {% if not attendances %}disabled{% endif %} onclick="return confirm('{{ form_date.strftime('%d.%m.%Y') }} kunini tasdiqlashni xohlaysizmi? Hujjat yaratiladi.');">
-                    <i class="bi bi-check-circle"></i> Tasdiqlash
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span>Barcha xodimlar ({{ attendance_rows|length }} ta) — keldi: {{ attendances|length }} ta. <span class="text-muted small">Hikvision yuklamasangiz, quyidagi ustunlarni qo'lda to'ldiring va «Qo'lda saqlash» bosing.</span></span>
+            <div class="d-flex gap-2 flex-wrap">
+                <button type="button" id="btnBulkTimeFill" class="btn btn-sm btn-outline-secondary" title="Barcha qatorlarda Keldi 9:00, Ketdi 18:00 va Soat avtomatik to'ldiriladi">
+                    <i class="bi bi-clock-history"></i> Vaqt yuklash (9:00–18:00)
                 </button>
-            </form>
-            {% endif %}
+                <form method="POST" action="/employees/attendance/form/bulk-time" class="d-inline" id="formBulkTimeSave">
+                    <input type="hidden" name="date" value="{{ form_date_str }}">
+                    <button type="submit" class="btn btn-sm btn-outline-primary" id="btnBulkTimeSave">
+                        <i class="bi bi-cloud-upload"></i> Vaqt yuklash va saqlash
+                    </button>
+                </form>
+                <button type="submit" form="attendanceManualFormInner" class="btn btn-sm btn-primary">
+                    <i class="bi bi-pencil-square"></i> Qo'lda saqlash
+                </button>
+                {% if current_user and current_user.role == 'admin' %}
+                <form method="POST" action="/employees/attendance/form/confirm" class="d-inline">
+                    <input type="hidden" name="date" value="{{ form_date_str }}">
+                    <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('{{ form_date.strftime('%d.%m.%Y') }} kunini tasdiqlashni xohlaysizmi? Hujjat yaratiladi.');">
+                        <i class="bi bi-check-circle"></i> Tasdiqlash
+                    </button>
+                </form>
+                {% endif %}
+            </div>
         </div>
         <div class="card-body p-0">
-            <div class="table-responsive">
-                <table class="table table-sm table-hover mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th width="45">№</th>
-                            <th>Xodim</th>
-                            <th>Lavozim</th>
-                            <th>Bo'lim</th>
-                            <th>Oylik turi</th>
-                            <th>Keldi</th>
-                            <th>Ketdi</th>
-                            <th>Soat</th>
-                            <th>Holat</th>
-                            <th width="80">Rasm</th>
-                            <th>Izoh</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in attendance_rows %}
-                        <tr class="{% if not row.attendance %}table-secondary{% endif %}">
-                            <td>{{ loop.index }}</td>
-                            <td>{{ row.employee.full_name }}{% if row.employee.code %} <small class="text-muted">({{ row.employee.code }})</small>{% endif %}</td>
-                            <td><small>{{ row.employee.position or '-' }}</small></td>
-                            <td><small>{{ row.employee.department or '-' }}</small></td>
-                            <td><small>{% if row.employee.salary_type %}{% if row.employee.salary_type == 'oylik' %}Oylik{% elif row.employee.salary_type == 'soatlik' %}Soatlik{% elif row.employee.salary_type == "bo'lak" %}Bo'lak{% else %}{{ row.employee.salary_type }}{% endif %}{% else %}-{% endif %}</small></td>
-                            <td>{% if row.attendance and row.attendance.check_in %}{{ row.attendance.check_in.strftime('%H:%M') }}{% else %}-{% endif %}</td>
-                            <td>{% if row.attendance and row.attendance.check_out %}{{ row.attendance.check_out.strftime('%H:%M') }}{% else %}-{% endif %}</td>
-                            <td>{% if row.attendance %}{{ row.attendance.hours_worked if row.attendance.hours_worked is not none else '-' }}{% else %}-{% endif %}</td>
-                            <td>
-                                {% if row.attendance %}
-                                    {% if row.attendance.status == 'present' %}<span class="badge bg-success">Keldi</span>
-                                    {% elif row.attendance.status == 'absent' %}<span class="badge bg-danger">Kelmadi</span>
-                                    {% else %}{{ row.attendance.status }}{% endif %}
-                                {% else %}<span class="text-muted">—</span>{% endif %}
-                            </td>
-                            <td>{% if row.attendance and row.attendance.event_snapshot_path %}<a href="/static/{{ row.attendance.event_snapshot_path }}" target="_blank" title="Hodisa rasmi"><img src="/static/{{ row.attendance.event_snapshot_path }}" alt="" class="rounded" style="max-width:48px;max-height:48px;object-fit:cover;"></a>{% else %}-{% endif %}</td>
-                            <td><small>{% if row.attendance %}{{ row.attendance.note or '-' }}{% else %}-{% endif %}</small></td>
-                        </tr>
-                        {% else %}
-                        <tr>
-                            <td colspan="11" class="text-center text-muted py-4">Xodimlar ro'yxati bo'sh. <a href="/info/employees">Ma'lumotnomalar → Xodimlar</a> da qo'shing.</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+            <form method="POST" action="/employees/attendance/form/save" id="attendanceManualFormInner">
+                <input type="hidden" name="date" value="{{ form_date_str }}">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th width="40" class="text-center" title="Vaqt yuklash uchun tanlash">
+                                    <label class="form-check-label small mb-0"><input type="checkbox" class="form-check-input" id="bulkSelectAll" title="Hammasini tanlash"> Tanlash</label>
+                                </th>
+                                <th width="45">№</th>
+                                <th>Xodim</th>
+                                <th>Lavozim</th>
+                                <th>Bo'lim</th>
+                                <th>Oylik turi</th>
+                                <th>Keldi</th>
+                                <th>Ketdi</th>
+                                <th>Soat</th>
+                                <th>Holat</th>
+                                <th width="80">Rasm</th>
+                                <th>Izoh</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in attendance_rows %}
+                            <tr class="{% if not row.attendance %}table-secondary{% endif %}" data-employee-id="{{ row.employee.id }}">
+                                <td class="text-center"><input type="checkbox" class="form-check-input bulk-select-employee" value="{{ row.employee.id }}" title="Vaqt yuklash uchun tanlash"></td>
+                                <td>{{ loop.index }}</td>
+                                <td>{{ row.employee.full_name }}{% if row.employee.code %} <small class="text-muted">({{ row.employee.code }})</small>{% endif %}
+                                    <input type="hidden" name="employee_id" value="{{ row.employee.id }}">
+                                </td>
+                                <td><small>{{ row.employee.position or '-' }}</small></td>
+                                <td><small>{{ row.employee.department or '-' }}</small></td>
+                                <td><small>{% if row.employee.salary_type %}{% if row.employee.salary_type == 'oylik' %}Oylik{% elif row.employee.salary_type == 'soatlik' %}Soatlik{% elif row.employee.salary_type == "bo'lak" %}Bo'lak{% elif row.employee.salary_type == "bo'lak_oylik" %}Bo'lak+oylik{% else %}{{ row.employee.salary_type }}{% endif %}{% else %}-{% endif %}</small></td>
+                                <td><input type="time" name="check_in_{{ row.employee.id }}" class="form-control form-control-sm" style="width:100px;" value="{% if row.attendance and row.attendance.check_in %}{{ row.attendance.check_in.strftime('%H:%M') }}{% endif %}" title="Keldi vaqti"></td>
+                                <td><input type="time" name="check_out_{{ row.employee.id }}" class="form-control form-control-sm" style="width:100px;" value="{% if row.attendance and row.attendance.check_out %}{{ row.attendance.check_out.strftime('%H:%M') }}{% endif %}" title="Ketdi vaqti"></td>
+                                <td><input type="number" name="hours_{{ row.employee.id }}" class="form-control form-control-sm" style="width:70px;" step="0.5" min="0" max="24" placeholder="-" value="{% if row.attendance and row.attendance.hours_worked is not none %}{{ row.attendance.hours_worked }}{% endif %}" title="Ishlash soati"></td>
+                                <td>
+                                    <select name="status_{{ row.employee.id }}" class="form-select form-select-sm" style="width:auto; min-width:100px;">
+                                        <option value="present" {% if row.attendance and row.attendance.status == 'present' %}selected{% endif %}>Keldi</option>
+                                        <option value="absent" {% if row.attendance and row.attendance.status == 'absent' %}selected{% endif %}>Kelmadi</option>
+                                        <option value="leave" {% if row.attendance and row.attendance.status == 'leave' %}selected{% endif %}>Ta'til</option>
+                                    </select>
+                                </td>
+                                <td>{% if row.attendance and row.attendance.event_snapshot_path %}<a href="/static/{{ row.attendance.event_snapshot_path }}" target="_blank" title="Hodisa rasmi"><img src="/static/{{ row.attendance.event_snapshot_path }}" alt="" class="rounded" style="max-width:48px;max-height:48px;object-fit:cover;"></a>{% else %}-{% endif %}</td>
+                                <td><input type="text" name="note_{{ row.employee.id }}" class="form-control form-control-sm" style="min-width:120px;" placeholder="Izoh" value="{{ row.attendance.note if row.attendance and row.attendance.note else '' }}"></td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="12" class="text-center text-muted py-4">Xodimlar ro'yxati bo'sh. <a href="/info/employees">Ma'lumotnomalar → Xodimlar</a> da qo'shing.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="card-footer py-2">
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-pencil-square"></i> Qo'lda saqlash</button>
+                </div>
+            </form>
         </div>
     </div>
     {% endif %}
@@ -192,6 +224,108 @@
 
 <script>
 (function() {
+    // Keldi / Ketdi yozilganda Soat avtomatik hisoblansin
+    function minutesFromMidnight(timeStr) {
+        if (!timeStr || !timeStr.trim()) return null;
+        var parts = timeStr.trim().split(':');
+        var h = parseInt(parts[0], 10);
+        var m = parseInt(parts[1], 10) || 0;
+        if (isNaN(h)) return null;
+        return h * 60 + m;
+    }
+    function updateHoursForRow(checkInInp, checkOutInp, hoursInp) {
+        var inMin = minutesFromMidnight(checkInInp.value);
+        var outMin = minutesFromMidnight(checkOutInp.value);
+        if (inMin == null || outMin == null) {
+            if (!checkInInp.value && !checkOutInp.value) hoursInp.value = '';
+            return;
+        }
+        var diffMin = outMin - inMin;
+        if (diffMin < 0) diffMin += 24 * 60; // kechasi ish
+        var hours = Math.round((diffMin / 60) * 2) / 2; // 0.5 ga yaxlitlash
+        hoursInp.value = hours > 0 ? hours : '';
+    }
+    function updateStatusByTime(checkInInp, checkOutInp, statusSelect) {
+        if (!statusSelect) return;
+        var hasTime = (checkInInp && checkInInp.value && checkInInp.value.trim()) || (checkOutInp && checkOutInp.value && checkOutInp.value.trim());
+        statusSelect.value = hasTime ? 'present' : 'absent';
+    }
+    var form = document.getElementById('attendanceManualFormInner');
+    if (form) {
+        var checkInInputs = form.querySelectorAll('input[name^="check_in_"]');
+        checkInInputs.forEach(function(inp) {
+            var name = inp.getAttribute('name');
+            if (!name || name.indexOf('_') === -1) return;
+            var empId = name.replace('check_in_', '');
+            var checkOutInp = form.querySelector('input[name="check_out_' + empId + '"]');
+            var hoursInp = form.querySelector('input[name="hours_' + empId + '"]');
+            var statusSelect = form.querySelector('select[name="status_' + empId + '"]');
+            if (!checkOutInp || !hoursInp) return;
+            function onTimeChange() {
+                updateHoursForRow(inp, checkOutInp, hoursInp);
+                updateStatusByTime(inp, checkOutInp, statusSelect);
+            }
+            inp.addEventListener('change', onTimeChange);
+            inp.addEventListener('input', onTimeChange);
+            checkOutInp.addEventListener('change', onTimeChange);
+            checkOutInp.addEventListener('input', onTimeChange);
+            onTimeChange();
+        });
+        // Hammasini tanlash
+        var bulkSelectAll = document.getElementById('bulkSelectAll');
+        if (bulkSelectAll) {
+            bulkSelectAll.addEventListener('change', function() {
+                form.querySelectorAll('.bulk-select-employee').forEach(function(cb) { cb.checked = bulkSelectAll.checked; });
+            });
+        }
+        // Vaqt yuklash (9:00–18:00) — tanlangan qatorlarni to'ldiradi (tanlangan bo'lmasa barchasi)
+        var btnBulkFill = document.getElementById('btnBulkTimeFill');
+        if (btnBulkFill) {
+            btnBulkFill.addEventListener('click', function() {
+                var f = document.getElementById('attendanceManualFormInner');
+                if (!f) return;
+                var selected = f.querySelectorAll('.bulk-select-employee:checked');
+                var idsToFill = selected.length ? Array.from(selected).map(function(cb) { return cb.value; }) : null;
+                if (idsToFill === null) {
+                    idsToFill = Array.from(f.querySelectorAll('.bulk-select-employee')).map(function(cb) { return cb.value; });
+                }
+                idsToFill.forEach(function(empId) {
+                    var checkInInp = f.querySelector('input[name="check_in_' + empId + '"]');
+                    var checkOutInp = f.querySelector('input[name="check_out_' + empId + '"]');
+                    var hoursInp = f.querySelector('input[name="hours_' + empId + '"]');
+                    var statusSelect = f.querySelector('select[name="status_' + empId + '"]');
+                    if (checkInInp && checkOutInp && hoursInp) {
+                        checkInInp.value = '09:00';
+                        checkOutInp.value = '18:00';
+                        updateHoursForRow(checkInInp, checkOutInp, hoursInp);
+                        updateStatusByTime(checkInInp, checkOutInp, statusSelect);
+                    }
+                });
+            });
+        }
+        // Vaqt yuklash va saqlash — tanlangan (yoki barcha) xodimlarga serverda saqlash
+        var formBulkSave = document.getElementById('formBulkTimeSave');
+        if (formBulkSave) {
+            formBulkSave.addEventListener('submit', function(e) {
+                e.preventDefault();
+                var f = document.getElementById('attendanceManualFormInner');
+                var selected = f ? f.querySelectorAll('.bulk-select-employee:checked') : [];
+                var ids = selected.length ? Array.from(selected).map(function(cb) { return cb.value; }) : [];
+                formBulkSave.querySelectorAll('input[name="employee_ids"]').forEach(function(inp) { inp.remove(); });
+                ids.forEach(function(id) {
+                    var hi = document.createElement('input');
+                    hi.type = 'hidden';
+                    hi.name = 'employee_ids';
+                    hi.value = id;
+                    formBulkSave.appendChild(hi);
+                });
+                var msg = ids.length ? 'Tanlangan ' + ids.length + ' ta xodimga' : 'Barcha xodimlarga';
+                if (!confirm(msg + ' Keldi 9:00, Ketdi 18:00 yuklansin va saqlansinmi?')) return;
+                formBulkSave.submit();
+            });
+        }
+    }
+
     var btn = document.getElementById('toggleHikvisionPassword');
     if (btn) {
         var inp = document.getElementById('hikvisionPassword');

@@ -31,7 +31,8 @@ from app.models.database import (
     Recipe, RecipeItem, RecipeStage, Production, ProductionItem, ProductionStage, PRODUCTION_STAGE_NAMES, Machine, Employee, Salary,
     PieceworkTask,
     employee_piecework_tasks,
-    Attendance, AttendanceDoc, EmployeeAdvance, EmploymentDoc,
+    Attendance, AttendanceDoc, EmployeeAdvance, EmploymentDoc, DismissalDoc,
+    ProductionGroup, production_group_members,
     Agent, AgentLocation, Route, RoutePoint, Visit,
     Driver, DriverLocation, Delivery, PartnerLocation,
     Purchase, PurchaseItem, PurchaseExpense, Department, Direction, Region, Position,
@@ -3870,6 +3871,134 @@ async def info_positions_delete(position_id: int, db: Session = Depends(get_db),
     position.is_active = False
     db.commit()
     return RedirectResponse(url="/info/positions", status_code=303)
+
+
+# --- ISHLAB CHIQARISH GURUHLARI (QIYOMCHILAR) ---
+@app.get("/info/production-groups", response_class=HTMLResponse)
+async def info_production_groups(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Ishlab chiqarish guruhlari — operator + a'zolar, kunlik tabel bo'yicha bo'lak taqsimlanadi."""
+    groups = (
+        db.query(ProductionGroup)
+        .options(joinedload(ProductionGroup.operator), joinedload(ProductionGroup.piecework_task), joinedload(ProductionGroup.members))
+        .filter(ProductionGroup.is_active == True)
+        .order_by(ProductionGroup.name)
+        .all()
+    )
+    employees = db.query(Employee).filter(Employee.is_active == True).order_by(Employee.full_name).all()
+    piecework_tasks = db.query(PieceworkTask).filter(PieceworkTask.is_active == True).order_by(PieceworkTask.name).all()
+    return templates.TemplateResponse("info/production_groups.html", {
+        "request": request,
+        "groups": groups,
+        "employees": employees,
+        "piecework_tasks": piecework_tasks,
+        "current_user": current_user,
+        "page_title": "Ishlab chiqarish guruhlari (qiyomchilar)",
+    })
+
+
+@app.post("/info/production-groups/add", response_class=RedirectResponse)
+async def info_production_groups_add(
+    request: Request,
+    name: str = Form(...),
+    operator_id: int = Form(...),
+    piecework_task_id: Optional[int] = Form(None),
+    include_qiyom: str = Form("1"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Guruh qo'shish."""
+    form = await request.form()
+    member_ids_raw = form.getlist("member_ids") if hasattr(form, "getlist") else []
+    member_ids = list(dict.fromkeys([int(x) for x in member_ids_raw if str(x).strip().isdigit()]))
+    gr = ProductionGroup(
+        name=name.strip(),
+        operator_id=operator_id,
+        piecework_task_id=int(piecework_task_id) if piecework_task_id else None,
+        include_qiyom=(include_qiyom == "1"),
+    )
+    db.add(gr)
+    db.flush()
+    for eid in member_ids:
+        db.execute(production_group_members.insert().values(group_id=gr.id, employee_id=eid))
+    db.commit()
+    return RedirectResponse(url="/info/production-groups?added=1", status_code=303)
+
+
+@app.get("/info/production-groups/edit/{group_id}", response_class=HTMLResponse)
+async def info_production_groups_edit_page(
+    group_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Guruhni tahrirlash sahifasi."""
+    gr = (
+        db.query(ProductionGroup)
+        .options(joinedload(ProductionGroup.operator), joinedload(ProductionGroup.piecework_task), joinedload(ProductionGroup.members))
+        .filter(ProductionGroup.id == group_id)
+        .first()
+    )
+    if not gr:
+        raise HTTPException(status_code=404, detail="Guruh topilmadi")
+    employees = db.query(Employee).filter(Employee.is_active == True).order_by(Employee.full_name).all()
+    piecework_tasks = db.query(PieceworkTask).filter(PieceworkTask.is_active == True).order_by(PieceworkTask.name).all()
+    return templates.TemplateResponse("info/production_group_edit.html", {
+        "request": request,
+        "group": gr,
+        "employees": employees,
+        "piecework_tasks": piecework_tasks,
+        "current_user": current_user,
+        "page_title": f"Guruhni tahrirlash: {gr.name}",
+    })
+
+
+@app.post("/info/production-groups/edit/{group_id}", response_class=RedirectResponse)
+async def info_production_groups_edit(
+    group_id: int,
+    request: Request,
+    name: str = Form(...),
+    operator_id: int = Form(...),
+    piecework_task_id: Optional[int] = Form(None),
+    include_qiyom: str = Form("1"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Guruhni saqlash."""
+    from sqlalchemy import delete
+    form = await request.form()
+    member_ids_raw = form.getlist("member_ids") if hasattr(form, "getlist") else []
+    member_ids = list(dict.fromkeys([int(x) for x in member_ids_raw if str(x).strip().isdigit()]))
+    gr = db.query(ProductionGroup).filter(ProductionGroup.id == group_id).first()
+    if not gr:
+        raise HTTPException(status_code=404, detail="Guruh topilmadi")
+    gr.name = name.strip()
+    gr.operator_id = operator_id
+    gr.piecework_task_id = int(piecework_task_id) if piecework_task_id else None
+    gr.include_qiyom = (include_qiyom == "1")
+    db.execute(delete(production_group_members).where(production_group_members.c.group_id == group_id))
+    for eid in member_ids:
+        db.execute(production_group_members.insert().values(group_id=gr.id, employee_id=eid))
+    db.commit()
+    return RedirectResponse(url="/info/production-groups?updated=1", status_code=303)
+
+
+@app.post("/info/production-groups/delete/{group_id}", response_class=RedirectResponse)
+async def info_production_groups_delete(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Guruhni o'chirish (is_active=False)."""
+    gr = db.query(ProductionGroup).filter(ProductionGroup.id == group_id).first()
+    if not gr:
+        raise HTTPException(status_code=404, detail="Guruh topilmadi")
+    gr.is_active = False
+    db.commit()
+    return RedirectResponse(url="/info/production-groups?deleted=1", status_code=303)
 
 
 # --- MAHSULOT DETAIL VA BARCODE ---
@@ -8336,9 +8465,17 @@ async def finance_payment_delete(
 # ==========================================
 
 @app.get("/employees", response_class=HTMLResponse)
-async def employees_list(request: Request, db: Session = Depends(get_db), current_user: User = Depends(require_auth)):
-    """Xodimlar ro'yxati"""
-    employees = db.query(Employee).all()
+async def employees_list(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+    show_dismissed: bool = False,
+):
+    """Xodimlar ro'yxati — odatiy holda faqat faol xodimlar."""
+    q = db.query(Employee).order_by(Employee.full_name)
+    if not show_dismissed:
+        q = q.filter(Employee.is_active == True)
+    employees = q.all()
     piecework_tasks = db.query(PieceworkTask).filter(PieceworkTask.is_active == True).order_by(PieceworkTask.name).all()
     departments = db.query(Department).filter(Department.is_active == True).order_by(Department.name).all()
     positions = db.query(Position).filter(Position.is_active == True).order_by(Position.name).all()
@@ -8349,7 +8486,8 @@ async def employees_list(request: Request, db: Session = Depends(get_db), curren
         "departments": departments,
         "positions": positions,
         "current_user": current_user,
-        "page_title": "Xodimlar"
+        "page_title": "Xodimlar",
+        "show_dismissed": show_dismissed,
     })
 
 
@@ -8369,7 +8507,7 @@ async def employee_add(
 ):
     """Xodim qo'shish"""
     st = (salary_type or "").strip() or None
-    if st and st not in ("oylik", "soatlik", "bo'lak"):
+    if st and st not in ("oylik", "soatlik", "bo'lak", "bo'lak_oylik"):
         st = None
     task_ids = [int(x) for x in (piecework_task_ids or []) if str(x).strip().isdigit()]
     task_ids = list(dict.fromkeys(task_ids))
@@ -8385,7 +8523,7 @@ async def employee_add(
     )
     db.add(employee)
     db.flush()
-    if st == "bo'lak" and task_ids:
+    if st in ("bo'lak", "bo'lak_oylik") and task_ids:
         tasks = db.query(PieceworkTask).filter(PieceworkTask.id.in_(task_ids)).all()
         employee.piecework_tasks = tasks
     db.commit()
@@ -8442,13 +8580,13 @@ async def employee_update(
     emp.phone = phone
     emp.salary = salary
     st = (salary_type or "").strip() or None
-    if st and st not in ("oylik", "soatlik", "bo'lak"):
+    if st and st not in ("oylik", "soatlik", "bo'lak", "bo'lak_oylik"):
         st = None
     emp.salary_type = st
     task_ids = [int(x) for x in (piecework_task_ids or []) if str(x).strip().isdigit()]
     task_ids = list(dict.fromkeys(task_ids))
     emp.piecework_task_id = task_ids[0] if task_ids else None  # legacy
-    if st == "bo'lak" and task_ids:
+    if st in ("bo'lak", "bo'lak_oylik") and task_ids:
         tasks = db.query(PieceworkTask).filter(PieceworkTask.id.in_(task_ids)).all()
         emp.piecework_tasks = tasks
     else:
@@ -8483,6 +8621,172 @@ async def employee_delete(
         )
 
 
+# --- ISHDAN BO'SHATISH ---
+DISMISSAL_REASONS = [
+    ("own_will", "O'z ixtiyori bilan"),
+    ("contract_end", "Shartnoma muddati tugadi"),
+    ("discipline", "Mehnat intizomini buzgani"),
+    ("reduction", "Loyihadan (shtatdan) qisqartirish"),
+    ("agreement", "O'zaro kelishuv"),
+    ("other", "Boshqa"),
+]
+
+
+@app.get("/employees/dismissal/create", response_class=HTMLResponse)
+async def dismissal_create_page(
+    request: Request,
+    employee_id: int = Query(..., description="Xodim ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Ishdan bo'shatish hujjati yaratish — forma."""
+    emp = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not emp:
+        return RedirectResponse(url="/employees?error=Xodim topilmadi", status_code=303)
+    if not emp.is_active:
+        return RedirectResponse(url="/employees?error=Xodim allaqachon ishdan bo'shatilgan", status_code=303)
+    default_date = datetime.now().date().strftime("%Y-%m-%d")
+    return templates.TemplateResponse("employees/dismissal_form.html", {
+        "request": request,
+        "employee": emp,
+        "reasons": DISMISSAL_REASONS,
+        "default_date": default_date,
+        "current_user": current_user,
+        "page_title": "Ishdan bo'shatish",
+    })
+
+
+@app.post("/employees/dismissal/create", response_class=RedirectResponse)
+async def dismissal_create_submit(
+    request: Request,
+    employee_id: int = Form(...),
+    doc_date: str = Form(...),
+    reason: str = Form(""),
+    note: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Ishdan bo'shatish hujjatini yaratadi, xodimni faol emas qiladi."""
+    from urllib.parse import quote
+    emp = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not emp:
+        return RedirectResponse(url="/employees?error=Xodim topilmadi", status_code=303)
+    if not emp.is_active:
+        return RedirectResponse(url="/employees?error=Xodim allaqachon ishdan bo'shatilgan", status_code=303)
+    try:
+        doc_d = datetime.strptime(doc_date.strip()[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return RedirectResponse(url=f"/employees/dismissal/create?employee_id={employee_id}&error=Noto%27g%27ri sana", status_code=303)
+    reason_label = next((r[1] for r in DISMISSAL_REASONS if r[0] == reason), reason or "—")
+    count = db.query(DismissalDoc).filter(DismissalDoc.doc_date >= doc_d.replace(day=1)).count()
+    number = f"IB-{doc_d.strftime('%Y%m%d')}-{count + 1:04d}"
+    doc = DismissalDoc(
+        number=number,
+        employee_id=emp.id,
+        doc_date=doc_d,
+        reason=reason_label,
+        note=(note or "").strip() or None,
+        user_id=current_user.id if current_user else None,
+    )
+    db.add(doc)
+    db.flush()
+    emp.is_active = False
+    db.commit()
+    return RedirectResponse(url=f"/employees/dismissal/{doc.id}?created=1", status_code=303)
+
+
+@app.get("/employees/dismissal/{doc_id}", response_class=HTMLResponse)
+async def dismissal_doc_view(
+    doc_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Ishdan bo'shatish hujjati ko'rinishi."""
+    doc = (
+        db.query(DismissalDoc)
+        .options(joinedload(DismissalDoc.employee), joinedload(DismissalDoc.user))
+        .filter(DismissalDoc.id == doc_id)
+        .first()
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Hujjat topilmadi")
+    return templates.TemplateResponse("employees/dismissal_doc.html", {
+        "request": request,
+        "doc": doc,
+        "current_user": current_user,
+        "page_title": f"Ishdan bo'shatish {doc.number}",
+    })
+
+
+def _build_dismissal_docx(doc, company_name: str, employer_rep_name: str):
+    """Ishdan bo'shatish hujjatini Word (.docx) sifatida qaytaradi (BytesIO)."""
+    d = Document()
+    style = d.styles["Normal"]
+    style.font.size = Pt(11)
+    style.font.name = "Times New Roman"
+    d.add_heading("ISHDAN BO'SHATISH HAQIDA BUYRUQ", level=0)
+    h = d.paragraphs[-1]
+    h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    d.add_paragraph()
+    p = d.add_paragraph()
+    p.add_run(f"№ {doc.number}").bold = True
+    p.add_run(f"   Sana: {doc.doc_date.strftime('%d.%m.%Y') if doc.doc_date else '—'}")
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    d.add_paragraph()
+    d.add_paragraph(f"Joy: ____________________________")
+    d.add_paragraph(f"Korxona: {company_name}")
+    d.add_paragraph()
+    emp = doc.employee
+    d.add_paragraph(
+        f"1. {emp.full_name} (xodim kodi: {emp.code or '—'}), "
+        f"{doc.doc_date.strftime('%d.%m.%Y')} sanadan boshlab ishdan bo'shatiladi."
+    )
+    d.add_paragraph(f"2. Ishdan bo'shatish sababi: {doc.reason or '—'}.")
+    if doc.note:
+        d.add_paragraph(f"3. Izoh: {doc.note}")
+    d.add_paragraph()
+    d.add_paragraph("Ish beruvchi:")
+    d.add_paragraph(f"Korxona: {company_name}")
+    d.add_paragraph(f"Rahbar: {employer_rep_name}")
+    d.add_paragraph("Imzo: ______________________")
+    d.add_paragraph()
+    d.add_paragraph("Xodim bilan tanishtirildi:")
+    d.add_paragraph(f"F.I.O: {emp.full_name}")
+    d.add_paragraph("Imzo: ______________________")
+    buf = io.BytesIO()
+    d.save(buf)
+    buf.seek(0)
+    return buf
+
+
+@app.get("/employees/dismissal/{doc_id}/export-word")
+async def dismissal_doc_export_word(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Ishdan bo'shatish hujjatini Word (.docx) formatida yuklab olish."""
+    doc = (
+        db.query(DismissalDoc)
+        .options(joinedload(DismissalDoc.employee))
+        .filter(DismissalDoc.id == doc_id)
+        .first()
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Hujjat topilmadi")
+    company_name = "TOTLI HOLVA SWEETS"
+    employer_rep_name = "Rahimov D.A."
+    buf = _build_dismissal_docx(doc, company_name, employer_rep_name)
+    safe_number = (doc.number or "ib").replace("/", "-").replace("\\", "-")
+    filename = f"Ishdan_bo'shatish_{safe_number}.docx"
+    return Response(
+        content=buf.read(),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename*=UTF-8\'\'{quote(filename)}'},
+    )
+
+
 # --- ISHGA QABUL QILISH HUJJATI ---
 @app.get("/employees/hiring-docs", response_class=HTMLResponse)
 async def employment_docs_list(
@@ -8512,9 +8816,18 @@ async def employment_doc_create_page(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Ishga qabul hujjati yaratish (xodim tanlash)"""
-    employees = db.query(Employee).order_by(Employee.full_name).all()
+    """Ishga qabul hujjati yaratish (xodim tanlash). Har bir xodim faqat bir marta ishga qabul qilinadi."""
+    employees = db.query(Employee).filter(Employee.is_active == True).order_by(Employee.full_name).all()
     emp = db.query(Employee).filter(Employee.id == employee_id).first() if employee_id else None
+    # Agar tanlangan xodimda allaqachon ishga qabul hujjati bo'lsa — yangi yaratishga ruxsat yo'q
+    if emp:
+        existing = db.query(EmploymentDoc).filter(EmploymentDoc.employee_id == emp.id).order_by(EmploymentDoc.doc_date.desc()).first()
+        if existing:
+            return RedirectResponse(
+                url="/employees/hiring-docs?error=" + quote(f"«{emp.full_name}» allaqachon ishga qabul qilingan. Yangi hujjat yaratib bo'lmaydi — mavjud hujjatni ko'ring yoki tahrirlang.")
+                + "&existing_doc_id=" + str(existing.id),
+                status_code=303,
+            )
     today_str = date.today().isoformat()
     departments = db.query(Department).filter(Department.is_active == True).order_by(Department.name).all()
     positions = db.query(Position).filter(Position.is_active == True).order_by(Position.name).all()
@@ -8550,11 +8863,18 @@ async def employment_doc_create(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Ishga qabul hujjati yaratish (O'zR Mehnat kodeksi, gov.uz tamoyillari asosida)"""
+    """Ishga qabul hujjati yaratish (O'zR Mehnat kodeksi, gov.uz tamoyillari asosida). Har bir xodim faqat bir marta ishga qabul qilinadi."""
     from urllib.parse import quote
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:
         return RedirectResponse(url="/employees/hiring-docs?error=" + quote("Xodim topilmadi"), status_code=303)
+    existing = db.query(EmploymentDoc).filter(EmploymentDoc.employee_id == emp.id).first()
+    if existing:
+        return RedirectResponse(
+            url="/employees/hiring-docs?error=" + quote(f"«{emp.full_name}» allaqachon ishga qabul qilingan. Yangi hujjat yaratib bo'lmaydi.")
+            + "&existing_doc_id=" + str(existing.id),
+            status_code=303,
+        )
     try:
         doc_d = datetime.strptime(doc_date.strip(), "%Y-%m-%d").date()
     except (ValueError, TypeError):
@@ -8576,7 +8896,7 @@ async def employment_doc_create(
     doc_salary = float(salary) if salary else (emp.salary or 0)
     doc_department = (department or "").strip() or (emp.department or "").strip() or None
     st = (salary_type or "").strip() or None
-    if st and st not in ("oylik", "soatlik", "bo'lak"):
+    if st and st not in ("oylik", "soatlik", "bo'lak", "bo'lak_oylik"):
         st = None
     task_ids = [int(x) for x in (piecework_task_ids or []) if str(x).strip().isdigit()]
     task_ids = list(dict.fromkeys(task_ids))
@@ -8594,7 +8914,7 @@ async def employment_doc_create(
         department=doc_department,
         salary=doc_salary,
         salary_type=st,
-        piecework_task_ids=",".join(str(x) for x in task_ids) if (st == "bo'lak" and task_ids) else None,
+        piecework_task_ids=",".join(str(x) for x in task_ids) if (st in ("bo'lak", "bo'lak_oylik") and task_ids) else None,
         rest_days=",".join(rest_days_clean) if rest_days_clean else None,
         probation=probation_clean,
         contract_type=ct,
@@ -8608,7 +8928,7 @@ async def employment_doc_create(
     emp.salary = doc_salary
     if st:
         emp.salary_type = st
-    if st == "bo'lak":
+    if st in ("bo'lak", "bo'lak_oylik"):
         if task_ids:
             tasks = db.query(PieceworkTask).filter(PieceworkTask.id.in_(task_ids)).all()
             emp.piecework_tasks = tasks
@@ -8814,10 +9134,10 @@ def _build_labor_contract_docx(doc, display_department, selected_piecework_tasks
     d.add_paragraph()
 
     d.add_heading("4. MEHNATGA HAQ TO'LASH", level=1)
-    salary_type_map = {"oylik": "Oylik", "soatlik": "Soatlik", "bo'lak": "Bo'lak"}
+    salary_type_map = {"oylik": "Oylik", "soatlik": "Soatlik", "bo'lak": "Bo'lak", "bo'lak_oylik": "Bo'lak + oylik"}
     st = salary_type_map.get(doc.salary_type, "________________")
     d.add_paragraph(f"4.1. Ish haqi turi: {st}.")
-    if doc.salary_type == "bo'lak" and selected_piecework_tasks:
+    if doc.salary_type in ("bo'lak", "bo'lak_oylik") and selected_piecework_tasks:
         d.add_paragraph("Bo'lak ishlar va stavkalar:")
         for t in selected_piecework_tasks:
             name = t.name or t.code or str(t.id)
@@ -8925,6 +9245,58 @@ async def employment_doc_contract_export_word(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename*=UTF-8\'\'{quote(filename)}'},
     )
+
+
+@app.post("/employees/hiring-docs/bulk-confirm")
+async def employment_docs_bulk_confirm(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Tanlangan ishga qabul hujjatlarini tasdiqlash"""
+    from urllib.parse import quote
+    form = await request.form()
+    doc_ids_raw = form.getlist("doc_ids")
+    try:
+        doc_ids = [int(x) for x in doc_ids_raw if str(x).strip().isdigit()]
+    except (ValueError, TypeError):
+        doc_ids = []
+    if not doc_ids:
+        return RedirectResponse(url="/employees/hiring-docs?error=" + quote("Hech qanday hujjat tanlanmagan."), status_code=303)
+    confirmed = 0
+    for did in doc_ids:
+        doc = db.query(EmploymentDoc).filter(EmploymentDoc.id == did).first()
+        if doc and not doc.confirmed_at:
+            doc.confirmed_at = datetime.now()
+            confirmed += 1
+    db.commit()
+    return RedirectResponse(url=f"/employees/hiring-docs?confirmed=1&count={confirmed}", status_code=303)
+
+
+@app.post("/employees/hiring-docs/bulk-cancel-confirm")
+async def employment_docs_bulk_cancel_confirm(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Tanlangan hujjatlarda tasdiqlashni bekor qilish"""
+    from urllib.parse import quote
+    form = await request.form()
+    doc_ids_raw = form.getlist("doc_ids")
+    try:
+        doc_ids = [int(x) for x in doc_ids_raw if str(x).strip().isdigit()]
+    except (ValueError, TypeError):
+        doc_ids = []
+    if not doc_ids:
+        return RedirectResponse(url="/employees/hiring-docs?error=" + quote("Hech qanday hujjat tanlanmagan."), status_code=303)
+    unconfirmed = 0
+    for did in doc_ids:
+        doc = db.query(EmploymentDoc).filter(EmploymentDoc.id == did).first()
+        if doc and doc.confirmed_at:
+            doc.confirmed_at = None
+            unconfirmed += 1
+    db.commit()
+    return RedirectResponse(url=f"/employees/hiring-docs?unconfirmed=1&count={unconfirmed}", status_code=303)
 
 
 @app.post("/employees/hiring-doc/{doc_id}/confirm")
@@ -9064,7 +9436,7 @@ async def employment_doc_edit_save(
         except (ValueError, TypeError):
             pass
     st = (salary_type or "").strip() or None
-    if st and st not in ("oylik", "soatlik", "bo'lak"):
+    if st and st not in ("oylik", "soatlik", "bo'lak", "bo'lak_oylik"):
         st = None
     task_ids = [int(x) for x in (piecework_task_ids or []) if str(x).strip().isdigit()]
     task_ids = list(dict.fromkeys(task_ids))
@@ -9080,7 +9452,7 @@ async def employment_doc_edit_save(
     doc.department = (department or "").strip() or None
     doc.salary = float(salary or 0)
     doc.salary_type = st
-    doc.piecework_task_ids = ",".join(str(x) for x in task_ids) if (st == "bo'lak" and task_ids) else None
+    doc.piecework_task_ids = ",".join(str(x) for x in task_ids) if (st in ("bo'lak", "bo'lak_oylik") and task_ids) else None
     doc.contract_type = ct
     doc.contract_end_date = end_d
     doc.note = (note or "").strip() or None
@@ -9097,7 +9469,7 @@ async def employment_doc_edit_save(
         emp.position = doc.position
     if doc.department:
         emp.department = doc.department
-    if st == "bo'lak":
+    if st in ("bo'lak", "bo'lak_oylik"):
         if task_ids:
             tasks = db.query(PieceworkTask).filter(PieceworkTask.id.in_(task_ids)).all()
             emp.piecework_tasks = tasks
@@ -9415,6 +9787,141 @@ async def attendance_sync_hikvision(
         return RedirectResponse(url=base_redirect + sep + "error=" + quote("Hikvision yuklash: " + err_msg), status_code=303)
 
 
+def _parse_time(s: str):
+    """'09:00' yoki '09:00:00' dan time object qaytaradi, bo'sh bo'lsa None."""
+    if not s or not str(s).strip():
+        return None
+    s = str(s).strip()
+    for fmt in ("%H:%M", "%H:%M:%S"):
+        try:
+            from datetime import time as dt_time
+            t = datetime.strptime(s, fmt).time()
+            return t
+        except ValueError:
+            continue
+    return None
+
+
+@app.post("/employees/attendance/form/bulk-time")
+async def attendance_form_bulk_time(
+    request: Request,
+    date_param: str = Form(..., alias="date"),
+    check_in_time: str = Form("09:00"),
+    check_out_time: str = Form("18:00"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Barcha faol xodimlarga tanlangan kun uchun Keldi/Ketdi/Soat (9:00–18:00) yuklash va saqlash."""
+    from urllib.parse import quote
+    try:
+        doc_date = datetime.strptime(date_param.strip(), "%Y-%m-%d").date()
+    except (ValueError, AttributeError):
+        return RedirectResponse(url="/employees/attendance/form?error=" + quote("Noto'g'ri sana"), status_code=303)
+    t_in = _parse_time((check_in_time or "09:00").strip())
+    t_out = _parse_time((check_out_time or "18:00").strip())
+    if not t_in:
+        t_in = datetime.strptime("09:00", "%H:%M").time()
+    if not t_out:
+        t_out = datetime.strptime("18:00", "%H:%M").time()
+    check_in_dt = datetime.combine(doc_date, t_in)
+    check_out_dt = datetime.combine(doc_date, t_out)
+    delta = check_out_dt - check_in_dt
+    if delta.total_seconds() < 0:
+        delta += timedelta(days=1)
+    hours_worked = round(delta.total_seconds() / 3600 * 2) / 2
+    form = await request.form()
+    employee_ids_param = form.getlist("employee_ids")
+    if employee_ids_param:
+        try:
+            emp_ids = [int(x) for x in employee_ids_param if str(x).strip().isdigit()]
+        except (ValueError, TypeError):
+            emp_ids = []
+        employees = db.query(Employee).filter(Employee.id.in_(emp_ids), Employee.is_active == True).all() if emp_ids else []
+    else:
+        employees = db.query(Employee).filter(Employee.is_active == True).all()
+    saved = 0
+    for emp in employees:
+        att = db.query(Attendance).filter(Attendance.employee_id == emp.id, Attendance.date == doc_date).first()
+        if not att:
+            att = Attendance(employee_id=emp.id, date=doc_date)
+            db.add(att)
+        att.check_in = check_in_dt
+        att.check_out = check_out_dt
+        att.hours_worked = hours_worked
+        att.status = "present"
+        saved += 1
+    db.commit()
+    msg = f"{saved} ta xodimga vaqt yuklandi (Keldi {check_in_time or '09:00'}, Ketdi {check_out_time or '18:00'})."
+    return RedirectResponse(
+        url=f"/employees/attendance/form?date={doc_date.strftime('%Y-%m-%d')}&saved={saved}&msg=" + quote(msg),
+        status_code=303,
+    )
+
+
+@app.post("/employees/attendance/form/save")
+async def attendance_form_save(
+    request: Request,
+    date_param: str = Form(..., alias="date"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tabelni qo'lda to'ldirish — har bir xodim uchun Keldi/Ketdi/Soat/Holat/Izoh saqlanadi."""
+    from urllib.parse import quote
+    try:
+        doc_date = datetime.strptime(date_param.strip(), "%Y-%m-%d").date()
+    except (ValueError, AttributeError):
+        return RedirectResponse(url="/employees/attendance/form?error=" + quote("Noto'g'ri sana"), status_code=303)
+    form = await request.form()
+    # employee_ids = form.getlist("employee_id"), check_in_1=..., check_out_1=..., hours_1=..., status_1=..., note_1=...
+    employee_ids = form.getlist("employee_id")
+    saved = 0
+    for i, emp_id_str in enumerate(employee_ids):
+        try:
+            emp_id = int(emp_id_str)
+        except (ValueError, TypeError):
+            continue
+        emp = db.query(Employee).filter(Employee.id == emp_id).first()
+        if not emp:
+            continue
+        check_in_str = (form.get(f"check_in_{emp_id}") or "").strip()
+        check_out_str = (form.get(f"check_out_{emp_id}") or "").strip()
+        hours_str = (form.get(f"hours_{emp_id}") or "").strip().replace(",", ".")
+        status_val = (form.get(f"status_{emp_id}") or "").strip() or "present"
+        note_val = (form.get(f"note_{emp_id}") or "").strip() or None
+        if status_val not in ("present", "absent", "leave"):
+            status_val = "present"
+        if not check_in_str and not check_out_str:
+            status_val = "absent"
+        try:
+            hours_worked = float(hours_str) if hours_str else None
+        except ValueError:
+            hours_worked = None
+        check_in_time = _parse_time(check_in_str)
+        check_out_time = _parse_time(check_out_str)
+        check_in_dt = datetime.combine(doc_date, check_in_time) if check_in_time else None
+        check_out_dt = datetime.combine(doc_date, check_out_time) if check_out_time else None
+        if hours_worked is None and check_in_dt and check_out_dt:
+            delta = check_out_dt - check_in_dt
+            if delta.total_seconds() < 0:
+                delta += timedelta(days=1)
+            hours_worked = round(delta.total_seconds() / 3600 * 2) / 2
+        att = db.query(Attendance).filter(Attendance.employee_id == emp_id, Attendance.date == doc_date).first()
+        if not att:
+            att = Attendance(employee_id=emp_id, date=doc_date)
+            db.add(att)
+        att.check_in = check_in_dt
+        att.check_out = check_out_dt
+        att.hours_worked = hours_worked if hours_worked is not None else (att.hours_worked if att.hours_worked is not None else 0)
+        att.status = status_val
+        att.note = note_val
+        saved += 1
+    db.commit()
+    return RedirectResponse(
+        url=f"/employees/attendance/form?date={doc_date.strftime('%Y-%m-%d')}&saved={saved}&msg=" + quote("Tabel qo'lda saqlandi."),
+        status_code=303,
+    )
+
+
 @app.post("/employees/attendance/form/confirm")
 async def attendance_form_confirm(
     request: Request,
@@ -9500,12 +10007,11 @@ async def attendance_doc_delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Tabel hujjatini o'chirish (tasdiqlash bekor, yozuvlar qoladi)"""
+    """Tabel hujjatini ro'yxatdan butunlay o'chirish (AttendanceDoc jadvaldan o'chiriladi; davomat yozuvlari saqlanadi)."""
     doc = db.query(AttendanceDoc).filter(AttendanceDoc.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
-    doc.confirmed_at = None
-    doc.user_id = None
+    db.delete(doc)
     db.commit()
     return RedirectResponse(url="/employees/attendance?deleted=1", status_code=303)
 
@@ -9567,7 +10073,152 @@ async def attendance_record_add(
     )
     db.add(att)
     db.commit()
-    return RedirectResponse(url=f"/employees/attendance/records?start_date={start_date}&end_date={end_date}", status_code=303)
+    return RedirectResponse(url=f"/employees/attendance/records?start_date={start_date}&end_date={end_date}&added=1", status_code=303)
+
+
+@app.get("/employees/attendance/records/edit/{record_id}", response_class=HTMLResponse)
+async def attendance_record_edit_page(
+    request: Request,
+    record_id: int,
+    start_date: str = Query(""),
+    end_date: str = Query(""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Davomat yozuvini tahrirlash sahifasi"""
+    att = db.query(Attendance).filter(Attendance.id == record_id).first()
+    if not att:
+        raise HTTPException(status_code=404, detail="Yozuv topilmadi")
+    return templates.TemplateResponse("employees/attendance_record_edit.html", {
+        "request": request,
+        "record": att,
+        "start_date": start_date or att.date.strftime("%Y-%m-%d"),
+        "end_date": end_date or att.date.strftime("%Y-%m-%d"),
+        "current_user": current_user,
+        "page_title": "Davomat yozuvini tahrirlash",
+    })
+
+
+@app.post("/employees/attendance/records/edit/{record_id}")
+async def attendance_record_edit_save(
+    record_id: int,
+    check_in: Optional[str] = Form(None),
+    check_out: Optional[str] = Form(None),
+    hours_worked: float = Form(None),
+    status: str = Form("present"),
+    note: str = Form(""),
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Davomat yozuvini saqlash"""
+    att = db.query(Attendance).filter(Attendance.id == record_id).first()
+    if not att:
+        raise HTTPException(status_code=404, detail="Yozuv topilmadi")
+    att_date_str = att.date.strftime("%Y-%m-%d")
+    check_in_dt = None
+    if check_in and str(check_in).strip():
+        try:
+            check_in_dt = datetime.strptime(f"{att_date_str} {check_in.strip()}", "%Y-%m-%d %H:%M")
+        except ValueError:
+            pass
+    check_out_dt = None
+    if check_out and str(check_out).strip():
+        try:
+            check_out_dt = datetime.strptime(f"{att_date_str} {check_out.strip()}", "%Y-%m-%d %H:%M")
+        except ValueError:
+            pass
+    att.check_in = check_in_dt
+    att.check_out = check_out_dt
+    if hours_worked is not None:
+        att.hours_worked = float(hours_worked)
+    elif check_in_dt and check_out_dt:
+        delta = check_out_dt - check_in_dt
+        if delta.total_seconds() < 0:
+            delta += timedelta(days=1)
+        att.hours_worked = round(delta.total_seconds() / 3600 * 2) / 2
+    if status in ("present", "absent", "leave"):
+        att.status = status
+    att.note = (note or "").strip() or None
+    db.commit()
+    return RedirectResponse(url=f"/employees/attendance/records?start_date={start_date}&end_date={end_date}&updated=1", status_code=303)
+
+
+@app.post("/employees/attendance/records/bulk-time")
+async def attendance_records_bulk_time(
+    request: Request,
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tanlangan yozuvlarga Keldi 9:00, Ketdi 18:00, Soat 9 qo'llash"""
+    from urllib.parse import quote
+    form = await request.form()
+    record_ids_raw = form.getlist("record_ids")
+    try:
+        record_ids = [int(x) for x in record_ids_raw if str(x).strip().isdigit()]
+    except (ValueError, TypeError):
+        record_ids = []
+    if not record_ids:
+        return RedirectResponse(url=f"/employees/attendance/records?start_date={start_date}&end_date={end_date}&error=" + quote("Hech qanday yozuv tanlanmagan"), status_code=303)
+    check_in_dt = datetime.strptime("09:00", "%H:%M").time()
+    check_out_dt = datetime.strptime("18:00", "%H:%M").time()
+    hours_worked = 9.0
+    updated = 0
+    for rid in record_ids:
+        att = db.query(Attendance).filter(Attendance.id == rid).first()
+        if not att:
+            continue
+        att.check_in = datetime.combine(att.date, check_in_dt)
+        att.check_out = datetime.combine(att.date, check_out_dt)
+        att.hours_worked = hours_worked
+        att.status = "present"
+        updated += 1
+    db.commit()
+    return RedirectResponse(url=f"/employees/attendance/records?start_date={start_date}&end_date={end_date}&updated={updated}&msg=" + quote("Vaqt yuklandi (9:00–18:00)."), status_code=303)
+
+
+@app.post("/employees/attendance/records/bulk-time-all")
+async def attendance_records_bulk_time_all(
+    start_date: str = Form(...),
+    end_date: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tanlangan sana oralig'idagi har bir kun uchun barcha faol xodimlarga Keldi 9:00, Ketdi 18:00, Soat 9 yuklash."""
+    from urllib.parse import quote
+    try:
+        d_start = datetime.strptime(start_date.strip()[:10], "%Y-%m-%d").date()
+        d_end = datetime.strptime(end_date.strip()[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return RedirectResponse(url=f"/employees/attendance/records?error=" + quote("Noto'g'ri sana"), status_code=303)
+    if d_end < d_start:
+        d_end = d_start
+    check_in_t = datetime.strptime("09:00", "%H:%M").time()
+    check_out_t = datetime.strptime("18:00", "%H:%M").time()
+    hours_worked = 9.0
+    employees = db.query(Employee).filter(Employee.is_active == True).all()
+    saved = 0
+    d = d_start
+    while d <= d_end:
+        check_in_dt = datetime.combine(d, check_in_t)
+        check_out_dt = datetime.combine(d, check_out_t)
+        for emp in employees:
+            att = db.query(Attendance).filter(Attendance.employee_id == emp.id, Attendance.date == d).first()
+            if not att:
+                att = Attendance(employee_id=emp.id, date=d)
+                db.add(att)
+            att.check_in = check_in_dt
+            att.check_out = check_out_dt
+            att.hours_worked = hours_worked
+            att.status = "present"
+            saved += 1
+        d += timedelta(days=1)
+    db.commit()
+    msg = quote(f"Barcha xodimlar uchun vaqt yuklandi: {saved} ta yozuv (9:00–18:00).")
+    return RedirectResponse(url=f"/employees/attendance/records?start_date={start_date}&end_date={end_date}&updated={saved}&msg={msg}", status_code=303)
 
 
 @app.post("/employees/attendance/records/delete/{record_id}")
@@ -9584,6 +10235,35 @@ async def attendance_record_delete(
         db.delete(att)
         db.commit()
     return RedirectResponse(url=f"/employees/attendance/records?start_date={start_date}&end_date={end_date}", status_code=303)
+
+
+@app.post("/employees/attendance/records/bulk-delete")
+async def attendance_records_bulk_delete(
+    request: Request,
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tanlangan davomat yozuvlarini o'chirish."""
+    from urllib.parse import quote
+    form = await request.form()
+    record_ids_raw = form.getlist("record_ids")
+    try:
+        record_ids = [int(x) for x in record_ids_raw if str(x).strip().isdigit()]
+    except (ValueError, TypeError):
+        record_ids = []
+    if not record_ids:
+        return RedirectResponse(url=f"/employees/attendance/records?start_date={start_date}&end_date={end_date}&error=" + quote("Hech qanday yozuv tanlanmagan."), status_code=303)
+    deleted = 0
+    for rid in record_ids:
+        att = db.query(Attendance).filter(Attendance.id == rid).first()
+        if att:
+            db.delete(att)
+            deleted += 1
+    db.commit()
+    msg = quote(f"Tanlangan {deleted} ta yozuv o'chirildi.")
+    return RedirectResponse(url=f"/employees/attendance/records?start_date={start_date}&end_date={end_date}&deleted={deleted}&msg={msg}", status_code=303)
 
 
 # ==========================================
@@ -9983,7 +10663,18 @@ async def employee_salary_page(
         month = today.month
     if year < 2020 or year > 2030:
         year = today.year
-    employees = db.query(Employee).filter(Employee.is_active == True).order_by(Employee.full_name).all()
+    # Faqat ishga qabul hujjati bor xodimlar ro'yxatda ko'rinadi
+    hired_employee_ids = db.query(EmploymentDoc.employee_id).distinct().all()
+    hired_ids = [r[0] for r in hired_employee_ids if r[0]]
+    if not hired_ids:
+        employees = []
+    else:
+        employees = (
+            db.query(Employee)
+            .filter(Employee.is_active == True, Employee.id.in_(hired_ids))
+            .order_by(Employee.full_name)
+            .all()
+        )
     salaries = {s.employee_id: s for s in db.query(Salary).filter(Salary.year == year, Salary.month == month).all()}
     # Ishga qabul hujjatidagi oylik — avval tasdiqlangan, keyin har qanday oxirgi hujjat (qadoqlovchilar va b. uchun)
     emp_ids = [e.id for e in employees]
@@ -10034,6 +10725,66 @@ async def employee_salary_page(
         advance_sums[a.employee_id] = advance_sums.get(a.employee_id, 0) + a.amount
     # Bo'lak ish haqi: ishlab chiqarilgan miqdor * (bitta bo'lak narxi). Bitta stavka ishlatiladi (min), yig'indi emas.
     piecework_calculated = {}
+    emp_by_id = {e.id: e for e in employees}
+    group_member_ids = set()
+    # Ishlab chiqarish guruhlari (qiyomchilar): operator ishi kunlik tabel bo'yicha kелgan a'zolar orasida teng bo'linadi
+    production_groups = (
+        db.query(ProductionGroup)
+        .options(joinedload(ProductionGroup.members), joinedload(ProductionGroup.piecework_task))
+        .filter(ProductionGroup.is_active == True, ProductionGroup.operator_id.in_(emp_ids) if emp_ids else False)
+        .all()
+    )
+    for gr in production_groups:
+        member_ids = [m.id for m in gr.members if m.id in emp_ids] if hasattr(gr, "members") and gr.members else []
+        if not member_ids or gr.operator_id not in emp_ids:
+            continue
+        group_member_ids.update(member_ids)
+        rate = float(gr.piecework_task.price_per_unit or 0) if gr.piecework_task else 0
+        if rate <= 0:
+            continue
+        prod_list = (
+            db.query(Production)
+            .options(joinedload(Production.recipe))
+            .filter(
+                Production.operator_id == gr.operator_id,
+                Production.status == "completed",
+                func.date(Production.date) >= start_d,
+                func.date(Production.date) <= end_d,
+            )
+            .all()
+        )
+        day_kg = {}
+        for p in prod_list:
+            if not getattr(gr, "include_qiyom", True) and _is_qiyom_recipe(p.recipe):
+                continue
+            kg = (float(p.quantity or 0) * _kg_per_unit_from_recipe(p.recipe)) if p.recipe else 0
+            if kg <= 0:
+                continue
+            d = p.date.date() if hasattr(p.date, "date") else p.date
+            day_kg[d] = day_kg.get(d, 0) + kg
+        attendances = (
+            db.query(Attendance.employee_id, Attendance.date, Attendance.status, Attendance.check_in)
+            .filter(Attendance.employee_id.in_(member_ids), Attendance.date >= start_d, Attendance.date <= end_d)
+            .all()
+        )
+        present_by_date = {}
+        for row in attendances:
+            d = row.date
+            if d not in present_by_date:
+                present_by_date[d] = set()
+            if (row.status or "").strip() == "present" or (getattr(row, "check_in", None) is not None):
+                present_by_date[d].add(row.employee_id)
+        member_kg = {mid: 0.0 for mid in member_ids}
+        for d, kg in day_kg.items():
+            present = present_by_date.get(d, set()) & set(member_ids)
+            cnt = len(present)
+            if cnt <= 0:
+                continue
+            per_person = kg / cnt
+            for mid in present:
+                member_kg[mid] = member_kg.get(mid, 0) + per_person
+        for mid in member_ids:
+            piecework_calculated[mid] = member_kg.get(mid, 0) * rate
     # Har bir xodim uchun bitta bo'lak narxi (min stavka — bir xil ish uchun bitta narx)
     piece_rate_sum = {}
     if emp_ids:
@@ -10047,8 +10798,8 @@ async def employee_salary_page(
         )
         for eid, rate in rows_rates:
             piece_rate_sum[int(eid)] = float(rate or 0)
-    # Bo'lak xodimlar, lekin employee_piecework_tasks da yo'q: stavkani ishga qabul hujjatidagi piecework_task_ids dan olaymiz
-    boalak_emp_ids = [e.id for e in employees if getattr(e, "salary_type", None) == "bo'lak"]
+    # Bo'lak va Bo'lak+oylik xodimlar, lekin employee_piecework_tasks da yo'q: stavkani ishga qabul hujjatidagi piecework_task_ids dan olaymiz
+    boalak_emp_ids = [e.id for e in employees if getattr(e, "salary_type", None) in ("bo'lak", "bo'lak_oylik")]
     if boalak_emp_ids:
         docs_with_tasks = (
             db.query(EmploymentDoc.employee_id, EmploymentDoc.piecework_task_ids)
@@ -10067,7 +10818,7 @@ async def employee_salary_page(
             first_task = db.query(PieceworkTask).filter(PieceworkTask.id == ids[0], PieceworkTask.price_per_unit > 0).first()
             if first_task:
                 piece_rate_sum[eid] = float(first_task.price_per_unit)
-    boalak_employees = [e for e in employees if getattr(e, "salary_type", None) == "bo'lak" and piece_rate_sum.get(e.id, 0) > 0]
+    boalak_employees = [e for e in employees if getattr(e, "salary_type", None) in ("bo'lak", "bo'lak_oylik") and piece_rate_sum.get(e.id, 0) > 0]
     emp_by_id = {e.id: e for e in employees}
     user_to_employee_id = {}
     for e in employees:
@@ -10097,9 +10848,11 @@ async def employee_salary_page(
                 emp_id = p.operator_id
             elif p.user_id and p.user_id in user_to_employee_id:
                 emp_id = user_to_employee_id[p.user_id]
-            if emp_id:
+            if emp_id and emp_id not in group_member_ids:
                 total_kg_by_emp_id[emp_id] = total_kg_by_emp_id.get(emp_id, 0) + kg
         for emp in boalak_employees:
+            if emp.id in group_member_ids:
+                continue
             total_kg = total_kg_by_emp_id.get(emp.id, 0)
             rate = piece_rate_sum.get(emp.id, 0)
             if total_kg > 0 and rate > 0:
@@ -10107,9 +10860,17 @@ async def employee_salary_page(
     rows = []
     for emp in employees:
         s = salaries.get(emp.id)
-        # Bo'lak xodimlar: faqat ishlab chiqarish bo'yicha hisoblangan summa (saqlangan base ishlatilmaydi)
-        if getattr(emp, "salary_type", None) == "bo'lak":
+        # Guruh a'zosi (qiyomchilar): guruh bo'lak ulushi bo'yicha, asos = max(mehnat haqi, bo'lak)
+        if emp.id in group_member_ids and emp.id in piecework_calculated:
+            mehnat_haqi = float(latest_doc_salary.get(emp.id, 0) or 0) or float(emp.salary or 0)
+            piece_total = float(piecework_calculated.get(emp.id, 0) or 0)
+            base = max(mehnat_haqi, piece_total)
+        elif getattr(emp, "salary_type", None) == "bo'lak":
             base = piecework_calculated.get(emp.id, 0)
+        elif getattr(emp, "salary_type", None) == "bo'lak_oylik":
+            mehnat_haqi = float(latest_doc_salary.get(emp.id, 0) or 0) or float(emp.salary or 0)
+            piece_total = float(piecework_calculated.get(emp.id, 0) or 0)
+            base = max(mehnat_haqi, piece_total)
         else:
             base = (s.base_salary if s else 0) or (emp.salary or 0) or latest_doc_salary.get(emp.id, 0)
             if not base and emp.id in piecework_calculated:
@@ -10169,11 +10930,15 @@ async def employee_salary_save(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth),
 ):
-    """Oylik yozuvlarini saqlash; jami to'lov summasiga kassadan chiqim hujjati yaratiladi va tasdiqlanadi."""
+    """Oylik yozuvlarini saqlash; jami to'lov summasiga kassadan chiqim hujjati yaratiladi va tasdiqlanadi. Faqat ishga qabul qilingan xodimlar."""
     if not (1 <= month <= 12) or year < 2020 or year > 2030:
         return RedirectResponse(url="/employees/salary?error=Noto'g'ri oy yoki yil", status_code=303)
     form = await request.form()
-    employees = db.query(Employee).filter(Employee.is_active == True).all()
+    hired_ids = [r[0] for r in db.query(EmploymentDoc.employee_id).distinct().all() if r[0]]
+    if not hired_ids:
+        employees = []
+    else:
+        employees = db.query(Employee).filter(Employee.is_active == True, Employee.id.in_(hired_ids)).all()
     total_payroll = 0.0
     for emp in employees:
         base = float(form.get(f"base_{emp.id}", 0) or 0)
@@ -10907,6 +11672,84 @@ async def production_orders(
         import traceback
         traceback.print_exc()
         return RedirectResponse(url=f"/production?error=orders&detail={quote(str(e)[:80])}", status_code=303)
+
+
+@app.post("/production/orders/bulk-revert")
+async def production_orders_bulk_revert(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Tanlangan yakunlangan buyurtmalar uchun tasdiqni bekor qilish."""
+    from app.routes.production import _production_revert_one
+    form = await request.form()
+    raw_ids = form.getlist("prod_ids")
+    prod_ids = [int(x) for x in raw_ids if str(x).strip().isdigit()]
+    if not prod_ids:
+        return RedirectResponse(
+            url="/production/orders?error=revert&detail=" + quote("Hech qaysi buyurtma tanlanmagan."),
+            status_code=303,
+        )
+    reverted = 0
+    for pid in prod_ids:
+        production = db.query(Production).filter(Production.id == pid).first()
+        if not production:
+            continue
+        err = _production_revert_one(db, production)
+        if err:
+            db.rollback()
+            return RedirectResponse(
+                url="/production/orders?error=revert&detail=" + quote(f"{production.number}: {err}"),
+                status_code=303,
+            )
+        reverted += 1
+    db.commit()
+    return RedirectResponse(url="/production/orders?bulk_reverted=" + str(reverted), status_code=303)
+
+
+@app.post("/production/orders/bulk-complete")
+async def production_orders_bulk_complete(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Tanlangan buyurtmalarni yakunlash."""
+    from app.routes.production import _do_complete_production_stock, _recipe_max_stage
+    from app.utils.notifications import check_low_stock_and_notify
+    from app.utils.production_order import notify_managers_production_ready
+    form = await request.form()
+    raw_ids = form.getlist("prod_ids")
+    prod_ids = [int(x) for x in raw_ids if str(x).strip().isdigit()]
+    if not prod_ids:
+        return RedirectResponse(
+            url="/production/orders?error=complete&detail=" + quote("Hech qaysi buyurtma tanlanmagan."),
+            status_code=303,
+        )
+    completed = 0
+    for pid in prod_ids:
+        production = db.query(Production).filter(Production.id == pid).first()
+        if not production or production.status not in ("draft", "in_progress"):
+            continue
+        recipe = db.query(Recipe).filter(Recipe.id == production.recipe_id).first()
+        if not recipe:
+            return RedirectResponse(
+                url="/production/orders?error=complete&detail=" + quote(f"{production.number}: Retsept topilmadi."),
+                status_code=303,
+            )
+        err = _do_complete_production_stock(db, production, recipe)
+        if err:
+            db.rollback()
+            return err
+        production.status = "completed"
+        production.current_stage = _recipe_max_stage(recipe)
+        completed += 1
+    db.commit()
+    check_low_stock_and_notify(db)
+    for pid in prod_ids:
+        production = db.query(Production).filter(Production.id == pid).first()
+        if production and production.status == "completed":
+            notify_managers_production_ready(db, production)
+    return RedirectResponse(url="/production/orders?bulk_completed=" + str(completed), status_code=303)
 
 
 def _is_qiyom_recipe(recipe) -> bool:
