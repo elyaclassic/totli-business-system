@@ -10723,6 +10723,29 @@ async def employee_salary_page(
         EmployeeAdvance.advance_date <= end_d,
     ).all():
         advance_sums[a.employee_id] = advance_sums.get(a.employee_id, 0) + a.amount
+    # Oylik turi xodimlar uchun: tabel bo'yicha ishlagan kunlar — kunlik = oylik/oydagi kunlar, asos = kunlik * ishlagan kun
+    worked_days_by_emp = {}
+    if emp_ids:
+        try:
+            worked_rows = (
+                db.query(Attendance.employee_id, func.count(func.distinct(Attendance.date)).label("days"))
+                .filter(
+                    Attendance.employee_id.in_(emp_ids),
+                    Attendance.date >= start_d,
+                    Attendance.date <= end_d,
+                    or_(
+                        Attendance.status == "present",
+                        Attendance.check_in.isnot(None),
+                    ),
+                )
+                .group_by(Attendance.employee_id)
+                .all()
+            )
+            for r in worked_rows:
+                worked_days_by_emp[r.employee_id] = int(r.days or 0)
+        except Exception:
+            pass
+    days_in_month = last_day
     # Bo'lak ish haqi: ishlab chiqarilgan miqdor * (bitta bo'lak narxi). Bitta stavka ishlatiladi (min), yig'indi emas.
     piecework_calculated = {}
     emp_by_id = {e.id: e for e in employees}
@@ -10860,22 +10883,41 @@ async def employee_salary_page(
     rows = []
     for emp in employees:
         s = salaries.get(emp.id)
+        piecework_amount = float(piecework_calculated.get(emp.id, 0) or 0)
+        base_source = ""  # "oylik" | "bo'lak" — asos qaysi manbadan olingan
         # Guruh a'zosi (qiyomchilar): guruh bo'lak ulushi bo'yicha, asos = max(mehnat haqi, bo'lak)
         if emp.id in group_member_ids and emp.id in piecework_calculated:
             mehnat_haqi = float(latest_doc_salary.get(emp.id, 0) or 0) or float(emp.salary or 0)
-            piece_total = float(piecework_calculated.get(emp.id, 0) or 0)
+            piece_total = piecework_amount
             base = max(mehnat_haqi, piece_total)
+            base_source = "bo'lak" if piece_total >= mehnat_haqi and piece_total > 0 else "oylik"
         elif getattr(emp, "salary_type", None) == "bo'lak":
-            base = piecework_calculated.get(emp.id, 0)
+            base = piecework_amount
+            base_source = "bo'lak" if piecework_amount > 0 else ""
         elif getattr(emp, "salary_type", None) == "bo'lak_oylik":
             mehnat_haqi = float(latest_doc_salary.get(emp.id, 0) or 0) or float(emp.salary or 0)
-            piece_total = float(piecework_calculated.get(emp.id, 0) or 0)
+            piece_total = piecework_amount
             base = max(mehnat_haqi, piece_total)
+            base_source = "bo'lak" if piece_total >= mehnat_haqi and piece_total > 0 else "oylik"
         else:
             base = (s.base_salary if s else 0) or (emp.salary or 0) or latest_doc_salary.get(emp.id, 0)
             if not base and emp.id in piecework_calculated:
                 base = piecework_calculated[emp.id]
+            base = float(base or 0)
+            if getattr(emp, "salary_type", None) in ("oylik", "soatlik") or not getattr(emp, "salary_type", None):
+                base_source = "oylik" if base > 0 else ""
         base = float(base or 0)
+        # Hisoblangan oylik (tabel bo'yicha): Oylik turi — doim; Bo'lak+oylik / guruh a'zosi — faqat asos "oylikdan" bo'lsa
+        calculated_base = None
+        if days_in_month and days_in_month > 0:
+            contract_monthly = float(latest_doc_salary.get(emp.id, 0) or 0) or float(emp.salary or 0)
+            worked_days = worked_days_by_emp.get(emp.id, 0) or 0
+            if getattr(emp, "salary_type", None) == "oylik":
+                calculated_base = round((contract_monthly / days_in_month) * worked_days, 2)
+            elif base_source == "oylik" and contract_monthly > 0:
+                # Bo'lak+oylik yoki guruh a'zosi, asos oylikdan — tabel bo'yicha hisoblangan oylik
+                calculated_base = round((contract_monthly / days_in_month) * worked_days, 2)
+        amount_for_total = calculated_base if calculated_base is not None else base
         bonus = float(s.bonus if s and s.bonus is not None else 0) or 0
         deduction = float(s.deduction if s and s.deduction is not None else 0) or 0
         adv_ded = None
@@ -10883,9 +10925,9 @@ async def employee_salary_page(
             adv_ded = float(s.advance_deduction)
         if adv_ded is None:
             adv_ded = float(advance_sums.get(emp.id, 0) or 0)
-        total = base + bonus - deduction - adv_ded
+        total = amount_for_total + bonus - deduction - adv_ded
         total = round(total, 2)
-        paid = (s.paid if s else 0) or 0
+        paid = float(s.paid if s and s.paid is not None else 0) or 0
         status = (s.status if s else "pending") or "pending"
         if total == 0 and paid == 0:
             status = "pending"
@@ -10897,6 +10939,9 @@ async def employee_salary_page(
             "employee": emp,
             "salary_row": s,
             "base_salary": base,
+            "calculated_base": calculated_base,
+            "piecework_amount": piecework_amount,
+            "base_source": base_source,
             "bonus": bonus,
             "deduction": deduction,
             "advance_deduction": adv_ded,

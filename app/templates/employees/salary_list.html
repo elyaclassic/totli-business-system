@@ -58,57 +58,71 @@
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-sm table-hover mb-0">
+                <table class="table table-sm table-hover mb-0 salary-table-compact">
                     <thead class="table-light">
                         <tr>
-                            <th>Xodim F.I.O.</th>
-                            <th>Lavozimi</th>
-                            <th>Belgilangan ish haqi turi</th>
+                            <th class="text-start">Xodim F.I.O.</th>
+                            <th class="text-start">Lavozimi</th>
+                            <th class="text-start">Belgilangan ish haqi turi</th>
+                            <th class="text-end">Bo'lak</th>
                             <th class="text-end">Oylik (asos)</th>
+                            <th class="text-end">Hisoblangan oylik</th>
                             <th class="text-end">Bonus</th>
                             <th class="text-end">Ushlab qolish</th>
                             <th class="text-end">Avans</th>
                             <th class="text-end">Jami</th>
                             <th class="text-end">To'langan</th>
-                            <th>Holat</th>
+                            <th class="text-center">Holat</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for row in rows %}
                         <tr>
-                            <td>{{ row.employee.full_name }} <small class="text-muted">({{ row.employee.code }})</small></td>
-                            <td>{{ row.employee.position or '—' }}</td>
-                            <td>{% if row.employee.salary_type == 'oylik' %}Oylik{% elif row.employee.salary_type == 'soatlik' %}Soatlik{% elif row.employee.salary_type == "bo'lak" %}Bo'lak{% elif row.employee.salary_type == "bo'lak_oylik" %}Bo'lak + oylik{% else %}—{% endif %}</td>
-                            <td class="text-end">
-                                <input type="number" name="base_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:100px" step="1000" value="{{ row.base_salary }}">
+                            <td class="text-start">{{ row.employee.full_name }} <small class="text-muted">({{ row.employee.code }})</small></td>
+                            <td class="text-start">{{ row.employee.position or '—' }}</td>
+                            <td class="text-start">{% if row.employee.salary_type == 'oylik' %}Oylik{% elif row.employee.salary_type == 'soatlik' %}Soatlik{% elif row.employee.salary_type == "bo'lak" %}Bo'lak{% elif row.employee.salary_type == "bo'lak_oylik" %}Bo'lak + oylik{% else %}—{% endif %}</td>
+                            <td class="text-end{% if row.base_source == "bo'lak" %} text-success{% endif %}">
+                                <input type="text" readonly class="form-control form-control-sm text-end border-0 bg-transparent py-0{% if row.base_source == "bo'lak" %} text-success{% endif %}" value="{{ '{:,.0f}'.format(row.piecework_amount) if row.piecework_amount else '—' }}">
+                            </td>
+                            <td class="text-end{% if row.base_source == "oylik" %} text-success{% endif %}">
+                                <input type="hidden" name="base_{{ row.employee.id }}" form="salaryForm" value="{{ row.calculated_base if row.calculated_base is not none else row.base_salary }}">
+                                <input type="text" readonly class="form-control form-control-sm text-end border-0 bg-transparent py-0{% if row.base_source == "oylik" %} text-success{% endif %}" value="{{ '{:,.0f}'.format(row.base_salary) }}">
                             </td>
                             <td class="text-end">
-                                <input type="number" name="bonus_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:90px" step="1000" value="{{ row.bonus }}">
+                                <input type="text" readonly class="form-control form-control-sm text-end border-0 bg-transparent py-0" value="{{ '{:,.0f}'.format(row.calculated_base) if row.calculated_base is not none else '—' }}">
                             </td>
                             <td class="text-end">
-                                <input type="number" name="deduction_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:90px" step="1000" value="{{ row.deduction }}">
+                                <input type="hidden" name="bonus_{{ row.employee.id }}" form="salaryForm" value="{{ row.bonus }}">
+                                <input type="text" readonly class="form-control form-control-sm text-end border-0 bg-transparent py-0" value="{{ '{:,.0f}'.format(row.bonus) }}">
                             </td>
                             <td class="text-end">
-                                <input type="number" name="advance_{{ row.employee.id }}" form="salaryForm" class="form-control form-control-sm text-end" style="width:90px" step="1000" value="{{ row.advance_deduction }}">
+                                <input type="hidden" name="deduction_{{ row.employee.id }}" form="salaryForm" value="{{ row.deduction }}">
+                                <input type="text" readonly class="form-control form-control-sm text-end border-0 bg-transparent py-0" value="{{ '{:,.0f}'.format(row.deduction) }}">
+                            </td>
+                            <td class="text-end">
+                                <input type="hidden" name="advance_{{ row.employee.id }}" form="salaryForm" value="{{ row.advance_deduction }}">
+                                <input type="text" readonly class="form-control form-control-sm text-end border-0 bg-transparent py-0" value="{{ '{:,.0f}'.format(row.advance_deduction) }}">
                             </td>
                             <td class="text-end fw-bold jami-cell{% if row.total is defined and row.total < 0 %} text-danger{% endif %}" data-emp-id="{{ row.employee.id }}">{{ "{:,.0f}".format(row.total) }}</td>
-                            <td class="text-end">{{ "{:,.0f}".format(row.paid) }}</td>
-                            <td>
+                            <td class="text-end{% if row.paid and row.paid != 0 %}{% if row.paid < 0 %} text-danger{% endif %}{% else %}{% if row.total is defined and row.total < 0 %} text-danger{% endif %}{% endif %}" title="Shu oyda to'langan summa">{% if row.paid and row.paid != 0 %}{{ "{:,.0f}".format(row.paid) }}{% else %}{{ "{:,.0f}".format(row.total) }}{% endif %}</td>
+                            <td class="text-center">
+                                <div class="d-flex flex-nowrap align-items-center justify-content-center gap-1">
                                 {% if row.status == 'paid' %}
-                                <span class="badge bg-success">To'langan</span>
+                                <span class="badge bg-success" title="To'langan"><i class="bi bi-check-circle-fill"></i></span>
                                 {% else %}
-                                <span class="badge bg-warning text-dark">Kutilmoqda</span>
+                                <span class="badge bg-warning text-dark" title="Kutilmoqda"><i class="bi bi-clock"></i></span>
                                 <form method="post" action="/employees/salary/mark-paid/{{ row.employee.id }}" class="d-inline">
                                     <input type="hidden" name="year" value="{{ year }}">
                                     <input type="hidden" name="month" value="{{ month }}">
                                     <input type="hidden" name="paid_amount" value="{{ row.total }}">
-                                    <button type="submit" class="btn btn-sm btn-outline-success ms-1">To'langan deb belgilash</button>
+                                    <button type="submit" class="btn btn-sm btn-outline-success" title="To'langan deb belgilash"><i class="bi bi-check-circle-fill"></i></button>
                                 </form>
                                 {% endif %}
+                                </div>
                             </td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="10" class="text-center text-muted py-4">Ishga qabul qilingan xodimlar yo'q yoki xodimlar ro'yxati bo'sh.</td></tr>
+                        <tr><td colspan="12" class="text-center text-muted py-4">Ishga qabul qilingan xodimlar yo'q yoki xodimlar ro'yxati bo'sh.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -123,30 +137,28 @@
         </div>
     </div>
 </div>
+<style>
+.salary-table-compact th,
+.salary-table-compact td { padding: 0.25rem 0.35rem; vertical-align: middle; }
+.salary-table-compact th { font-weight: 600; }
+.salary-table-compact .form-control-sm { min-width: 4.5em; padding: 0.15rem 0.25rem; }
+/* Belgilangan ish haqi turi va Bo'lak ustunlari orasini qisqartir */
+.salary-table-compact th:nth-child(3),
+.salary-table-compact td:nth-child(3) { padding-right: 0.15rem; }
+.salary-table-compact th:nth-child(4),
+.salary-table-compact td:nth-child(4) { padding-left: 0.15rem; }
+/* Hisoblangan oylik va Bonus orasini qisqartir */
+.salary-table-compact th:nth-child(6),
+.salary-table-compact td:nth-child(6) { padding-right: 0.15rem; }
+.salary-table-compact th:nth-child(7),
+.salary-table-compact td:nth-child(7) { padding-left: 0.15rem; }
+/* Ushlab qolish va Avans orasini qisqartir */
+.salary-table-compact th:nth-child(8),
+.salary-table-compact td:nth-child(8) { padding-right: 0.15rem; }
+.salary-table-compact th:nth-child(9),
+.salary-table-compact td:nth-child(9) { padding-left: 0.15rem; }
+</style>
 <script>
-(function() {
-    function updateJami() {
-        document.querySelectorAll('.card table tbody tr').forEach(function(tr) {
-            var baseInp = tr.querySelector('input[name^="base_"]');
-            var bonusInp = tr.querySelector('input[name^="bonus_"]');
-            var dedInp = tr.querySelector('input[name^="deduction_"]');
-            var advInp = tr.querySelector('input[name^="advance_"]');
-            var jamiCell = tr.querySelector('.jami-cell');
-            if (!baseInp || !jamiCell) return;
-            var base = parseFloat(baseInp.value) || 0;
-            var bonus = parseFloat(bonusInp && bonusInp.value ? bonusInp.value : 0) || 0;
-            var ded = parseFloat(dedInp && dedInp.value ? dedInp.value : 0) || 0;
-            var adv = parseFloat(advInp && advInp.value ? advInp.value : 0) || 0;
-            var total = base + bonus - ded - adv;
-            jamiCell.textContent = Math.round(total).toLocaleString('ru-RU');
-            jamiCell.classList.toggle('text-danger', total < 0);
-        });
-    }
-    var card = document.querySelector('.card table');
-    if (card) {
-        card.addEventListener('input', updateJami);
-        card.addEventListener('change', updateJami);
-    }
-})();
+// Oylik (asos), Bonus, Ushlab qolish, Avans faqat o'qiladi — Jami backend da hisoblanadi, yangilash kerak emas.
 </script>
 {% endblock %}
